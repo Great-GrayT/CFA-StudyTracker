@@ -1,5 +1,5 @@
 import { db } from "../../../../lib/db";
-import { verifyPassword } from "../../../../lib/FUNC-crypto";
+import { hashPassword, verifyPassword } from "../../../../lib/FUNC-crypto";
 import { signJwt } from "../../../../lib/FUNC-auth";
 import { loginSchema } from "../../../../lib/validation";
 
@@ -7,16 +7,29 @@ import { loginSchema } from "../../../../lib/validation";
 // let a response distinguish the two, or an attacker can enumerate emails.
 const INVALID_CREDENTIALS = { error: "Invalid email or password" };
 
+// scrypt is deliberately slow; verifyPassword's cost is what makes the
+// "wrong password" branch below take noticeably longer than a response that
+// skips it. Precomputing (and caching) a dummy hash lets the "no such user" /
+// "OAuth-only, no passwordHash" branches pay that same scrypt cost, so the
+// two failure paths are not distinguishable by response time either -
+// otherwise an attacker could enumerate valid emails via a timing side
+// channel even though the status and body are identical.
+const dummyPasswordHash: Promise<string> = hashPassword(
+  "timing-safety-dummy-password-never-matches-anything",
+);
+
 export async function POST(req: Request): Promise<Response> {
   const body = await req.json();
   const parsed = loginSchema.safeParse(body);
   if (!parsed.success) {
+    await verifyPassword("", await dummyPasswordHash);
     return Response.json(INVALID_CREDENTIALS, { status: 401 });
   }
   const { email, password } = parsed.data;
 
   const user = await db.user.findUnique({ where: { email } });
   if (!user || !user.passwordHash) {
+    await verifyPassword(password, await dummyPasswordHash);
     return Response.json(INVALID_CREDENTIALS, { status: 401 });
   }
 
