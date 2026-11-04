@@ -1,0 +1,87 @@
+// Hand-rolled HS256 JWT (deliberately not a JWT library). verifyJwt never
+// reads or branches on the token's own header - it always recomputes an
+// HMAC-SHA256 signature itself with the server's secret. That is what makes
+// this immune to alg:none / algorithm-confusion attacks: a client-controlled
+// header can never talk the verifier into a weaker (or no) algorithm.
+import { createHmac, timingSafeEqual } from "node:crypto";
+
+const DEFAULT_TTL_HOURS = 72;
+
+interface JwtPayload {
+  userId: string;
+  tokenVersion: number;
+}
+
+function getSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error("JWT_SECRET environment variable is not set");
+  }
+  return secret;
+}
+
+function defaultTtlSeconds(): number {
+  const hours = Number(process.env.JWT_TTL_HOURS);
+  const validHours = Number.isFinite(hours) && hours > 0 ? hours : DEFAULT_TTL_HOURS;
+  return validHours * 3600;
+}
+
+function base64url(input: string): string {
+  return Buffer.from(input, "utf8").toString("base64url");
+}
+
+function sign(headerAndPayload: string, secret: string): string {
+  return createHmac("sha256", secret).update(headerAndPayload).digest("base64url");
+}
+
+export function signJwt(payload: JwtPayload, options?: { ttlSeconds?: number }): string {
+  const secret = getSecret();
+  const ttlSeconds = options?.ttlSeconds ?? defaultTtlSeconds();
+  const nowSeconds = Math.floor(Date.now() / 1000);
+
+  // typ/alg here are just conventional JWT shape; the "alg" value is never
+  // read back on verification, only ever recomputed as HS256 below.
+  const headerPart = base64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
+  const payloadPart = base64url(
+    JSON.stringify({ ...payload, exp: nowSeconds + ttlSeconds }),
+  );
+  const signaturePart = sign(`${headerPart}.${payloadPart}`, secret);
+
+  return `${headerPart}.${payloadPart}.${signaturePart}`;
+}
+
+export function verifyJwt(token: string): JwtPayload | null {
+  const secret = getSecret();
+  const parts = token.split(".");
+  if (parts.length !== 3) {
+    return null;
+  }
+  const [headerPart, payloadPart, signaturePart] = parts;
+
+  // Recompute the signature ourselves over the header/payload we were given -
+  // headerPart's content (e.g. a forged "alg":"none") is never inspected or
+  // trusted, it is only ever treated as opaque bytes to re-sign.
+  const expectedSignature = sign(`${headerPart}.${payloadPart}`, secret);
+  const expectedBuf = Buffer.from(expectedSignature, "utf8");
+  const actualBuf = Buffer.from(signaturePart, "utf8");
+  if (expectedBuf.length !== actualBuf.length || !timingSafeEqual(expectedBuf, actualBuf)) {
+    return null;
+  }
+
+  let decoded: Partial<JwtPayload & { exp: unknown }>;
+  try {
+    decoded = JSON.parse(Buffer.from(payloadPart, "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+
+  if (typeof decoded.userId !== "string" || typeof decoded.tokenVersion !== "number") {
+    return null;
+  }
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  if (typeof decoded.exp !== "number" || decoded.exp < nowSeconds) {
+    return null;
+  }
+
+  return { userId: decoded.userId, tokenVersion: decoded.tokenVersion };
+}
