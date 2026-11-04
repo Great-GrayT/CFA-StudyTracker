@@ -100,8 +100,19 @@ function rateLimited(
 }
 
 function clientIp(req: NextRequest): string {
-  // Behind a reverse proxy, these headers carry the real client IP; see
-  // SECURITY.md-equivalent notes in cron-server for the trust assumptions.
+  // CF-Connecting-IP first: this deploy mirrors cron-server's (Global
+  // Constraints), whose SECURITY.md locks the origin (ufw) to only accept
+  // traffic from Cloudflare's published ranges, so Cloudflare is the sole
+  // writer of this header and it cannot be spoofed by the client. Trust that
+  // boundary here rather than re-deriving it.
+  //
+  // X-Forwarded-For is only a fallback (local dev, or anywhere without
+  // Cloudflare in front): in a standard append-style proxy chain its
+  // leftmost entry is client-supplied, not proxy-verified, so a scripted
+  // caller can rotate it per-request to bypass the rate-limit keying. Do
+  // not rely on it as the sole IP source in production.
+  const cf = req.headers.get("cf-connecting-ip");
+  if (cf) return cf.trim();
   const fwd = req.headers.get("x-forwarded-for");
   if (fwd) return fwd.split(",")[0]!.trim();
   const real = req.headers.get("x-real-ip");
