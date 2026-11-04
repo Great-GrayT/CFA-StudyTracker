@@ -1,0 +1,164 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id            String         @id @default(cuid())
+  email         String         @unique
+  passwordHash  String?
+  tokenVersion  Int            @default(0)
+  createdAt     DateTime       @default(now())
+  oauthAccounts OAuthAccount[]
+  plans         StudyPlan[]
+  packages      StudyPackage[]
+  logs          StudyLogEntry[]
+  mockExams     MockExam[]
+  pushSubscriptions PushSubscription[]
+}
+
+model OAuthAccount {
+  id                String @id @default(cuid())
+  userId            String
+  provider          String
+  providerAccountId String
+  user              User   @relation(fields: [userId], references: [id])
+  @@unique([provider, providerAccountId])
+}
+
+model Level {
+  id     String  @id // "I" | "II" | "III"
+  topics Topic[]
+  plans  StudyPlan[]
+}
+
+model Topic {
+  id            String    @id @default(cuid())
+  levelId       String
+  name          String
+  order         Int
+  examWeightMin Int
+  examWeightMax Int
+  level         Level     @relation(fields: [levelId], references: [id])
+  readings      Reading[]
+}
+
+model Reading {
+  id      String @id @default(cuid())
+  topicId String
+  name    String
+  order   Int
+  topic   Topic  @relation(fields: [topicId], references: [id])
+  los     LOS[]
+}
+
+model LOS {
+  id        String          @id @default(cuid())
+  readingId String
+  text      String
+  order     Int
+  reading   Reading         @relation(fields: [readingId], references: [id])
+  logs      StudyLogEntry[]
+}
+
+model StudyPackage {
+  id        String          @id @default(cuid())
+  userId    String?
+  name      String
+  user      User?           @relation(fields: [userId], references: [id])
+  logs      StudyLogEntry[]
+  mockExams MockExam[]
+  planPackages PlanPackage[]
+}
+
+model StudyPlan {
+  id                 String             @id @default(cuid())
+  userId             String
+  levelId            String
+  examDate           DateTime
+  startDate          DateTime           @default(now())
+  weeklyAvailability Json
+  isActive           Boolean            @default(true)
+  createdAt          DateTime           @default(now())
+  user               User               @relation(fields: [userId], references: [id])
+  level              Level              @relation(fields: [levelId], references: [id])
+  logs               StudyLogEntry[]
+  mockExams          MockExam[]
+  snapshots          ProgressSnapshot[]
+  holidays           PlanHoliday[]
+  planPackages       PlanPackage[]
+}
+
+model StudyLogEntry {
+  id                String        @id @default(cuid())
+  userId            String
+  planId            String
+  losId             String
+  packageId         String?
+  date              DateTime      @default(now())
+  confidence        Int
+  questionsAnswered Int           @default(0)
+  questionsCorrect  Int           @default(0)
+  note              String?
+  user              User          @relation(fields: [userId], references: [id])
+  plan              StudyPlan     @relation(fields: [planId], references: [id])
+  los               LOS           @relation(fields: [losId], references: [id])
+  package           StudyPackage? @relation(fields: [packageId], references: [id])
+  @@index([planId, losId])
+}
+
+model MockExam {
+  id            String        @id @default(cuid())
+  userId        String
+  planId        String
+  date          DateTime
+  scorePercent  Int
+  packageId     String?
+  note          String?
+  user          User          @relation(fields: [userId], references: [id])
+  plan          StudyPlan     @relation(fields: [planId], references: [id])
+  package       StudyPackage? @relation(fields: [packageId], references: [id])
+}
+
+model ProgressSnapshot {
+  id               String   @id @default(cuid())
+  planId           String
+  date             DateTime
+  targetCumulative Int
+  actualCumulative Int
+  plan             StudyPlan @relation(fields: [planId], references: [id])
+  @@unique([planId, date])
+}
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model PlanHoliday {
+  id        String    @id @default(cuid())
+  planId    String
+  startDate DateTime
+  endDate   DateTime
+  note      String?
+  plan      StudyPlan @relation(fields: [planId], references: [id])
+}
+
+model PlanPackage {
+  id        String       @id @default(cuid())
+  planId    String
+  packageId String
+  roles     String[]
+  plan      StudyPlan    @relation(fields: [planId], references: [id])
+  package   StudyPackage @relation(fields: [packageId], references: [id])
+  @@unique([planId, packageId])
+}
