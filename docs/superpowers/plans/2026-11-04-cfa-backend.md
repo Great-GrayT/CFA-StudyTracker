@@ -802,13 +802,14 @@ test("creating a plan with backfilled logs writes one StudyLogEntry per entry, d
   expect(logs).toEqual([expect.objectContaining({ losId, confidence: 4, questionsAnswered: 12, date: new Date("2026-10-01") })])
 })
 
-test("adding a holiday range excludes it from the plan's remaining hours", async () => {
+test("adding a holiday range persists it and it's listed back", async () => {
   const { user, plan } = await setupUserWithPlan({ weeklyAvailability: fullWeek })
-  const before = await getProgress(user, plan.id)
   const res = await POST(authedRequest(user, `/api/plans/${plan.id}/holidays`, { startDate: "2026-12-20", endDate: "2026-12-27", note: "trip" }))
   expect(res.status).toBe(201)
-  const after = await getProgress(user, plan.id)
-  expect(after.today.targetCumulative).toBeLessThanOrEqual(before.today.targetCumulative)
+  const list = await readJson(await GET(authedRequest(user, `/api/plans/${plan.id}/holidays`)))
+  expect(list).toEqual([expect.objectContaining({ startDate: "2026-12-20", endDate: "2026-12-27", note: "trip" })])
+  // the holiday's effect on remaining hours is covered at the pure-function level in Task 8;
+  // this test only proves the CRUD plumbing persists and returns it correctly
 })
 
 test("deleting a holiday range removes it", async () => {
