@@ -18,7 +18,11 @@ export function jsonRequest(
     ...headers,
   };
 
-  return new Request(url, {
+  // Request() requires an absolute URL; route handlers only ever read the
+  // path/search off req.url, so a fixed dummy origin is fine for tests.
+  const absoluteUrl = url.startsWith("http") ? url : `http://localhost${url}`;
+
+  return new Request(absoluteUrl, {
     method,
     headers: requestHeaders,
     body: body ? JSON.stringify(body) : undefined,

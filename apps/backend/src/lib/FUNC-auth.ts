@@ -4,6 +4,7 @@
 // this immune to alg:none / algorithm-confusion attacks: a client-controlled
 // header can never talk the verifier into a weaker (or no) algorithm.
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { db } from "./db";
 
 const DEFAULT_TTL_HOURS = 72;
 
@@ -84,4 +85,32 @@ export function verifyJwt(token: string): JwtPayload | null {
   }
 
   return { userId: decoded.userId, tokenVersion: decoded.tokenVersion };
+}
+
+// Every protected route's auth check. A verified JWT alone is not enough:
+// tokenVersion is re-checked against the current DB row so that revoking a
+// user (bumping tokenVersion, e.g. on password change / logout-everywhere)
+// immediately invalidates tokens already issued, without needing a separate
+// token-blocklist.
+export async function requireUser(req: Request): Promise<{ userId: string } | null> {
+  const header = req.headers.get("authorization") ?? req.headers.get("Authorization");
+  if (!header || !header.startsWith("Bearer ")) {
+    return null;
+  }
+  const token = header.slice("Bearer ".length).trim();
+  if (!token) {
+    return null;
+  }
+
+  const payload = verifyJwt(token);
+  if (!payload) {
+    return null;
+  }
+
+  const user = await db.user.findUnique({ where: { id: payload.userId } });
+  if (!user || user.tokenVersion !== payload.tokenVersion) {
+    return null;
+  }
+
+  return { userId: user.id };
 }
