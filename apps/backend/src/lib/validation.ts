@@ -54,6 +54,18 @@ export const createPackageSchema = z.object({
   name: z.string().min(1),
 });
 
+// Same shape as createPlanSchema, minus initialLogs (an export/import file
+// carries plan-level packages, not raw log history) and plus an optional
+// packages list - the plan's PlanPackage tags, same shape as
+// planPackageSchema, so a plan can round-trip its package roles on import.
+export const importPlanSchema = z.object({
+  levelId: z.string(),
+  examDate: z.coerce.date(),
+  startDate: z.coerce.date().optional(),
+  weeklyAvailability: weeklyAvailabilitySchema,
+  packages: z.array(planPackageSchema).optional(),
+});
+
 export const createLogSchema = z
   .object({
     planId: z.string(),
