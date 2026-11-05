@@ -66,6 +66,14 @@ export const importPlanSchema = z.object({
   packages: z.array(planPackageSchema).optional(),
 });
 
+export const createMockExamSchema = z.object({
+  planId: z.string(),
+  date: z.coerce.date(),
+  scorePercent: z.number().int().min(0).max(100),
+  packageId: z.string().optional(),
+  note: z.string().optional(),
+});
+
 export const subscribePushSchema = z.object({
   endpoint: z.string().url(),
   keys: z.object({
