@@ -27,7 +27,7 @@ function isAuthorized(req: Request): boolean {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false;
 
-  const header = req.headers.get("authorization") ?? req.headers.get("Authorization");
+  const header = req.headers.get("authorization");
   if (!header || !header.startsWith("Bearer ")) return false;
   const token = header.slice("Bearer ".length).trim();
   if (!token) return false;
@@ -48,63 +48,77 @@ export async function GET(req: Request): Promise<Response> {
 
   const activePlans = await db.studyPlan.findMany({ where: { isActive: true } });
 
+  // Each plan is isolated behind its own try/catch: this is an unattended
+  // nightly batch, so one bad record (malformed data, a deleted curriculum
+  // row, etc.) must never cost every OTHER plan its snapshot for the day.
+  // Failures are logged with planId (diagnosable) and counted, not swallowed
+  // silently, so a caller can tell the batch didn't silently drop plans.
+  let plansFailed = 0;
   for (const plan of activePlans) {
-    const weeklyAvailability = plan.weeklyAvailability as unknown as WeeklyAvailability;
+    try {
+      const weeklyAvailability = plan.weeklyAvailability as unknown as WeeklyAvailability;
 
-    const [holidayRows, losRows, logs] = await Promise.all([
-      db.planHoliday.findMany({ where: { planId: plan.id } }),
-      db.lOS.findMany({
-        where: { reading: { topic: { levelId: plan.levelId } } },
-        include: { reading: { include: { topic: true } } },
-      }),
-      // Sorted ascending so the first log per losId (in this array order) is
-      // that LOS's first-ever log - used below for isFirstEverLog, same as
-      // Task 10's /api/progress.
-      db.studyLogEntry.findMany({ where: { planId: plan.id }, orderBy: [{ date: "asc" }, { id: "asc" }] }),
-    ]);
+      const [holidayRows, losRows, logs] = await Promise.all([
+        db.planHoliday.findMany({ where: { planId: plan.id } }),
+        db.lOS.findMany({
+          where: { reading: { topic: { levelId: plan.levelId } } },
+          include: { reading: { include: { topic: true } } },
+        }),
+        // Sorted ascending so the first log per losId (in this array order) is
+        // that LOS's first-ever log - used below for isFirstEverLog, same as
+        // Task 10's /api/progress.
+        db.studyLogEntry.findMany({ where: { planId: plan.id }, orderBy: [{ date: "asc" }, { id: "asc" }] }),
+      ]);
 
-    const holidays = holidayRows.map((h) => ({ start: h.startDate, end: h.endDate }));
+      const holidays = holidayRows.map((h) => ({ start: h.startDate, end: h.endDate }));
 
-    // Same fixed-baseline-pace math as Task 10's /api/progress: the rate is
-    // fixed from the plan's own whole start-to-exam span, not recomputed from
-    // today's live remaining backlog/hours.
-    const totalLosCount = losRows.length;
-    const totalHoursWhole = remainingHours(weeklyAvailability, plan.startDate, plan.examDate, holidays);
-    const basePaceRate = targetDailyPace(totalLosCount, totalLosCount, totalHoursWhole);
-    const hoursElapsedBeforeToday = remainingHours(
-      weeklyAvailability,
-      plan.startDate,
-      addUTCDays(today, -1),
-      holidays,
-    );
-    const targetCumulative = Math.max(
-      0,
-      Math.min(totalLosCount, Math.round(basePaceRate * hoursElapsedBeforeToday)),
-    );
+      // Same fixed-baseline-pace math as Task 10's /api/progress: the rate is
+      // fixed from the plan's own whole start-to-exam span, not recomputed from
+      // today's live remaining backlog/hours.
+      const totalLosCount = losRows.length;
+      const totalHoursWhole = remainingHours(weeklyAvailability, plan.startDate, plan.examDate, holidays);
+      const basePaceRate = targetDailyPace(totalLosCount, totalLosCount, totalHoursWhole);
+      const hoursElapsedBeforeToday = remainingHours(
+        weeklyAvailability,
+        plan.startDate,
+        addUTCDays(today, -1),
+        holidays,
+      );
+      const targetCumulative = Math.max(
+        0,
+        Math.min(totalLosCount, Math.round(basePaceRate * hoursElapsedBeforeToday)),
+      );
 
-    // First log (in the date/id-ascending array above) per losId is that
-    // LOS's first-ever log on this plan - everything after it is review work.
-    const seenLos = new Set<string>();
-    const isFirstEverLogById = new Map<string, boolean>();
-    for (const log of logs) {
-      if (!seenLos.has(log.losId)) {
-        isFirstEverLogById.set(log.id, true);
-        seenLos.add(log.losId);
-      } else {
-        isFirstEverLogById.set(log.id, false);
+      // First log (in the date/id-ascending array above) per losId is that
+      // LOS's first-ever log on this plan - everything after it is review work.
+      const seenLos = new Set<string>();
+      const isFirstEverLogById = new Map<string, boolean>();
+      for (const log of logs) {
+        if (!seenLos.has(log.losId)) {
+          isFirstEverLogById.set(log.id, true);
+          seenLos.add(log.losId);
+        } else {
+          isFirstEverLogById.set(log.id, false);
+        }
       }
-    }
-    const { newCoverage, reviewWork } = splitProgress(
-      logs.map((l) => ({ isFirstEverLog: isFirstEverLogById.get(l.id) ?? false })),
-    );
-    const actualCumulative = newCoverage + reviewWork;
+      const { newCoverage, reviewWork } = splitProgress(
+        logs.map((l) => ({ isFirstEverLog: isFirstEverLogById.get(l.id) ?? false })),
+      );
+      const actualCumulative = newCoverage + reviewWork;
 
-    await db.progressSnapshot.upsert({
-      where: { planId_date: { planId: plan.id, date: today } },
-      create: { planId: plan.id, date: today, targetCumulative, actualCumulative },
-      update: { targetCumulative, actualCumulative },
-    });
+      await db.progressSnapshot.upsert({
+        where: { planId_date: { planId: plan.id, date: today } },
+        create: { planId: plan.id, date: today, targetCumulative, actualCumulative },
+        update: { targetCumulative, actualCumulative },
+      });
+    } catch (err) {
+      plansFailed += 1;
+      console.error(`cron/tick: failed to snapshot plan ${plan.id}`, err);
+    }
   }
 
-  return Response.json({ ok: true, plansProcessed: activePlans.length }, { status: 200 });
+  return Response.json(
+    { ok: true, plansProcessed: activePlans.length - plansFailed, plansFailed },
+    { status: 200 },
+  );
 }
