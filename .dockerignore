@@ -1,0 +1,20 @@
+# Build context is the repo root (apps/backend/Dockerfile needs the
+# workspace lockfile). Keep secrets and bloat out of the image.
+node_modules
+**/node_modules
+.next
+**/.next
+out
+build
+.git
+.github
+.env
+.env.*
+**/.env
+**/.env.*
+.npmrc
+*.md
+!README.md
+.DS_Store
+npm-debug.log*
+pnpm-debug.log*
