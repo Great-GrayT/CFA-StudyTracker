@@ -1,0 +1,14 @@
+-- Enforces "at most one active plan per user" at the DB level, closing the
+-- concurrent-double-POST gap that the application-level transaction in
+-- plans/route.ts (deactivate-then-create, default READ COMMITTED isolation)
+-- cannot fully close on its own: two simultaneous POSTs could otherwise both
+-- see the same prior active plan, both deactivate it, and both successfully
+-- create a new active plan. Task 10 relies on "exactly one active plan per
+-- user" as an invariant.
+--
+-- A plain @@unique([userId]) isn't usable since a user may have many
+-- inactive plans over time; a partial index (WHERE "isActive" = true) is not
+-- expressible in schema.prisma's DSL, so this migration is raw SQL with no
+-- corresponding schema.prisma change - `prisma migrate dev` will not detect
+-- drift from this, since the Prisma schema has nothing to diff it against.
+CREATE UNIQUE INDEX "StudyPlan_userId_active_unique" ON "StudyPlan" ("userId") WHERE "isActive" = true;
