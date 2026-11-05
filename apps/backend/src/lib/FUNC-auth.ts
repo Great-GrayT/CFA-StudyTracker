@@ -114,3 +114,37 @@ export async function requireUser(req: Request): Promise<{ userId: string } | nu
 
   return { userId: user.id };
 }
+
+// OAuth sign-in find-or-create. An existing OAuthAccount (provider +
+// providerAccountId) always wins - it's the durable link, keyed off the
+// provider's own stable account id rather than email, which a user can
+// change at the provider. Only when no such link exists yet do we fall
+// back to matching by email, so someone who registered with a password
+// and later signs in via OAuth lands on the same account instead of a
+// duplicate; if no user has that email either, a new passwordless one is
+// created and linked.
+export async function linkOrCreateOauthUser(
+  provider: string,
+  providerAccountId: string,
+  email: string,
+): Promise<{ id: string; tokenVersion: number }> {
+  const existingAccount = await db.oAuthAccount.findUnique({
+    where: { provider_providerAccountId: { provider, providerAccountId } },
+  });
+  if (existingAccount) {
+    const user = await db.user.findUniqueOrThrow({ where: { id: existingAccount.userId } });
+    return { id: user.id, tokenVersion: user.tokenVersion };
+  }
+
+  const user = await db.user.upsert({
+    where: { email },
+    update: {},
+    create: { email },
+  });
+
+  await db.oAuthAccount.create({
+    data: { provider, providerAccountId, userId: user.id },
+  });
+
+  return { id: user.id, tokenVersion: user.tokenVersion };
+}
