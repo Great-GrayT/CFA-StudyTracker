@@ -67,6 +67,27 @@ test("paceRealistic is false when the remaining LOS can't plausibly fit in the r
   expect((await readJson(res)).paceRealistic).toBe(false);
 });
 
+// Regresses a bug where paceRealistic's "required daily hours" was derived
+// from a rate recomputed from TODAY's live remaining backlog/remaining
+// hours, which cancels out algebraically (x/(x/y) = y) and so can never
+// flag a plan whose remaining window alone has any nonzero hours in it, no
+// matter how large the backlog actually is. Here the plan's original pace
+// (50 LOS over ~62 modest hours across 60+ days) was entirely reasonable,
+// but none of it got used - only today+tomorrow (~2 modest hours) are left,
+// so the live-rate formula would wrongly read "realistic" (its own tiny
+// live window always looks fine to itself) while the fixed original-pace
+// rate correctly shows the backlog can't be crammed into what's left.
+test("paceRealistic is false for a long-running plan whose backlog can't be caught up in what's left, even though today's own tiny remaining window looks fine in isolation", async () => {
+  const { user, plan } = await setupUserWithPlan({
+    totalLos: 50,
+    startDate: isoDate(daysAgo(60)),
+    examDate: tomorrow,
+    weeklyAvailability: { mon: 1, tue: 1, wed: 1, thu: 1, fri: 1, sat: 1, sun: 1 },
+  });
+  const res = await GET(authedRequest(user, `/api/progress?planId=${plan.id}`));
+  expect((await readJson(res)).paceRealistic).toBe(false);
+});
+
 test("diversityNudges includes a LOS drilled 20+ times from one questions-role package at mid confidence", async () => {
   const { user, plan, losId } = await setupUserWithPlan();
   const pkg = await anyPresetPackage(); // e.g. UWorld

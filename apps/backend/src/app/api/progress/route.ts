@@ -189,18 +189,25 @@ export async function GET(req: Request): Promise<Response> {
   const actualCumulative = newCoverage + reviewWork;
   const { delta, percent } = behindAhead(actualCumulative, targetCumulative);
 
-  // Pace-realism: required daily hours, going forward from today, derived
-  // from targetDailyPace's LOS-per-hour rate. When remainingHoursFromToday
-  // is positive this reduces (by that rate's own definition) to the
-  // template's own average daily hours over the remaining span - a
-  // non-trivial check when the template itself declares more hours/day than
-  // the ceiling. When remainingHoursFromToday is zero (or negative) but work
-  // still remains, the rate's zero-guard turns a genuine divide-by-zero into
-  // an explicit Infinity here, correctly flagging "can't fit no matter what".
-  const remainingHoursFromToday = remainingHours(weeklyAvailability, today, plan.examDate, holidays);
-  const forwardRate = targetDailyPace(totalLosCount, remainingLosCount, remainingHoursFromToday);
+  // Pace-realism: required daily hours to still finish `remainingLosCount`
+  // at `basePaceRate` - the FIXED rate from the plan's whole original span
+  // (totalLosCount/totalHoursWhole, same rate `targetCumulative` above is
+  // built from), not a rate recomputed from today's live remaining backlog.
+  // Using a live rate here is tautological: targetDailyPace(total, remaining,
+  // remainingHours) = remaining/remainingHours whenever remainingHours > 0,
+  // so remaining/thatRate collapses by algebraic cancellation (x/(x/y) = y)
+  // back to remainingHours itself, no matter how large remaining is -
+  // structurally unable to ever detect "too far behind to catch up". Fixing
+  // the rate from the plan's original span instead means that as actual
+  // progress falls behind what the original pace predicted for this point
+  // in the plan, remainingLosCount grows relative to what basePaceRate
+  // expects, so this ratio genuinely grows instead of cancelling - the
+  // "can you still realistically catch up" signal spec point 7 describes.
+  // The basePaceRate=0 guard (totalHoursWhole<=0, e.g. examDate already
+  // passed) still turns a genuine divide-by-zero into an explicit Infinity
+  // here when work remains, correctly flagging "can't fit no matter what".
   const totalHoursNeeded =
-    remainingLosCount <= 0 ? 0 : forwardRate > 0 ? remainingLosCount / forwardRate : Infinity;
+    remainingLosCount <= 0 ? 0 : basePaceRate > 0 ? remainingLosCount / basePaceRate : Infinity;
   const daysRemaining = Math.max(
     0,
     Math.round((startOfUTCDay(plan.examDate).getTime() - today.getTime()) / MS_PER_DAY) + 1,
