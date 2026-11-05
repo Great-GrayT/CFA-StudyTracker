@@ -8,8 +8,15 @@ import {
   targetDailyPace,
   remainingHours,
   splitProgress,
+  missedStudyDays,
   type WeeklyAvailability,
 } from "../../../../core/pace";
+// Namespace import, not destructured: tests spy on
+// `pushModule.sendPushToUser` directly, which only intercepts calls made
+// through this same object (see FUNC-push.ts's own top comment).
+import * as pushModule from "../../../../lib/FUNC-push";
+
+const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 // Same UTC-calendar-day convention as progress/route.ts (Task 10) and pace.ts.
 function startOfUTCDay(d: Date): Date {
@@ -111,6 +118,27 @@ export async function GET(req: Request): Promise<Response> {
         create: { planId: plan.id, date: today, targetCumulative, actualCumulative },
         update: { targetCumulative, actualCumulative },
       });
+
+      // Missed-day push: yesterday only (not today - still in progress - and
+      // not the trailing week Task 10's /api/progress checks), same holiday
+      // ranges as the snapshot math above so a holiday day is never flagged.
+      const yesterday = addUTCDays(today, -1);
+      const missedYesterday = missedStudyDays(
+        weeklyAvailability,
+        logs.map((l) => l.date),
+        { from: yesterday, to: yesterday },
+        holidays,
+      );
+      if (missedYesterday.length > 0) {
+        const subscriptionCount = await db.pushSubscription.count({ where: { userId: plan.userId } });
+        if (subscriptionCount > 0) {
+          const weekdayName = WEEKDAY_NAMES[yesterday.getUTCDay()];
+          await pushModule.sendPushToUser(plan.userId, {
+            title: "You missed a study day",
+            body: `You didn't log any study time on ${weekdayName}. Let's get back on track today.`,
+          });
+        }
+      }
     } catch (err) {
       plansFailed += 1;
       console.error(`cron/tick: failed to snapshot plan ${plan.id}`, err);
