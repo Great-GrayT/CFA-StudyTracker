@@ -5,6 +5,10 @@ name: Build and Deploy
 # apps/backend/Dockerfile, push to GHCR, then SSH in and `compose pull` +
 # one-off migrate + `compose up -d`. The server only pulls and runs — it
 # never builds.
+#
+# `test` gates `build-and-deploy` (see `needs:` below): migrate/typecheck/test
+# must all pass against a real throwaway Postgres before anything is built or
+# pushed, so a red suite can never reach deploy.
 
 on:
   push:
@@ -18,7 +22,72 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: cfa_ci
+          POSTGRES_PASSWORD: cfa_ci
+          POSTGRES_DB: cfa_study_tracker_ci
+        ports:
+          - 5432:5432
+        # Waits for Postgres to actually accept connections before any later
+        # step runs - the service container starts in parallel with
+        # `actions/checkout`, not necessarily before pnpm needs it.
+        options: >-
+          --health-cmd "pg_isready -U cfa_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://cfa_ci:cfa_ci@localhost:5432/cfa_study_tracker_ci
+      # Dummy, non-production values - this job never talks to a real
+      # provider or sends a real push; VAPID keys still have to be a
+      # structurally valid keypair because web-push validates key shape at
+      # module load (see apps/backend/.env.test's own comment on this).
+      JWT_SECRET: ci-test-jwt-secret-not-for-production-use-only
+      JWT_TTL_HOURS: "72"
+      CRON_SECRET: ci-test-cron-secret-not-for-production-use-only
+      CORS_ALLOW_ORIGINS: http://localhost:3000
+      GOOGLE_CLIENT_ID: ci-placeholder-google-client-id
+      GOOGLE_CLIENT_SECRET: ci-placeholder-google-client-secret
+      GITHUB_CLIENT_ID: ci-placeholder-github-client-id
+      GITHUB_CLIENT_SECRET: ci-placeholder-github-client-secret
+      OAUTH_REDIRECT_BASE: http://localhost:3000
+      FRONTEND_BASE_URL: http://localhost:5173
+      RATE_LIMIT_WINDOW_MS: "60000"
+      RATE_LIMIT_MAX_REQUESTS: "240"
+      VAPID_PUBLIC_KEY: BDBa8LuxVvDmU10XXqzWpM47YhgJl2HgLxBpG3zOVHiCAcg1VHe8OqycCWaoG6wDpztgObJdl5zxlEK0auLo9rI
+      VAPID_PRIVATE_KEY: IkLduRz1c6RbwZUlaDhy15Suv_AWC86_bSp1PU_Q40M
+      VAPID_SUBJECT: mailto:ci@localhost
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply migrations to the CI database
+        run: pnpm --filter backend exec prisma migrate deploy
+
+      - name: Typecheck
+        run: pnpm --filter backend typecheck
+
+      - name: Test
+        run: pnpm --filter backend test
+
   build-and-deploy:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read

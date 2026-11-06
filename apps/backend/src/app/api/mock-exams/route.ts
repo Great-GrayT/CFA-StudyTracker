@@ -1,6 +1,7 @@
 import { db } from "../../../lib/db";
 import { requireUser } from "../../../lib/FUNC-auth";
 import { createMockExamSchema } from "../../../lib/validation";
+import { assertUsablePackage } from "../../../lib/FUNC-packages";
 
 export async function POST(req: Request): Promise<Response> {
   const auth = await requireUser(req);
@@ -18,6 +19,11 @@ export async function POST(req: Request): Promise<Response> {
   const plan = await db.studyPlan.findUnique({ where: { id: planId } });
   if (!plan || plan.userId !== auth.userId) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  if (packageId) {
+    const packageError = await assertUsablePackage(packageId, auth.userId);
+    if (packageError) return packageError;
   }
 
   const mockExam = await db.mockExam.create({

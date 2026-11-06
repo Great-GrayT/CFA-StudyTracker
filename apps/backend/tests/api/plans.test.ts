@@ -23,6 +23,39 @@ beforeEach(async () => {
   await anyLosIdForLevel("I");
 });
 
+// Regresses the Critical DoS finding: an unbounded examDate let a crafted
+// far-future date make pace.ts's remaining-hours math churn for a huge
+// span. The real defense is now pace.ts's O(1) rewrite (see pace.test.ts),
+// but this boundary check means a degenerate date is rejected outright
+// before it ever reaches that math, on every route that accepts examDate.
+test("creating a plan with an examDate more than 10 years out is rejected with 400", async () => {
+  const { POST } = await import("../../src/app/api/plans/route");
+  const user = await registerUser();
+  const farFuture = new Date(Date.now() + 11 * 365 * 24 * 60 * 60 * 1000).toISOString();
+  const res = await POST(
+    authedRequest(user, "/api/plans", { levelId: "I", examDate: farFuture, weeklyAvailability: fullWeek }),
+  );
+  expect(res.status).toBe(400);
+});
+
+test("PATCHing a plan's examDate more than 10 years out is rejected with 400", async () => {
+  const { PATCH } = await import("../../src/app/api/plans/[id]/route");
+  const { user, plan } = await setupUserWithPlan();
+  const farFuture = new Date(Date.now() + 11 * 365 * 24 * 60 * 60 * 1000).toISOString();
+  const res = await PATCH(authedRequest(user, `/api/plans/${plan.id}`, { examDate: farFuture }));
+  expect(res.status).toBe(400);
+});
+
+test("importing a plan with an examDate more than 10 years out is rejected with 400", async () => {
+  const { POST } = await import("../../src/app/api/plans/import/route");
+  const user = await registerUser();
+  const farFuture = new Date(Date.now() + 11 * 365 * 24 * 60 * 60 * 1000).toISOString();
+  const res = await POST(
+    authedRequest(user, "/api/plans/import", { levelId: "I", examDate: farFuture, weeklyAvailability: fullWeek }),
+  );
+  expect(res.status).toBe(400);
+});
+
 test("creating a new active plan deactivates the previous active plan", async () => {
   const user = await registerUser();
   await createPlan(user, { levelId: "I", examDate: "2027-06-01", weeklyAvailability: fullWeek });
@@ -76,6 +109,21 @@ test("deleting a holiday range removes it", async () => {
   const res = await DELETE(authedRequest(user, `/api/plans/${plan.id}/holidays/${holiday.id}`));
   expect(res.status).toBe(200);
   expect(await db.planHoliday.count()).toBe(0);
+});
+
+// Guards the raw-SQL partial unique index (migration
+// 20261105000254_add_study_plan_active_unique_index): schema.prisma has no
+// model-level annotation for it, so a future `prisma migrate dev` run could
+// silently generate a migration that drops it (see that migration's own
+// comment for why). Querying pg_indexes directly means CI catches a dropped
+// index even though schema.prisma itself would never show the drift.
+test("the StudyPlan_userId_active_unique partial index still exists", async () => {
+  const rows = await db.$queryRaw<Array<{ indexdef: string }>>`
+    SELECT indexdef FROM pg_indexes
+    WHERE tablename = 'StudyPlan' AND indexname = 'StudyPlan_userId_active_unique'
+  `;
+  expect(rows).toHaveLength(1);
+  expect(rows[0]!.indexdef).toContain('"isActive"');
 });
 
 test("tagging a package with roles on a plan, then re-tagging it, replaces the roles rather than duplicating the row", async () => {

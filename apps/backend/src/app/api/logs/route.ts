@@ -1,9 +1,16 @@
 import { db } from "../../../lib/db";
 import { requireUser } from "../../../lib/FUNC-auth";
 import { createLogSchema } from "../../../lib/validation";
+import { assertUsablePackage } from "../../../lib/FUNC-packages";
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
+
+// Same UTC-calendar-day convention as pace.ts/progress/route.ts - plan dates
+// are calendar days, not instants.
+function startOfUTCDay(d: Date): Date {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+}
 
 export async function POST(req: Request): Promise<Response> {
   const auth = await requireUser(req);
@@ -23,6 +30,27 @@ export async function POST(req: Request): Promise<Response> {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  if (packageId) {
+    const packageError = await assertUsablePackage(packageId, auth.userId);
+    if (packageError) return packageError;
+  }
+
+  // date defaults to now (today) - the behavior before this field existed.
+  // When given explicitly, it must fall within the plan's own lifetime: not
+  // before it started, and not in the future (a candidate can log today or
+  // backdate a missed entry, but can't log ahead of when the session
+  // happened).
+  const date = parsed.data.date ?? new Date();
+  const dateDay = startOfUTCDay(date);
+  const todayDay = startOfUTCDay(new Date());
+  const startDateDay = startOfUTCDay(plan.startDate);
+  if (dateDay.getTime() < startDateDay.getTime() || dateDay.getTime() > todayDay.getTime()) {
+    return Response.json(
+      { error: "date must be on or after the plan's startDate and not in the future" },
+      { status: 400 },
+    );
+  }
+
   const log = await db.studyLogEntry.create({
     data: {
       userId: auth.userId,
@@ -33,6 +61,7 @@ export async function POST(req: Request): Promise<Response> {
       questionsCorrect: questionsCorrect ?? 0,
       packageId,
       note,
+      date,
     },
   });
 

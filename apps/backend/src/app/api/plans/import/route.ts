@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { db } from "../../../../lib/db";
 import { requireUser } from "../../../../lib/FUNC-auth";
 import { importPlanSchema } from "../../../../lib/validation";
+import { assertUsablePackage } from "../../../../lib/FUNC-packages";
 
 export async function POST(req: Request): Promise<Response> {
   const auth = await requireUser(req);
@@ -16,6 +17,16 @@ export async function POST(req: Request): Promise<Response> {
   }
   const { levelId, examDate, weeklyAvailability, packages } = parsed.data;
   const startDate = parsed.data.startDate ?? new Date();
+
+  // Validated before the transaction opens: every packageId an imported
+  // plan file carries must be usable by the importing caller (shared, or
+  // already their own) - otherwise an imported file naming someone else's
+  // private package would silently attach it (and, via plans/[id]/packages's
+  // GET, leak that package's name back to the importer).
+  for (const p of packages ?? []) {
+    const packageError = await assertUsablePackage(p.packageId, auth.userId);
+    if (packageError) return packageError;
+  }
 
   // Same deactivate-then-create transaction pattern as plans/route.ts's
   // POST (Task 9), so an import can never leave two active plans - or a

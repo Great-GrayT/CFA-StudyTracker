@@ -9,6 +9,17 @@
 -- A plain @@unique([userId]) isn't usable since a user may have many
 -- inactive plans over time; a partial index (WHERE "isActive" = true) is not
 -- expressible in schema.prisma's DSL, so this migration is raw SQL with no
--- corresponding schema.prisma change - `prisma migrate dev` will not detect
--- drift from this, since the Prisma schema has nothing to diff it against.
+-- corresponding schema.prisma change.
+--
+-- WARNING, not the opposite of one: `prisma migrate dev` diffs schema.prisma
+-- against a shadow database that HAS replayed this migration (and every
+-- other one in history), so the index DOES exist there. Since schema.prisma
+-- itself has no model-level annotation for it, the next `prisma migrate dev`
+-- run will see the shadow DB has an index the Prisma schema doesn't describe
+-- and will generate a migration that DROPS this index to reconcile the two -
+-- silently destroying the "one active plan per user" invariant Task 10
+-- relies on. Guarded by a test (tests/api/plans.test.ts) that queries
+-- pg_indexes directly to assert this index still exists; if a future
+-- `prisma migrate dev` run ever drops it, that test fails loudly in CI
+-- instead of the gap surfacing only as a production race.
 CREATE UNIQUE INDEX "StudyPlan_userId_active_unique" ON "StudyPlan" ("userId") WHERE "isActive" = true;

@@ -232,28 +232,14 @@ export async function anyPresetPackage(): Promise<any> {
 
 /**
  * POSTs a log entry via the real route, returning the raw Response (callers
- * assert on status for validation-boundary tests). The real route always
- * dates a log `now()`; Task 10's missedDays tests need to backdate entries,
- * so when `body.date` is present this writes the row directly instead,
- * applying the same defaulting the route would (questionsCorrect/note/packageId).
+ * assert on status for validation-boundary tests). The route now supports
+ * an explicit `date` directly (it used to only ever date a log `now()`, so
+ * this fixture had to bypass the route and write backdated rows straight to
+ * the DB for missedDays tests - that workaround is gone now that the real
+ * route handles dates, so a dated log actually exercises the route's own
+ * date-bounds validation instead of skipping it).
  */
 export async function createLog(user: RegisteredUser, body: Record<string, unknown>): Promise<Response> {
-  if (body.date !== undefined) {
-    const log = await db.studyLogEntry.create({
-      data: {
-        userId: user.id,
-        planId: body.planId as string,
-        losId: body.losId as string,
-        confidence: body.confidence as number,
-        questionsAnswered: (body.questionsAnswered as number) ?? 0,
-        questionsCorrect: (body.questionsCorrect as number) ?? 0,
-        packageId: body.packageId as string | undefined,
-        note: body.note as string | undefined,
-        date: body.date as Date,
-      },
-    });
-    return Response.json(log, { status: 201 });
-  }
   return CREATE_LOG(authedRequest(user, "/api/logs", body));
 }
 

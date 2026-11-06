@@ -1,6 +1,7 @@
 import { db } from "../../../../../lib/db";
 import { requireUser } from "../../../../../lib/FUNC-auth";
 import { planPackageSchema } from "../../../../../lib/validation";
+import { assertUsablePackage } from "../../../../../lib/FUNC-packages";
 
 function planIdFromUrl(req: Request): string {
   const segments = new URL(req.url).pathname.split("/");
@@ -60,6 +61,9 @@ export async function POST(req: Request): Promise<Response> {
     return Response.json({ error: "Invalid request body" }, { status: 400 });
   }
   const { packageId, roles } = parsed.data;
+
+  const packageError = await assertUsablePackage(packageId, auth.userId);
+  if (packageError) return packageError;
 
   // Unique on [planId, packageId]: re-tagging the same package replaces its
   // roles in place rather than creating a second row for the pair.

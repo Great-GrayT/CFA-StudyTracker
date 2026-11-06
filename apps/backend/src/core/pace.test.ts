@@ -6,6 +6,7 @@ import {
   coverageCount,
   behindAhead,
   missedStudyDays,
+  missedDaysWindow,
   classifyLosFlag,
   weightedCoveragePercent,
   splitProgress,
@@ -176,4 +177,83 @@ test("recommendedSessionSplit applies a 1:2 content-to-practice ratio by default
 
 test("recommendedSessionSplit honors a custom ratio", () => {
   expect(recommendedSessionSplit(10, 0.5)).toEqual({ contentHours: 5, practiceHours: 5 });
+});
+
+// --- remainingHours closed-form rewrite (Critical fix: no more one Date
+// allocation per calendar day - see pace.ts's sumAvailability) ---
+
+test("remainingHours matches an exact-multiple-of-7-days span against a hand-computed weekly total", () => {
+  // monday is 2026-11-02; +27 days lands on 2026-11-29, a Sunday - 28 days
+  // inclusive is exactly 4 full weeks, zero remainder, so the result must be
+  // precisely 4x this week's total (2+0+2+2+2+0+0 = 8).
+  const fourWeeksLater = new Date("2026-11-29");
+  expect(remainingHours(availability, monday, fourWeeksLater, [])).toBe(4 * 8);
+});
+
+test("remainingHours matches a hand-computed total across a partial (non-week-aligned) span", () => {
+  // monday (2h) through wednesday (2h) is 3 days: mon=2, tue=0, wed=2 -> 4.
+  const wed = new Date("2026-11-04");
+  expect(remainingHours(availability, monday, wed, [])).toBe(4);
+});
+
+test("remainingHours still subtracts overlapping holiday ranges only once (union, not double-counted)", () => {
+  const fourWeeksLater = new Date("2026-11-29");
+  const withoutHolidays = remainingHours(availability, monday, fourWeeksLater, []);
+  // Two overlapping ranges both covering the same Wednesday (worth 2h): if
+  // they were summed independently instead of merged, this would wrongly
+  // subtract 4h instead of 2h.
+  const wed = new Date("2026-11-04");
+  const withOverlappingHolidays = remainingHours(availability, monday, fourWeeksLater, [
+    { start: wed, end: wed },
+    { start: wed, end: new Date("2026-11-05") }, // wed..thu, overlaps the first range on wed
+  ]);
+  // thu is also worth 2h, so total excluded should be wed(2) + thu(2) = 4,
+  // not wed(2) counted twice + thu(2) = 6.
+  expect(withOverlappingHolidays).toBe(withoutHolidays - 4);
+});
+
+test("remainingHours completes near-instantly across a multi-year span (closed-form, not a day-by-day loop)", () => {
+  const start = new Date("2026-01-01");
+  const tenYearsLater = new Date("2036-01-01");
+  const t0 = Date.now();
+  const result = remainingHours(availability, start, tenYearsLater, []);
+  const elapsedMs = Date.now() - t0;
+  // A day-by-day loop over a 10-year span allocates ~3650 Date objects per
+  // call; this is called twice per /api/progress request and once per plan
+  // per cron tick. The closed-form rewrite is O(1) in the span length, so
+  // this must stay fast regardless of how far examDate is pushed out -
+  // generously budgeted well under what even a slow CI runner would need.
+  expect(elapsedMs).toBeLessThan(200);
+  expect(result).toBeGreaterThan(0);
+});
+
+// --- missedDaysWindow: the shared clipping logic behind the fixed
+// missedStudyDays bug (new plans showing missed days before they existed;
+// missed-day alerts continuing forever after the exam date passes) ---
+
+test("missedDaysWindow clips the start up to the plan's startDate", () => {
+  const plan = { startDate: new Date("2026-11-04"), examDate: new Date("2027-06-01") };
+  const result = missedDaysWindow(plan, { from: new Date("2026-10-01"), to: new Date("2026-11-10") }, new Date("2026-11-10"));
+  expect(result).toEqual({ start: new Date("2026-11-04"), end: new Date("2026-11-09") });
+});
+
+test("missedDaysWindow clips the end down to yesterday, never including today", () => {
+  const plan = { startDate: new Date("2026-01-01"), examDate: new Date("2027-06-01") };
+  const today = new Date("2026-11-10");
+  const result = missedDaysWindow(plan, { from: new Date("2026-11-01"), to: today }, today);
+  expect(result?.end).toEqual(new Date("2026-11-09"));
+});
+
+test("missedDaysWindow returns null once the plan's exam date has already passed", () => {
+  const plan = { startDate: new Date("2026-01-01"), examDate: new Date("2026-11-01") };
+  const today = new Date("2026-11-10");
+  const result = missedDaysWindow(plan, { from: new Date("2026-11-01"), to: today }, today);
+  expect(result).toBeNull();
+});
+
+test("missedDaysWindow returns null for a brand-new plan whose only requested day is today", () => {
+  const today = new Date("2026-11-10");
+  const plan = { startDate: today, examDate: new Date("2027-06-01") };
+  const result = missedDaysWindow(plan, { from: today, to: today }, today);
+  expect(result).toBeNull();
 });

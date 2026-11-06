@@ -69,10 +69,41 @@ function round2(n: number): number {
 }
 
 /**
+ * Closed-form sum of `weeklyAvailability` over [start, end] (both already
+ * UTC-midnight, inclusive, start <= end), with no holiday exclusion. The
+ * weekly pattern repeats every 7 days, so the range decomposes into some
+ * number of full weeks (each contributing the same fixed weekly total) plus
+ * a remainder of at most 6 days starting on `start`'s weekday - addition
+ * being commutative, it doesn't matter that the "remainder" is computed as
+ * if it were the first few days rather than the actual leftover days at
+ * either end of the range, the total is the same either way. O(1): no loop
+ * over the span itself, only ever at most 6 iterations for the remainder.
+ */
+function sumAvailability(weeklyAvailability: WeeklyAvailability, start: Date, end: Date): number {
+  const totalDays = Math.round((end.getTime() - start.getTime()) / MS_PER_DAY) + 1;
+  const fullWeeks = Math.floor(totalDays / 7);
+  const remainderDays = totalDays % 7;
+
+  const weeklySum = WEEKDAY_KEYS.reduce((sum, key) => sum + weeklyAvailability[key], 0);
+
+  let remainderSum = 0;
+  for (let i = 0; i < remainderDays; i++) {
+    remainderSum += plannedHoursFor(weeklyAvailability, addUTCDays(start, i));
+  }
+
+  return fullWeeks * weeklySum + remainderSum;
+}
+
+/**
  * Sum of available study hours from `from` through `examDate`, both
  * inclusive, zeroing out any day that falls inside a holiday range
  * regardless of its weekday. Returns 0 (never negative) once examDate is
  * on or before the day before `from`.
+ *
+ * O(number of holiday ranges), never O(number of days spanned): a crafted
+ * far-future examDate (or a multi-decade holiday range) must not make this
+ * iterate one Date allocation per calendar day - see sumAvailability above
+ * for the closed-form week/remainder decomposition this builds on.
  */
 export function remainingHours(
   weeklyAvailability: WeeklyAvailability,
@@ -84,12 +115,30 @@ export function remainingHours(
   const end = startOfUTCDay(examDate);
   if (end.getTime() < start.getTime()) return 0;
 
-  let total = 0;
-  for (let d = start; d.getTime() <= end.getTime(); d = addUTCDays(d, 1)) {
-    if (isWithinAnyRange(d, holidays)) continue;
-    total += plannedHoursFor(weeklyAvailability, d);
+  const total = sumAvailability(weeklyAvailability, start, end);
+
+  // Clip each holiday range to [start, end], then merge overlaps (a sweep
+  // over start-sorted intervals) before summing, so a day double-covered by
+  // two holiday ranges is only ever subtracted once, matching the old
+  // day-by-day isWithinAnyRange behavior exactly.
+  const clipped = holidays
+    .map((r) => ({
+      start: Math.max(startOfUTCDay(r.start).getTime(), start.getTime()),
+      end: Math.min(startOfUTCDay(r.end).getTime(), end.getTime()),
+    }))
+    .filter((r) => r.start <= r.end)
+    .sort((a, b) => a.start - b.start);
+
+  let holidayHours = 0;
+  let mergedEnd = -Infinity; // end (ms) of the holiday coverage already counted
+  for (const r of clipped) {
+    const segStart = Math.max(r.start, mergedEnd + MS_PER_DAY);
+    if (segStart > r.end) continue; // fully covered by a previous (earlier-starting, longer) range already
+    holidayHours += sumAvailability(weeklyAvailability, new Date(segStart), new Date(r.end));
+    mergedEnd = Math.max(mergedEnd, r.end);
   }
-  return total;
+
+  return Math.max(0, total - holidayHours);
 }
 
 /**
@@ -144,6 +193,49 @@ export function behindAhead(
         : 0
       : round2((actualCumulative / targetCumulative) * 100);
   return { delta, percent };
+}
+
+/**
+ * The valid window for "missed study day" reporting/pushing for one plan,
+ * given a caller-requested `[from, to]` range and "today". A single shared
+ * computation so progress/route.ts (trailing week, read on every dashboard
+ * load) and cron/tick/route.ts (yesterday only, nightly) can never drift
+ * apart on this again - that drift is exactly how the plan.startDate/
+ * examDate clipping bug happened in the first place.
+ *
+ * - Never reports a day before the plan existed: the window's start is
+ *   clipped up to `plan.startDate`.
+ * - Never reports a day that hasn't finished yet: the window's end is
+ *   clipped down to yesterday (today is still in progress).
+ * - Never reports anything once the exam has passed: if `plan.examDate` is
+ *   already before `today`, there is no valid window at all (`null`), not
+ *   just one clipped down to the exam date - a candidate who already sat
+ *   the exam gets no further missed-day alerts, full stop.
+ *
+ * Returns `null` when the plan's exam has passed, or when clipping leaves
+ * `start > end` (e.g. a brand-new plan whose only candidate day is today,
+ * which itself gets clipped out) - callers should treat `null` as "report
+ * no missed days" without calling missedStudyDays at all.
+ */
+export function missedDaysWindow(
+  plan: { startDate: Date; examDate: Date },
+  requested: { from: Date; to: Date },
+  today: Date
+): { start: Date; end: Date } | null {
+  const todayStart = startOfUTCDay(today);
+  const examDate = startOfUTCDay(plan.examDate);
+  if (examDate.getTime() < todayStart.getTime()) return null;
+
+  const yesterday = addUTCDays(todayStart, -1);
+  const start = new Date(
+    Math.max(startOfUTCDay(plan.startDate).getTime(), startOfUTCDay(requested.from).getTime())
+  );
+  const end = new Date(
+    Math.min(examDate.getTime(), yesterday.getTime(), startOfUTCDay(requested.to).getTime())
+  );
+
+  if (end.getTime() < start.getTime()) return null;
+  return { start, end };
 }
 
 /**

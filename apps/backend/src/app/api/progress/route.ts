@@ -10,6 +10,7 @@ import {
   remainingHours,
   behindAhead,
   missedStudyDays,
+  missedDaysWindow,
   splitProgress,
   isPaceRealistic,
   shouldNudgeDiversity,
@@ -216,14 +217,22 @@ export async function GET(req: Request): Promise<Response> {
     daysRemaining > 0 ? totalHoursNeeded / daysRemaining : totalHoursNeeded > 0 ? Infinity : 0;
   const paceRealistic = isPaceRealistic(requiredDailyHours);
 
-  // --- missed days: trailing 7 calendar days, today inclusive ---
+  // --- missed days: trailing 7 calendar days, clipped to [plan.startDate,
+  // min(yesterday, plan.examDate)] by the shared missedDaysWindow helper so
+  // this can never drift from cron/tick's own clipping again - a brand-new
+  // plan never reports missed days from before it existed, today (still in
+  // progress) is never flagged, and nothing is reported once the exam has
+  // already passed. ---
   const sevenDaysAgo = addUTCDays(today, -6);
-  const missedDays = missedStudyDays(
-    weeklyAvailability,
-    logs.map((l) => l.date),
-    { from: sevenDaysAgo, to: today },
-    holidays,
-  );
+  const window = missedDaysWindow(plan, { from: sevenDaysAgo, to: today }, today);
+  const missedDays = window
+    ? missedStudyDays(
+        weeklyAvailability,
+        logs.map((l) => l.date),
+        { from: window.start, to: window.end },
+        holidays,
+      )
+    : [];
 
   // --- diversity nudges: only questions-role packages count toward the
   // 20-question single-source threshold ---

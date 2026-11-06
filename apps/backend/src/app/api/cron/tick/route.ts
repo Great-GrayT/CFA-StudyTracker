@@ -9,6 +9,7 @@ import {
   remainingHours,
   splitProgress,
   missedStudyDays,
+  missedDaysWindow,
   type WeeklyAvailability,
 } from "../../../../core/pace";
 // Namespace import, not destructured: tests spy on
@@ -61,8 +62,17 @@ export async function GET(req: Request): Promise<Response> {
   // Failures are logged with planId (diagnosable) and counted, not swallowed
   // silently, so a caller can tell the batch didn't silently drop plans.
   let plansFailed = 0;
+  let plansSkipped = 0;
   for (const plan of activePlans) {
     try {
+      // Once the exam date has passed, this plan gets neither a fresh
+      // snapshot nor a missed-day push, ever again - otherwise a candidate
+      // keeps getting "you missed a study day" pushes forever post-exam.
+      if (startOfUTCDay(plan.examDate).getTime() < today.getTime()) {
+        plansSkipped += 1;
+        continue;
+      }
+
       const weeklyAvailability = plan.weeklyAvailability as unknown as WeeklyAvailability;
 
       const [holidayRows, losRows, logs] = await Promise.all([
@@ -120,15 +130,21 @@ export async function GET(req: Request): Promise<Response> {
       });
 
       // Missed-day push: yesterday only (not today - still in progress - and
-      // not the trailing week Task 10's /api/progress checks), same holiday
-      // ranges as the snapshot math above so a holiday day is never flagged.
+      // not the trailing week Task 10's /api/progress checks), clipped to
+      // the plan's valid window by the same shared missedDaysWindow helper
+      // /api/progress uses - a brand-new plan (startDate today) has no
+      // valid "yesterday" to have missed yet, so window is null and no push
+      // fires.
       const yesterday = addUTCDays(today, -1);
-      const missedYesterday = missedStudyDays(
-        weeklyAvailability,
-        logs.map((l) => l.date),
-        { from: yesterday, to: yesterday },
-        holidays,
-      );
+      const window = missedDaysWindow(plan, { from: yesterday, to: yesterday }, today);
+      const missedYesterday = window
+        ? missedStudyDays(
+            weeklyAvailability,
+            logs.map((l) => l.date),
+            { from: window.start, to: window.end },
+            holidays,
+          )
+        : [];
       if (missedYesterday.length > 0) {
         const subscriptionCount = await db.pushSubscription.count({ where: { userId: plan.userId } });
         if (subscriptionCount > 0) {
@@ -146,7 +162,12 @@ export async function GET(req: Request): Promise<Response> {
   }
 
   return Response.json(
-    { ok: true, plansProcessed: activePlans.length - plansFailed, plansFailed },
+    {
+      ok: true,
+      plansProcessed: activePlans.length - plansFailed - plansSkipped,
+      plansFailed,
+      plansSkipped,
+    },
     { status: 200 },
   );
 }

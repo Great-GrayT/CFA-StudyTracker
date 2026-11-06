@@ -145,7 +145,15 @@ export async function GET(req: Request, context: RouteContext): Promise<Response
   const user = await linkOrCreateOauthUser(provider, profile.providerAccountId, profile.email);
   const token = signJwt({ userId: user.id, tokenVersion: user.tokenVersion });
 
-  const base = requiredEnv("OAUTH_REDIRECT_BASE");
+  // Deliberately a different env var from OAUTH_REDIRECT_BASE: that one is
+  // this backend's OWN origin (used to build the provider's redirect_uri,
+  // where this very callback route lives); this redirect's target is the
+  // FRONTEND's origin (the Vercel app), where /auth/callback is a page that
+  // reads `token` off the query string. Conflating the two means OAuth
+  // cannot be configured correctly at all - the provider would get sent a
+  // frontend URL as its callback, and/or the user would get redirected back
+  // into the backend's own origin instead of the app.
+  const base = requiredEnv("FRONTEND_BASE_URL");
   const headers = new Headers({ Location: `${base}/auth/callback?token=${encodeURIComponent(token)}` });
   // Clear the one-time state cookie now that it's been consumed.
   headers.append("Set-Cookie", `oauth_state=; Path=/api/auth/oauth/${provider}; HttpOnly; SameSite=Lax; Max-Age=0`);

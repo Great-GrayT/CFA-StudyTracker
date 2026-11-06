@@ -120,7 +120,13 @@ test("today's view is live; a past day's view reads the stored ProgressSnapshot"
 });
 
 test("missedDays is empty when every planned day in the trailing week has a log", async () => {
-  const { user, plan, losId } = await setupUserWithPlan({ weeklyAvailability: fullWeek });
+  // Backdated startDate: the trailing-week window is clipped to
+  // plan.startDate, so a plan that only started today would otherwise have
+  // no valid window to report "every day has a log" against at all.
+  const { user, plan, losId } = await setupUserWithPlan({
+    weeklyAvailability: fullWeek,
+    startDate: isoDate(daysAgo(10)),
+  });
   for (let i = 0; i < 7; i++) {
     await createLog(user, { planId: plan.id, losId, confidence: 3, questionsAnswered: 0, date: daysAgo(i) });
   }
@@ -129,7 +135,11 @@ test("missedDays is empty when every planned day in the trailing week has a log"
 });
 
 test("missedDays includes a planned day in the trailing week that has no log", async () => {
-  const { user, plan, losId } = await setupUserWithPlan({ weeklyAvailability: fullWeek });
+  // Backdated startDate, same reason as the test above.
+  const { user, plan, losId } = await setupUserWithPlan({
+    weeklyAvailability: fullWeek,
+    startDate: isoDate(daysAgo(10)),
+  });
   // log every day except three days ago
   for (let i = 0; i < 7; i++) {
     if (i === 3) continue;
@@ -137,6 +147,29 @@ test("missedDays includes a planned day in the trailing week that has no log", a
   }
   const res = await GET(authedRequest(user, `/api/progress?planId=${plan.id}`));
   expect((await readJson(res)).missedDays).toContain(isoDate(daysAgo(3)));
+});
+
+// Regresses the startDate-clipping bug: a plan created today has no
+// missed days yet, since it didn't exist on any of the trailing week's
+// earlier dates - even though fullWeek has every weekday planned and
+// nothing has been logged.
+test("missedDays never reports a day from before the plan's own startDate", async () => {
+  const { user, plan } = await setupUserWithPlan({ weeklyAvailability: fullWeek });
+  const res = await GET(authedRequest(user, `/api/progress?planId=${plan.id}`));
+  expect((await readJson(res)).missedDays).toEqual([]);
+});
+
+// Regresses the "forever post-exam" bug: once the exam date has passed,
+// missedDays must report nothing further for that plan, even though the
+// plan's own template would otherwise call yesterday a miss.
+test("missedDays is empty once the plan's exam date has already passed", async () => {
+  const { user, plan } = await setupUserWithPlan({
+    weeklyAvailability: fullWeek,
+    startDate: isoDate(daysAgo(10)),
+    examDate: isoDate(daysAgo(1)),
+  });
+  const res = await GET(authedRequest(user, `/api/progress?planId=${plan.id}`));
+  expect((await readJson(res)).missedDays).toEqual([]);
 });
 
 test("returns 403 for a planId that isn't the caller's own plan", async () => {

@@ -1,5 +1,16 @@
 import { z } from "zod";
 
+// A crafted far-future examDate would make pace.ts's remaining-hours math
+// (and anything iterating the plan's day span) churn for an unbounded span;
+// 10 years comfortably covers any real CFA candidate's plan while keeping
+// every date-span computation bounded. Computed per-parse (not a fixed Date
+// captured at module load) so the ceiling stays 10 years from "now", not
+// 10 years from server-start.
+const TEN_YEARS_MS = 10 * 365 * 24 * 60 * 60 * 1000;
+const examDateSchema = z.coerce.date().refine((d) => d.getTime() <= Date.now() + TEN_YEARS_MS, {
+  message: "examDate must not be more than 10 years in the future",
+});
+
 export const registerSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
@@ -8,6 +19,13 @@ export const registerSchema = z.object({
 export const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
+});
+
+// newPassword uses the same min(8) rule as registerSchema's password - "the
+// same validation as registration" per the change-password route's brief.
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(8),
 });
 
 export const weeklyAvailabilitySchema = z.object({
@@ -28,14 +46,14 @@ const initialLogSchema = z.object({
 
 export const createPlanSchema = z.object({
   levelId: z.string(),
-  examDate: z.coerce.date(),
+  examDate: examDateSchema,
   startDate: z.coerce.date().optional(),
   weeklyAvailability: weeklyAvailabilitySchema,
   initialLogs: z.array(initialLogSchema).optional(),
 });
 
 export const patchPlanSchema = z.object({
-  examDate: z.coerce.date().optional(),
+  examDate: examDateSchema.optional(),
   weeklyAvailability: weeklyAvailabilitySchema.optional(),
 });
 
@@ -60,7 +78,7 @@ export const createPackageSchema = z.object({
 // planPackageSchema, so a plan can round-trip its package roles on import.
 export const importPlanSchema = z.object({
   levelId: z.string(),
-  examDate: z.coerce.date(),
+  examDate: examDateSchema,
   startDate: z.coerce.date().optional(),
   weeklyAvailability: weeklyAvailabilitySchema,
   packages: z.array(planPackageSchema).optional(),
@@ -95,6 +113,11 @@ export const createLogSchema = z
     questionsCorrect: z.number().int().min(0).optional(),
     packageId: z.string().optional(),
     note: z.string().optional(),
+    // Optional: lets a candidate log yesterday's session instead of only
+    // "now". Absent means "today", same as before this field existed. The
+    // route checks this against the plan's startDate/today (needs the DB
+    // row), not here.
+    date: z.coerce.date().optional(),
   })
   // The DB default (0) only applies when the column is omitted entirely; a
   // request's explicit value still needs this same-request cross-field check.
