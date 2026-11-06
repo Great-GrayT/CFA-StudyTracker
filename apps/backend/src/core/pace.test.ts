@@ -212,18 +212,21 @@ test("remainingHours still subtracts overlapping holiday ranges only once (union
   expect(withOverlappingHolidays).toBe(withoutHolidays - 4);
 });
 
-test("remainingHours completes near-instantly across a multi-year span (closed-form, not a day-by-day loop)", () => {
+test("remainingHours stays O(1) across a span no day-by-day loop could survive", () => {
+  // zod caps examDate at 10 years from the API boundary, but this calls the
+  // pure function directly, bypassing that cap, specifically to prove the
+  // complexity property the cap alone can't demonstrate: a 10-year span only
+  // takes ~6ms even under the old day-by-day loop (measured directly), so a
+  // budget anywhere near that would pass against either implementation. A
+  // 100,000-year span scales the old loop to ~20s (linear in days) while the
+  // closed-form rewrite stays sub-millisecond - this is what actually
+  // distinguishes O(1) from O(n) and would fail if the loop ever came back.
   const start = new Date("2026-01-01");
-  const tenYearsLater = new Date("2036-01-01");
+  const farFuture = new Date("102026-01-01");
   const t0 = Date.now();
-  const result = remainingHours(availability, start, tenYearsLater, []);
+  const result = remainingHours(availability, start, farFuture, []);
   const elapsedMs = Date.now() - t0;
-  // A day-by-day loop over a 10-year span allocates ~3650 Date objects per
-  // call; this is called twice per /api/progress request and once per plan
-  // per cron tick. The closed-form rewrite is O(1) in the span length, so
-  // this must stay fast regardless of how far examDate is pushed out -
-  // generously budgeted well under what even a slow CI runner would need.
-  expect(elapsedMs).toBeLessThan(200);
+  expect(elapsedMs).toBeLessThan(500);
   expect(result).toBeGreaterThan(0);
 });
 

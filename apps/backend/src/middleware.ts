@@ -34,7 +34,11 @@ const LOGIN_TIER: Tier = { name: "login", windowMs: 60_000, max: 10 };
 const REGISTER_TIER: Tier = { name: "register", windowMs: 15 * 60_000, max: 5 };
 
 function tierFor(pathname: string): Tier {
-  if (pathname === "/api/auth/login" || pathname.startsWith("/api/auth/oauth/")) {
+  if (
+    pathname === "/api/auth/login" ||
+    pathname === "/api/auth/password" ||
+    pathname.startsWith("/api/auth/oauth/")
+  ) {
     return LOGIN_TIER;
   }
   if (pathname === "/api/auth/register" || pathname === "/api/auth/forgot-password") {
