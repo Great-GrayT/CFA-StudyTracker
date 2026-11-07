@@ -133,6 +133,6 @@ jobs:
             cd "${{ secrets.APP_DIR }}"
             docker compose pull
             # Migrations as a one-off process (12-factor admin task), not in the web container.
-            docker compose run --rm app node /app/node_modules/prisma/build/index.js migrate deploy
+            docker compose run --rm app sh -c 'node "$(find /app/node_modules/.pnpm -maxdepth 1 -name "prisma@*" -print -quit)/node_modules/prisma/build/index.js" migrate deploy'
             docker compose up -d
             docker image prune -f
