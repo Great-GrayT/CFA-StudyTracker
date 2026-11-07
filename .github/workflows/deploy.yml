@@ -158,12 +158,6 @@ jobs:
             # with no manual server step.
             mv /srv/scripts/.cfa-cron-staging/cfa-cron-tick.sh /srv/scripts/cfa-cron-tick.sh
             chmod 700 /srv/scripts/cfa-cron-tick.sh
-            ls -la /srv/scripts/.cfa-cron-staging/ || echo "STAGING DIR MISSING"
             SCHEDULE=$(cat /srv/scripts/.cfa-cron-staging/cron-schedule)
-            echo "DEBUG SCHEDULE=[$SCHEDULE]"
             rm -rf /srv/scripts/.cfa-cron-staging
-            NEWCRON=$(crontab -l 2>/dev/null | grep -v cfa-cron-tick.sh; echo "$SCHEDULE /srv/scripts/cfa-cron-tick.sh >> /srv/scripts/cfa-cron-tick.log 2>&1")
-            echo "DEBUG NEWCRON=[$NEWCRON]"
-            echo "$NEWCRON" | crontab -
-            echo "DEBUG crontab exit=$?"
-            crontab -l
+            (crontab -l 2>/dev/null | grep -v cfa-cron-tick.sh; echo "$SCHEDULE /srv/scripts/cfa-cron-tick.sh >> /srv/scripts/cfa-cron-tick.log 2>&1") | crontab -
