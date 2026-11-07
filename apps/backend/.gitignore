@@ -9,6 +9,7 @@ prisma/seed-data/*.json
 
 # Next.js build and output
 .next/
+tsconfig.tsbuildinfo
 
 # Dependencies
 node_modules/
