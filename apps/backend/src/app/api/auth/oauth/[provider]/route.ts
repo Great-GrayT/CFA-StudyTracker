@@ -2,10 +2,11 @@ import { randomBytes } from "node:crypto";
 import { signJwt } from "../../../../../lib/FUNC-auth";
 import { getProviderConfig, redirectUriFor } from "./providers";
 
-// Next 15 passes params as a Promise at runtime; tests here call the
-// handler directly with a plain object. Awaiting either works the same -
-// a non-Promise value resolves to itself - so one signature covers both.
-type RouteContext = { params: { provider: string } | Promise<{ provider: string }> };
+// Next 15's build-time route-type validator requires params to be typed as
+// exactly a Promise - a union with the resolved shape (even though it's
+// harmless at runtime, since await on a non-Promise resolves to itself)
+// fails `next build`. Tests wrap their literal in Promise.resolve() to match.
+type RouteContext = { params: Promise<{ provider: string }> };
 
 export async function GET(_req: Request, context: RouteContext): Promise<Response> {
   const { provider } = await context.params;

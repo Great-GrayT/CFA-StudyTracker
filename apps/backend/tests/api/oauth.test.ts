@@ -11,13 +11,13 @@ afterEach(() => {
 });
 
 test("GET /api/auth/oauth/google redirects to Google's authorization URL with the configured client id", async () => {
-  const res = await GET(jsonRequest("GET", "/api/auth/oauth/google"), { params: { provider: "google" } });
+  const res = await GET(jsonRequest("GET", "/api/auth/oauth/google"), { params: Promise.resolve({ provider: "google" }) });
   expect(res.status).toBe(302);
   expect(res.headers.get("location")).toContain(process.env.GOOGLE_CLIENT_ID);
 });
 
 test("an unknown provider returns 404", async () => {
-  const res = await GET(jsonRequest("GET", "/api/auth/oauth/facebook"), { params: { provider: "facebook" } });
+  const res = await GET(jsonRequest("GET", "/api/auth/oauth/facebook"), { params: Promise.resolve({ provider: "facebook" }) });
   expect(res.status).toBe(404);
 });
 
@@ -31,7 +31,7 @@ test("the callback's post-login redirect uses FRONTEND_BASE_URL, not OAUTH_REDIR
 
   // Start the flow for real so the state JWT and its double-submit cookie
   // are both genuinely valid for the callback to accept.
-  const startRes = await GET(jsonRequest("GET", "/api/auth/oauth/google"), { params: { provider: "google" } });
+  const startRes = await GET(jsonRequest("GET", "/api/auth/oauth/google"), { params: Promise.resolve({ provider: "google" }) });
   const location = new URL(startRes.headers.get("location")!);
   const state = location.searchParams.get("state")!;
   const cookiePair = startRes.headers.get("set-cookie")!.split(";")[0]!; // "oauth_state=<value>"
@@ -58,7 +58,7 @@ test("the callback's post-login redirect uses FRONTEND_BASE_URL, not OAUTH_REDIR
     `http://localhost/api/auth/oauth/google/callback?code=test-code&state=${encodeURIComponent(state)}`,
     { headers: { cookie: cookiePair } },
   );
-  const res = await CALLBACK_GET(callbackReq, { params: { provider: "google" } });
+  const res = await CALLBACK_GET(callbackReq, { params: Promise.resolve({ provider: "google" }) });
 
   expect(res.status).toBe(302);
   const redirectLocation = res.headers.get("location")!;

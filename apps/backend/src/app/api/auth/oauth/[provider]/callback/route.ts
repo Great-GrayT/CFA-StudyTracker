@@ -11,7 +11,8 @@ import { extractVerifiedGithubEmail, extractVerifiedGoogleEmail, type GithubEmai
 // (FUNC-auth.ts) ARE unit tested, since those don't require real network
 // calls.
 
-type RouteContext = { params: { provider: string } | Promise<{ provider: string }> };
+// See oauth/[provider]/route.ts for why this must be exactly a Promise.
+type RouteContext = { params: Promise<{ provider: string }> };
 
 interface TokenResponse {
   access_token: string;
