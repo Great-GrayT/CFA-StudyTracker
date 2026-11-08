@@ -41,7 +41,8 @@
 
 import { PrismaClient } from "@prisma/client";
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const prisma = new PrismaClient();
 
@@ -66,7 +67,12 @@ type SeedLevel = {
   topics: SeedTopic[];
 };
 
-const SEED_DATA_DIR = join(__dirname, "seed-data");
+// Resolved without __dirname, which does not exist in an ES module. Node 22
+// strips types natively but reparses this file as ESM (it has import syntax
+// and the package has no "type" field), so __dirname was undefined at run
+// time and the seed could not find its own data. Deriving the directory from
+// import.meta.url works under tsx and plain node alike.
+const SEED_DATA_DIR = join(dirname(fileURLToPath(import.meta.url)), "seed-data");
 
 type Counts = { levels: number; topics: number; readings: number; los: number };
 
