@@ -32,6 +32,12 @@ model OAuthAccount {
 
 model Level {
   id     String  @id // "I" | "II" | "III"
+  // Set by the seed script from the curriculum data it loads. The frontend
+  // caches the tree in IndexedDB with a long max-age, and the curriculum is
+  // reseeded yearly, so cached clients eventually hold LOS ids this database
+  // no longer has. Echoing a version lets the client notice and refetch
+  // instead of silently rendering blank rows.
+  version String  @default("unknown")
   topics Topic[]
   plans  StudyPlan[]
 }
@@ -132,6 +138,24 @@ model ProgressSnapshot {
   actualCumulative Int
   plan             StudyPlan @relation(fields: [planId], references: [id])
   @@unique([planId, date])
+}
+
+// One row per nightly tick. The tick already computes these counts and
+// previously discarded them, which left the watchdogs screen with nothing to
+// show and no way to tell "ran, nothing to do" from "never ran".
+model CronRun {
+  id              String   @id @default(cuid())
+  startedAt       DateTime @default(now())
+  finishedAt      DateTime?
+  ok              Boolean  @default(false)
+  plansProcessed  Int      @default(0)
+  plansFailed     Int      @default(0)
+  plansSkipped    Int      @default(0)
+  // Null for the nightly global run; set when a user triggered a scoped run,
+  // so one user's manual run is never mistaken for the scheduled sweep.
+  triggeredByUserId String?
+  error           String?
+  @@index([startedAt])
 }
 
 model PushSubscription {
