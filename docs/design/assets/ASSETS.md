@@ -178,12 +178,15 @@ carrying two motifs is the minimal rectangular cell for a hex lattice.
 
 ## Marks already authored
 
-`mark.svg` and `mark-maskable.svg` (the stepped-climb glyph: a hairline diagonal
-for the target pace, a stepped climb over it for the real one) are superseded as
-the primary identity by Vortex, and kept as a candidate for a secondary
-pace-specific mark.
+An earlier stepped-climb glyph (`mark.svg`, `mark-maskable.svg`) was superseded
+by Vortex and has been deleted rather than left to confuse a reader about which
+mark is current. Its idea, a target line with the real climb stepping over it,
+survives as the pace chart itself.
 
-`sprite-marks.svg`, still current, 14 symbols on a 16px grid, 1.5 stroke, square
+`sprite-marks.svg` is the source of truth for the day marks and the three review
+flags. Those shapes are reimplemented as React components in
+`apps/frontend/src/components/icons.tsx`, which is what the app imports. 14
+symbols on a 16px grid, 1.5 stroke, square
 caps, `currentColor`:
 
 | Symbols | Used on |

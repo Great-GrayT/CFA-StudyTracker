@@ -1,0 +1,16 @@
+.wrap {
+  height: 60dvh;
+  min-height: 320px;
+  border: 1px solid var(--rule-strong);
+  background: var(--ground);
+  /* The canvas owns its gestures; the page must not scroll under a drag. */
+  touch-action: none;
+}
+
+.lost {
+  padding: var(--space-5);
+  margin: 0;
+  background: var(--raised);
+  border: 1px solid var(--rule-strong);
+  color: var(--muted);
+}

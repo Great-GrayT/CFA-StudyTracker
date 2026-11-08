@@ -1,0 +1,449 @@
+.container {
+  padding: var(--space-4);
+  max-width: 100%;
+}
+
+.title {
+  font-size: 26px;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  font-weight: 500;
+  margin: 0 0 var(--space-5);
+}
+
+.section {
+  margin-bottom: var(--space-5);
+  padding: var(--space-4);
+  background: var(--raised);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-input);
+}
+
+.sectionHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-3);
+  gap: var(--space-3);
+}
+
+.sectionTitle {
+  font-size: 18px;
+  line-height: 1.4;
+  letter-spacing: -0.005em;
+  font-weight: 600;
+  margin: 0;
+}
+
+.infoRow {
+  display: grid;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.infoRow:last-child {
+  margin-bottom: 0;
+}
+
+.infoLabel {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin-bottom: var(--space-1);
+}
+
+.infoValue {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--text);
+  margin: 0;
+}
+
+.examDateDisplay,
+.editExamDate {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.editExamDate {
+  flex-wrap: wrap;
+}
+
+.dateInput {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-input);
+  background: var(--ground);
+  color: var(--text);
+  font-size: 16px;
+  min-width: 140px;
+}
+
+.editButton {
+  padding: var(--space-2) var(--space-3);
+  background: transparent;
+  border: 1px solid var(--rule-strong);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: var(--radius-input);
+  cursor: pointer;
+  transition: background-color var(--dur-tap) var(--ease-settle);
+}
+
+.editButton:hover {
+  background: var(--ground);
+}
+
+.availabilityGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+}
+
+.daySlider {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.dayLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.slider {
+  width: 100%;
+  height: 6px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--rule);
+  border-radius: var(--radius-pill);
+  outline: none;
+  cursor: pointer;
+}
+
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--focus);
+  cursor: pointer;
+  border: 2px solid var(--raised);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.slider::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--focus);
+  cursor: pointer;
+  border: 2px solid var(--raised);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.numberInput {
+  width: 50px;
+  padding: var(--space-2);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-input);
+  background: var(--ground);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.planHealth {
+  padding: var(--space-3);
+  background: var(--ground);
+  border-left: 3px solid var(--strong);
+  border-radius: var(--radius-input);
+  margin-top: var(--space-3);
+}
+
+.planHealthText {
+  font-size: 14px;
+  color: var(--text);
+  margin: 0 0 var(--space-2);
+  line-height: 1.45;
+}
+
+.form {
+  padding: var(--space-3);
+  background: var(--ground);
+  border-radius: var(--radius-input);
+  margin: var(--space-3) 0;
+}
+
+.formGroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-bottom: var(--space-3);
+}
+
+.formGroup:last-child {
+  margin-bottom: 0;
+}
+
+.formLabel {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.formInput {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-input);
+  background: var(--raised);
+  color: var(--text);
+  font-size: 16px;
+}
+
+.formInput:focus {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.error {
+  padding: var(--space-2) var(--space-3);
+  background: var(--alarm);
+  color: var(--alarm-ink);
+  border-radius: var(--radius-input);
+  font-size: 14px;
+  margin: var(--space-2) 0;
+  margin-bottom: var(--space-3);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.listItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--ground);
+  border-radius: var(--radius-input);
+  border: 1px solid var(--rule);
+}
+
+.listItemContent {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1;
+}
+
+.listItemTitle {
+  font-size: 14px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.listItemNote {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.packageItem {
+  padding: var(--space-3);
+  background: var(--ground);
+  border-radius: var(--radius-input);
+  border: 1px solid var(--rule);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.packageName {
+  font-size: 14px;
+  font-weight: 500;
+  margin: 0;
+  color: var(--text);
+  flex: 1;
+}
+
+.roles {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.roleSlot {
+  padding: var(--space-2) var(--space-3);
+  background: var(--raised);
+  border: 1px solid var(--rule-strong);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: var(--radius-input);
+  cursor: pointer;
+  transition: background-color var(--dur-tap) var(--ease-settle),
+    color var(--dur-tap) var(--ease-settle);
+  min-width: 50px;
+  text-align: center;
+}
+
+.roleSlot:hover {
+  background: var(--ground);
+}
+
+.roleSlotFilled {
+  background: var(--focus);
+  color: var(--raised);
+  border-color: var(--focus);
+}
+
+.buttonGroup {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.primaryButton,
+.secondaryButton,
+.addButton {
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-input);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background-color var(--dur-tap) var(--ease-settle),
+    color var(--dur-tap) var(--ease-settle);
+}
+
+.primaryButton {
+  background: var(--focus);
+  color: var(--raised);
+  border-color: var(--focus);
+}
+
+.primaryButton:hover:not(:disabled) {
+  background: var(--rule-strong);
+  border-color: var(--rule-strong);
+}
+
+.primaryButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.secondaryButton {
+  background: transparent;
+  color: var(--text);
+  border-color: var(--rule-strong);
+}
+
+.secondaryButton:hover:not(:disabled) {
+  background: var(--ground);
+}
+
+.secondaryButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.addButton {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--rule-strong);
+  padding: var(--space-2) var(--space-3);
+}
+
+.addButton:hover {
+  background: var(--ground);
+}
+
+.deleteButton {
+  padding: var(--space-1) var(--space-2);
+  background: var(--alarm);
+  color: var(--alarm-ink);
+  border: none;
+  border-radius: var(--radius-input);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity var(--dur-tap) var(--ease-settle);
+}
+
+.deleteButton:hover:not(:disabled) {
+  opacity: 0.8;
+}
+
+.deleteButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.cancelButton {
+  padding: var(--space-2) var(--space-3);
+  background: transparent;
+  border: 1px solid var(--rule-strong);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: var(--radius-input);
+  cursor: pointer;
+}
+
+.saveButton {
+  padding: var(--space-2) var(--space-3);
+  background: var(--focus);
+  color: var(--raised);
+  border: 1px solid var(--focus);
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: var(--radius-input);
+  cursor: pointer;
+}
+
+.empty {
+  color: var(--muted);
+  font-size: 14px;
+  margin: var(--space-2) 0;
+  text-align: center;
+}
+
+.skeleton {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.skelLine,
+.skelBlock {
+  background: var(--raised);
+  border: 1px solid var(--rule);
+}
+
+.skelLine {
+  height: 34px;
+  width: 40%;
+}
+
+.skelBlock {
+  height: 200px;
+}

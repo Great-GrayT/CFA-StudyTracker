@@ -1,0 +1,234 @@
+.page {
+  min-height: 100dvh;
+  max-width: 34rem;
+  margin: 0 auto;
+  padding: var(--space-5) var(--space-4);
+  padding-top: max(var(--space-5), env(safe-area-inset-top));
+  padding-bottom: calc(96px + env(safe-area-inset-bottom));
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-5);
+  color: var(--claimed-ink);
+}
+
+.title {
+  font-size: 20px;
+  letter-spacing: -0.005em;
+  margin: 0;
+  color: var(--text);
+}
+
+.progress {
+  height: 3px;
+  background: var(--rule);
+  margin-bottom: var(--space-2);
+}
+
+.progress span {
+  display: block;
+  height: 100%;
+  background: var(--claimed);
+  transition: width var(--dur-move) var(--ease-settle);
+}
+
+.stepName {
+  margin: 0 0 var(--space-5);
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.h2 {
+  font-size: 26px;
+  letter-spacing: -0.01em;
+  margin: 0 0 var(--space-3);
+}
+
+.muted {
+  color: var(--muted);
+  margin: 0 0 var(--space-4);
+  font-size: 15px;
+}
+
+.label {
+  display: block;
+  font-size: 14px;
+  color: var(--muted);
+  margin-bottom: var(--space-1);
+}
+
+.input {
+  width: 100%;
+  padding: var(--space-3);
+  margin-bottom: var(--space-3);
+  background: var(--raised);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-input);
+  color: var(--text);
+}
+
+.levelList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+
+.level,
+.levelOn {
+  display: grid;
+  gap: var(--space-1);
+  width: 100%;
+  text-align: left;
+  padding: var(--space-4);
+  background: var(--raised);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-input);
+  color: var(--text);
+}
+
+.levelOn {
+  border-color: var(--claimed);
+  box-shadow: inset 0 0 0 1px var(--claimed);
+}
+
+.level:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.levelName {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.levelMeta {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+/* Weight bars: each segment's width is that topic's share of the exam, so the
+   choice shows the shape of the level rather than just its name. */
+.weights {
+  display: flex;
+  gap: 1px;
+  height: 8px;
+  margin-top: var(--space-2);
+}
+
+.weight {
+  background: var(--rule-strong);
+  flex-basis: 0;
+}
+
+.weight:nth-child(odd) {
+  background: var(--claimed);
+}
+
+.health {
+  margin: var(--space-3) 0 var(--space-2);
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.packageList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--rule-strong);
+}
+
+.packageRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--rule);
+  background: var(--raised);
+}
+
+.packageRow:last-child {
+  border-bottom: 0;
+}
+
+.packageName {
+  font-weight: 500;
+}
+
+/* Three independent slots, filled or empty. Roles are three booleans, not
+   three shares of a whole, so an empty slot shows incompleteness better than
+   a ring segment could. */
+.roles {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.role,
+.roleOn {
+  min-height: 36px;
+  padding: 0 var(--space-2);
+  font-size: 12px;
+  border: 1px dashed var(--rule-strong);
+  border-radius: var(--radius-input);
+  background: transparent;
+  color: var(--muted);
+}
+
+.roleOn {
+  border-style: solid;
+  border-color: var(--claimed);
+  background: var(--claimed);
+  color: var(--ground);
+  font-weight: 600;
+}
+
+.error {
+  color: var(--alarm-ink);
+  margin: var(--space-3) 0 0;
+}
+
+.footer {
+  position: fixed;
+  inset: auto 0 0 0;
+  display: flex;
+  gap: var(--space-3);
+  justify-content: flex-end;
+  padding: var(--space-3) var(--space-4);
+  padding-bottom: calc(var(--space-3) + env(safe-area-inset-bottom));
+  background: var(--raised);
+  border-top: 1px solid var(--rule-strong);
+}
+
+.primary,
+.secondary {
+  min-height: 48px;
+  padding: 0 var(--space-5);
+  border-radius: var(--radius-pill);
+  font-weight: 600;
+  border: 1px solid var(--rule-strong);
+  background: var(--ground);
+  color: var(--text);
+}
+
+.primary {
+  background: var(--claimed);
+  border-color: var(--claimed);
+  color: var(--ground);
+}
+
+.primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress span {
+    transition: none;
+  }
+}

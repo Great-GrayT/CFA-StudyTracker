@@ -1,0 +1,126 @@
+.title {
+  font-size: 26px;
+  letter-spacing: -0.01em;
+  margin: 0 0 var(--space-4);
+}
+
+.summary {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-5);
+}
+
+.big {
+  font-size: 48px;
+  letter-spacing: -0.02em;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--claimed-ink);
+}
+
+.summaryLabel {
+  font-size: 14px;
+  color: var(--muted);
+  max-width: 44ch;
+}
+
+.sectionTitle {
+  font-size: 20px;
+  letter-spacing: -0.005em;
+  font-weight: 600;
+  margin: 0 0 var(--space-1);
+}
+
+.sectionHint {
+  font-size: 14px;
+  color: var(--muted);
+  margin: 0 0 var(--space-3);
+}
+
+.accuracy {
+  margin-top: var(--space-6);
+}
+
+.accList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.accRow {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "name  pct"
+    "track track";
+  gap: var(--space-1) var(--space-3);
+  align-items: center;
+}
+
+.accName {
+  grid-area: name;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accPct {
+  grid-area: pct;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.accTrack {
+  grid-area: track;
+  position: relative;
+  display: block;
+  height: 10px;
+  background: var(--untouched);
+  border: 1px solid var(--rule);
+}
+
+.accBar,
+.accBarLow {
+  display: block;
+  height: 100%;
+  background: var(--strong);
+}
+
+.accBarLow {
+  background: var(--alarm);
+}
+
+.accThreshold {
+  position: absolute;
+  inset: -2px auto -2px 60%;
+  width: 1px;
+  background: var(--rule-strong);
+}
+
+.exploreWrap {
+  margin-top: var(--space-6);
+}
+
+.explore {
+  display: inline-block;
+  padding: var(--space-3) var(--space-5);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-pill);
+  color: var(--claimed-ink);
+  text-decoration: none;
+  font-weight: 600;
+  min-height: 44px;
+}
+
+.skeleton {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.skelRow {
+  height: 56px;
+  background: var(--raised);
+  border: 1px solid var(--rule);
+}

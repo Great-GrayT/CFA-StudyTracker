@@ -1,0 +1,266 @@
+.scrim {
+  position: fixed;
+  inset: 0;
+  background: rgb(0 0 0 / 0.5);
+  display: grid;
+  align-items: end;
+  z-index: 50;
+}
+
+.sheet {
+  background: var(--raised);
+  border-top: 1px solid var(--rule-strong);
+  box-shadow: var(--shadow-float);
+  max-height: 92dvh;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  /* Vertical pan only: a horizontal drag inside the sheet is the virtualized
+     list's business, not a dismissal gesture. */
+  touch-action: pan-y;
+  animation: rise var(--dur-sheet) var(--ease-settle);
+}
+
+@keyframes rise {
+  from {
+    transform: translateY(100%);
+  }
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--rule);
+}
+
+.title {
+  margin: 0;
+  font-size: 20px;
+  letter-spacing: -0.005em;
+}
+
+.close {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.body {
+  padding: var(--space-4);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.label {
+  display: block;
+  font-size: 14px;
+  color: var(--muted);
+  margin-bottom: var(--space-1);
+}
+
+.input {
+  width: 100%;
+  padding: var(--space-3);
+  margin-bottom: var(--space-3);
+  background: var(--ground);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-input);
+  color: var(--text);
+}
+
+.input[aria-invalid="true"] {
+  border-color: var(--alarm);
+}
+
+.results {
+  border: 1px solid var(--rule);
+  margin-bottom: var(--space-4);
+}
+
+.result {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: var(--space-3);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  color: var(--text);
+  min-height: 44px;
+}
+
+.result:hover {
+  background: var(--ground);
+}
+
+.resultText {
+  display: block;
+  font-size: 15px;
+  margin-bottom: 2px;
+}
+
+.resultMeta,
+.selectedMeta {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.noResults {
+  padding: var(--space-4);
+  color: var(--muted);
+  margin: 0;
+}
+
+.selected {
+  padding: var(--space-3);
+  background: var(--ground);
+  border: 1px solid var(--rule-strong);
+  margin-bottom: var(--space-4);
+}
+
+.selectedText {
+  margin: 0 0 var(--space-1);
+  font-size: 15px;
+}
+
+.change {
+  margin-top: var(--space-2);
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: var(--claimed-ink);
+  font-size: 14px;
+  text-decoration: underline;
+}
+
+.fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0 0 var(--space-4);
+}
+
+.confidence {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: var(--space-2);
+}
+
+.conf,
+.confOn {
+  /* 44px floor on every side: these are the most-tapped controls in the app. */
+  min-height: 44px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-input);
+  background: var(--ground);
+  color: var(--muted);
+  font-weight: 600;
+}
+
+/* Selected state fills with that step of the brass ramp, so the control shows
+   the same lightness ladder used for confidence everywhere else. */
+.confOn {
+  background: var(--step);
+  border-color: var(--step);
+  color: var(--ground);
+}
+
+.pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+
+.accuracy,
+.accuracyWarn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 14px;
+  margin: 0 0 var(--space-3);
+  color: var(--muted);
+}
+
+.accuracyWarn {
+  color: var(--alarm-ink);
+}
+
+.arc {
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-pill);
+  background: conic-gradient(currentColor var(--pct), var(--rule) 0);
+  flex: none;
+}
+
+.disclosure {
+  background: transparent;
+  border: 0;
+  padding: var(--space-2) 0;
+  color: var(--claimed-ink);
+  font-size: 14px;
+  text-decoration: underline;
+}
+
+.extras {
+  margin-top: var(--space-2);
+}
+
+.error {
+  color: var(--alarm-ink);
+  font-size: 14px;
+  margin: var(--space-2) 0 0;
+}
+
+.footer {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  padding-bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--rule);
+}
+
+.primary,
+.secondary {
+  min-height: 48px;
+  border-radius: var(--radius-pill);
+  font-weight: 600;
+  border: 1px solid var(--rule-strong);
+  background: var(--ground);
+  color: var(--text);
+}
+
+.primary {
+  background: var(--claimed);
+  border-color: var(--claimed);
+  color: var(--ground);
+}
+
+.primary:disabled,
+.secondary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet {
+    animation: none;
+  }
+}
+
+@media (min-width: 52rem) {
+  .scrim {
+    place-items: center;
+  }
+
+  .sheet {
+    width: min(40rem, 92vw);
+    max-height: 86dvh;
+    border: 1px solid var(--rule-strong);
+    animation: none;
+  }
+}

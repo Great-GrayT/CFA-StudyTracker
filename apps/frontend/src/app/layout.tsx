@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "sonner";
 import { QueryProvider } from "@/lib/query-provider";
+import { ServiceWorkerRegistrar } from "@/components/service-worker-registrar";
 import "./tokens.css";
 
 export const metadata: Metadata = {
@@ -33,6 +34,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <ThemeProvider attribute="data-theme" defaultTheme="system" enableSystem>
           <QueryProvider>
+            <ServiceWorkerRegistrar />
             <a href="#main" className="visually-hidden">
               Skip to content
             </a>
