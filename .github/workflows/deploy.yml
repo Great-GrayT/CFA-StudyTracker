@@ -59,6 +59,11 @@ jobs:
       FRONTEND_BASE_URL: http://localhost:5173
       RATE_LIMIT_WINDOW_MS: "60000"
       RATE_LIMIT_MAX_REQUESTS: "240"
+      # A throwaway pair generated for CI only, NOT the production keys,
+      # which live in the server .env and are never in this repo.
+      # It exists because web-push validates key shape at module load, so
+      # tests cannot run against a placeholder string. Safe to publish:
+      # it signs nothing real and no device is ever subscribed with it.
       VAPID_PUBLIC_KEY: BDBa8LuxVvDmU10XXqzWpM47YhgJl2HgLxBpG3zOVHiCAcg1VHe8OqycCWaoG6wDpztgObJdl5zxlEK0auLo9rI
       VAPID_PRIVATE_KEY: IkLduRz1c6RbwZUlaDhy15Suv_AWC86_bSp1PU_Q40M
       VAPID_SUBJECT: mailto:ci@localhost
