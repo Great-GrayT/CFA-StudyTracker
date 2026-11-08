@@ -7,6 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { signIn, ApiError } from "@/lib/api";
 import { Mark } from "@/components/mark";
+import { GoogleMark, GitHubMark } from "@/components/provider-marks";
 import styles from "./login.module.css";
 
 // Mirrors the backend's own zod shape, so the client rejects what the server
@@ -124,9 +125,11 @@ function LoginForm() {
           {/* Full page navigations, not fetches: these are redirects to the
               provider and must leave the SPA. */}
           <a className={styles.provider} href="/api/oauth/google">
+            <GoogleMark />
             Google
           </a>
           <a className={styles.provider} href="/api/oauth/github">
+            <GitHubMark />
             GitHub
           </a>
         </div>
