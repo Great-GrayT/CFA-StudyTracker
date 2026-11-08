@@ -1,0 +1,128 @@
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+}
+
+.heading {
+  font-size: 20px;
+  letter-spacing: -0.005em;
+  font-weight: 600;
+  margin: 0;
+}
+
+.toggle {
+  background: transparent;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-input);
+  color: var(--muted);
+  padding: var(--space-1) var(--space-2);
+  font-size: 14px;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-1);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  grid-template-areas:
+    "name   figure range"
+    "track  track  track";
+  gap: var(--space-1) var(--space-3);
+  width: 100%;
+  padding: var(--space-3) var(--space-2);
+  background: transparent;
+  border: 0;
+  /* Data surface, so no radius. */
+  border-radius: 0;
+  text-align: left;
+  color: inherit;
+  /* 44px minimum target is a floor, not a target: these rows are taller. */
+  min-height: 44px;
+}
+
+.row:hover {
+  background: var(--raised);
+}
+
+.name {
+  grid-area: name;
+  font-weight: 500;
+  /* Long topic names are real: "Financial Statement Analysis" does not fit. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.figure {
+  grid-area: figure;
+  color: var(--claimed-ink);
+  font-weight: 600;
+}
+
+.range {
+  grid-area: range;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.track {
+  grid-area: track;
+  display: block;
+  width: var(--bar);
+  min-width: 2px;
+  height: 10px;
+  background: var(--untouched);
+  border: 1px solid var(--rule);
+  transition: width var(--dur-move) var(--ease-settle);
+}
+
+.bar {
+  display: block;
+  height: 100%;
+  position: relative;
+}
+
+/* The covered portion sits inside the bar's own length, so the row reads twice:
+   total length is what is at stake, the brass fill is what is already done. */
+.covered {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--covered);
+  background: var(--claimed);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.table th,
+.table td {
+  text-align: left;
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--rule-strong);
+}
+
+.table td {
+  color: var(--muted);
+}
+
+.empty {
+  color: var(--muted);
+  margin: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .track {
+    transition: none;
+  }
+}

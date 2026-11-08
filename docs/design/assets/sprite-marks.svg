@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <!--
+    Mark sprite. Every symbol is 16x16, stroke 1.5, square caps, no radius, no gradient.
+    Colors come from currentColor so a token sets them: brass for claimed, eucalyptus for
+    confident, oxide for alarm, muted for untouched.
+
+    The day marks are a floating bar family, not a dot: a day carries two numbers (hours
+    planned and work logged), and a hollow outline with a filled body inside it shows both
+    at once. The fill fraction below is drawn at a canonical 60 percent; the real component
+    takes it as a prop and clamps it to the 0 to 1 range.
+  -->
+
+  <symbol id="day-planned" viewBox="0 0 16 16">
+    <title>Planned, nothing logged yet</title>
+    <rect x="5" y="2.5" width="6" height="11" fill="none" stroke="currentColor" stroke-width="1.5"/>
+  </symbol>
+
+  <symbol id="day-new" viewBox="0 0 16 16">
+    <title>New coverage logged</title>
+    <rect x="5" y="2.5" width="6" height="11" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    <rect x="5.75" y="7.1" width="4.5" height="6.15" fill="currentColor"/>
+  </symbol>
+
+  <symbol id="day-review" viewBox="0 0 16 16">
+    <title>Review work logged</title>
+    <defs>
+      <pattern id="hatch-review" width="3" height="3" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+        <line x1="0" y1="0" x2="0" y2="3" stroke="currentColor" stroke-width="1.4"/>
+      </pattern>
+    </defs>
+    <rect x="5" y="2.5" width="6" height="11" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    <rect x="5.75" y="7.1" width="4.5" height="6.15" fill="url(#hatch-review)"/>
+  </symbol>
+
+  <symbol id="day-missed" viewBox="0 0 16 16">
+    <title>Planned and missed</title>
+    <rect x="5" y="2.5" width="6" height="11" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    <line x1="3.5" y1="13.25" x2="12.5" y2="13.25" stroke="currentColor" stroke-width="2.5"/>
+  </symbol>
+
+  <symbol id="day-holiday" viewBox="0 0 16 16">
+    <title>Holiday, no hours expected</title>
+    <line x1="3" y1="8" x2="13" y2="8" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2 2"/>
+  </symbol>
+
+  <symbol id="day-rest" viewBox="0 0 16 16">
+    <title>Not a study day</title>
+    <line x1="6.5" y1="8" x2="9.5" y2="8" stroke="currentColor" stroke-width="1.5"/>
+  </symbol>
+
+  <!-- Review flags. Three reasons, three distinct shapes, because color alone must never
+       carry a status (greyscale and color blind readers get the same information). -->
+
+  <symbol id="flag-confidence" viewBox="0 0 16 16">
+    <title>Low confidence</title>
+    <path d="M4 2 L4 14" stroke="currentColor" stroke-width="1.5"/>
+    <path d="M4 2.75 L12 5 L4 7.25 Z" fill="currentColor"/>
+  </symbol>
+
+  <symbol id="flag-accuracy" viewBox="0 0 16 16">
+    <title>Question accuracy below 60 percent</title>
+    <circle cx="8" cy="8" r="5.25" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    <line x1="8" y1="8" x2="13.5" y2="3.5" stroke="currentColor" stroke-width="1.5"/>
+    <circle cx="8" cy="8" r="1.4" fill="currentColor"/>
+  </symbol>
+
+  <symbol id="flag-stale" viewBox="0 0 16 16">
+    <title>Untouched for 30 days or more</title>
+    <path d="M3 12.5 L6 12.5 L6 9 L9 9 L9 5.5 L13 5.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    <path d="M3 12.5 L13 12.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="1.5 2"/>
+  </symbol>
+
+  <symbol id="untouched" viewBox="0 0 16 16">
+    <title>Not started</title>
+    <circle cx="8" cy="8" r="3.25" fill="none" stroke="currentColor" stroke-width="1.5"/>
+  </symbol>
+
+  <symbol id="covered" viewBox="0 0 16 16">
+    <title>Covered</title>
+    <circle cx="8" cy="8" r="3.25" fill="currentColor"/>
+  </symbol>
+
+  <!-- Watchdogs: one mark per night, 30 nights in a row. A missing night must be
+       distinguishable from a failed night at a glance, so one is hollow and one is struck. -->
+
+  <symbol id="tick-ok" viewBox="0 0 16 16">
+    <title>Snapshot recorded</title>
+    <rect x="5" y="5" width="6" height="6" fill="currentColor"/>
+  </symbol>
+
+  <symbol id="tick-missing" viewBox="0 0 16 16">
+    <title>No snapshot for this night</title>
+    <rect x="5" y="5" width="6" height="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+  </symbol>
+
+  <symbol id="tick-failed" viewBox="0 0 16 16">
+    <title>Run failed</title>
+    <rect x="5" y="5" width="6" height="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    <line x1="3.5" y1="12.5" x2="12.5" y2="3.5" stroke="currentColor" stroke-width="1.5"/>
+  </symbol>
+</svg>

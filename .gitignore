@@ -1,2 +1,19 @@
 node_modules/
 .npmrc
+
+# Brand assets: third-party logos and licensed stock live here and are never
+# committed. The app reads them at runtime; authored fallbacks ship in the repo.
+apps/frontend/brand/
+
+# Next.js build output
+apps/frontend/.next/
+apps/frontend/next-env.d.ts
+apps/frontend/tsconfig.tsbuildinfo
+
+# Reference images dropped in the repo root for the asset pipeline. These are
+# third-party brand files and licensed stock previews, so they stay out of the
+# public repo. See docs/design/assets/ASSETS.md.
+/*.jfif
+/*.jpg
+/*.png
+/*.avif

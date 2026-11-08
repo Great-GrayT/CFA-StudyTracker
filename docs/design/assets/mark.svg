@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="Study Tracker">
+  <title>Study Tracker</title>
+  <!-- Target: the straight climb the plan asks for. Hairline, behind. -->
+  <path d="M4 27 L28 5" fill="none" stroke="currentColor" stroke-opacity="0.45" stroke-width="1.5" stroke-linecap="square"/>
+  <!-- Actual: the stepped climb a real candidate makes, one tread per week. -->
+  <path d="M4 27 L4 21 L10 21 L10 16 L16 16 L16 12 L22 12 L22 7 L28 7"
+        fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="square" stroke-linejoin="miter"/>
+</svg>
