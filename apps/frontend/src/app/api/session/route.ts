@@ -48,7 +48,20 @@ export async function POST(req: NextRequest): Promise<Response> {
     return Response.json({ error: message }, { status: res.status });
   }
 
-  const data = (await res.json()) as { token?: string };
+  const data = (await res.json()) as {
+    token?: string;
+    mfaRequired?: boolean;
+    mfaToken?: string;
+  };
+
+  // A two-step account gets no cookie here: the password was right, but the
+  // bearer is not signed in until the second step. The mfaToken is passed to
+  // the client deliberately, because it is scoped so the API refuses it as a
+  // session; it can only be exchanged at /api/session/mfa.
+  if (data.mfaRequired && data.mfaToken) {
+    return Response.json({ mfaRequired: true, mfaToken: data.mfaToken }, { status: 200 });
+  }
+
   if (!data.token) {
     return Response.json({ error: "Sign in failed." }, { status: 502 });
   }

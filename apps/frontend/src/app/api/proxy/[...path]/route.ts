@@ -30,6 +30,9 @@ const ALLOWED = [
   /^cron\/(runs|run)$/,
   /^auth\/me$/,
   /^auth\/password$/,
+  /^auth\/2fa\/(setup|enable|disable)$/,
+  /^auth\/passkey\/register-(options|verify)$/,
+  /^auth\/passkeys(\/|$)/,
 ];
 
 function allowed(path: string): boolean {
@@ -38,7 +41,14 @@ function allowed(path: string): boolean {
 
 // Password reset is the one flow that must work WITHOUT a session: a user who
 // has forgotten their password has no token to send. These forward unauthed.
-const PUBLIC = [/^auth\/forgot-password$/, /^auth\/reset-password$/];
+const PUBLIC = [
+  /^auth\/forgot-password$/,
+  /^auth\/reset-password$/,
+  // Signing in cannot require a session. The second step and passkey login
+  // both happen before one exists.
+  /^auth\/2fa\/verify$/,
+  /^auth\/passkey\/login-(options|verify)$/,
+];
 
 async function forward(req: NextRequest, path: string[]): Promise<Response> {
   const joined = path.join("/");

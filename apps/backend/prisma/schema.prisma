@@ -20,6 +20,14 @@ model User {
   mockExams     MockExam[]
   pushSubscriptions PushSubscription[]
   passwordResets    PasswordResetToken[]
+  passkeys          Passkey[]
+  recoveryCodes     RecoveryCode[]
+
+  // Two-step sign in. The secret is only meaningful once totpEnabledAt is set:
+  // setup writes the secret, and confirming a code is what turns it on. That
+  // split stops a half-finished setup locking anyone out.
+  totpSecret    String?
+  totpEnabledAt DateTime?
 }
 
 // A pending password reset.
@@ -41,6 +49,60 @@ model PasswordResetToken {
   user      User     @relation(fields: [userId], references: [id])
   @@index([userId])
   @@index([expiresAt])
+}
+
+// A registered passkey (WebAuthn credential).
+//
+// `counter` is the authenticator's signature counter. Verifying it never goes
+// backwards is how a cloned authenticator is detected, which is the whole
+// reason the field is persisted rather than ignored.
+model Passkey {
+  id             String   @id @default(cuid())
+  userId         String
+  credentialId   String   @unique
+  publicKey      Bytes
+  counter        BigInt   @default(0)
+  transports     String[] @default([])
+  deviceType     String?
+  backedUp       Boolean  @default(false)
+  // User-facing name, so someone with three passkeys can tell which is which.
+  label          String?
+  createdAt      DateTime @default(now())
+  lastUsedAt     DateTime?
+  user           User     @relation(fields: [userId], references: [id])
+  @@index([userId])
+}
+
+// A short-lived WebAuthn challenge.
+//
+// Stored server side rather than round-tripped to the client: a challenge the
+// client could choose is not a challenge, and replaying one would defeat the
+// whole ceremony.
+model WebAuthnChallenge {
+  id        String   @id @default(cuid())
+  // Null during a usernameless login, where the user is not known until the
+  // authenticator answers.
+  userId    String?
+  challenge String   @unique
+  kind      String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  @@index([expiresAt])
+}
+
+// One recovery code for two-step sign in, stored hashed.
+//
+// These are the fallback when the authenticator app is gone, so they are as
+// powerful as the second factor itself and get the same treatment as a
+// password: never stored in a readable form.
+model RecoveryCode {
+  id        String    @id @default(cuid())
+  userId    String
+  codeHash  String
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id])
+  @@index([userId])
 }
 
 model OAuthAccount {

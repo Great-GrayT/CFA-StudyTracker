@@ -76,25 +76,34 @@ export const api = {
 };
 
 // Session routes are not proxied: they capture the token into the cookie.
+export type SignInOutcome = { ok: true } | { mfaRequired: true; mfaToken: string };
+
 export async function signIn(
   email: string,
   password: string,
   mode: "login" | "register",
-): Promise<void> {
+): Promise<SignInOutcome> {
   const res = await fetch("/api/session", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ email, password, mode }),
   });
-  if (!res.ok) {
-    let detail: string | undefined;
-    try {
-      detail = ((await res.json()) as { error?: string })?.error;
-    } catch {
-      /* non-JSON body */
-    }
-    throw new ApiError(res.status, messageForStatus(res.status, detail));
+
+  let body: { error?: string; mfaRequired?: boolean; mfaToken?: string } = {};
+  try {
+    body = (await res.json()) as typeof body;
+  } catch {
+    /* non-JSON body */
   }
+
+  if (!res.ok) {
+    throw new ApiError(res.status, messageForStatus(res.status, body.error));
+  }
+  // A correct password on a two-step account is not yet a session.
+  if (body.mfaRequired && body.mfaToken) {
+    return { mfaRequired: true, mfaToken: body.mfaToken };
+  }
+  return { ok: true };
 }
 
 export async function signOut(): Promise<void> {

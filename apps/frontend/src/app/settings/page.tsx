@@ -9,11 +9,12 @@ import { usePlan, useLogs, useMocks } from "@/lib/hooks";
 import { api, signOut } from "@/lib/api";
 import { toast } from "sonner";
 import styles from "./settings.module.css";
+import { SecuritySettings } from "@/components/security-settings";
 
 const numbers = new Intl.NumberFormat("en");
 const plural = new Intl.PluralRules("en");
 
-type User = { email: string };
+type User = { email: string; twoStepEnabled?: boolean; hasPassword?: boolean };
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -344,6 +345,8 @@ export default function SettingsPage() {
           </Link>
         </section>
       </div>
+      <SecuritySettings twoStepEnabled={user?.twoStepEnabled ?? false} />
+
     </AppShell>
   );
 }

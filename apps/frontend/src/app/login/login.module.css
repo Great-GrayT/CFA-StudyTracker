@@ -16,8 +16,10 @@
 
 .brand {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: var(--space-3);
+  justify-content: center;
+  gap: var(--space-4);
   font-size: 26px;
   letter-spacing: -0.01em;
   font-weight: 600;
@@ -139,4 +141,24 @@
   margin-top: var(--space-5);
   font-size: 14px;
   color: var(--muted);
+}
+
+.passkey {
+  width: 100%;
+  min-height: 44px;
+  margin-top: var(--space-3);
+  background: transparent;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-input);
+  color: var(--claimed-ink);
+  font-weight: 600;
+}
+
+.linkButton {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: var(--claimed-ink);
+  text-decoration: underline;
+  font-size: 14px;
 }

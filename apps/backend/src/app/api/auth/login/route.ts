@@ -1,6 +1,6 @@
 import { db } from "../../../../lib/db";
 import { hashPassword, verifyPassword } from "../../../../lib/FUNC-crypto";
-import { signJwt } from "../../../../lib/FUNC-auth";
+import { signJwt, MFA_TOKEN_TTL_SECONDS } from "../../../../lib/FUNC-auth";
 import { loginSchema } from "../../../../lib/validation";
 
 // Same status and message for "no such email" and "wrong password" - never
@@ -38,6 +38,17 @@ export async function POST(req: Request): Promise<Response> {
     return Response.json(INVALID_CREDENTIALS, { status: 401 });
   }
 
-  const token = signJwt({ userId: user.id, tokenVersion: user.tokenVersion });
+  // Two-step accounts get a short-lived token scoped to the second step only.
+  // requireUser rejects that scope, so this response signs nobody in: it just
+  // proves the password was right and carries that fact to /auth/2fa/verify.
+  if (user.totpEnabledAt) {
+    const mfaToken = signJwt(
+      { userId: user.id, tokenVersion: user.tokenVersion, scope: "mfa" },
+      { ttlSeconds: MFA_TOKEN_TTL_SECONDS },
+    );
+    return Response.json({ mfaRequired: true, mfaToken }, { status: 200 });
+  }
+
+  const token = signJwt({ userId: user.id, tokenVersion: user.tokenVersion, scope: "access" });
   return Response.json({ token }, { status: 200 });
 }

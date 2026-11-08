@@ -1,13 +1,19 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { signIn, ApiError } from "@/lib/api";
+import {
+  signInWithPasskey,
+  completeTwoStep,
+  isPasskeySupported,
+} from "@/lib/auth-client";
 import { Mark } from "@/components/mark";
+import { Mark3DLazy } from "@/components/mark-3d-lazy";
 import { GoogleMark, GitHubMark } from "@/components/provider-marks";
 import styles from "./login.module.css";
 
@@ -23,6 +29,14 @@ function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
   const [mode, setMode] = useState<"login" | "register">("login");
+  // Set once the password was right but the second step is outstanding.
+  const [mfaToken, setMfaToken] = useState<string | null>(null);
+  const [code, setCode] = useState("");
+  const [passkeyReady, setPasskeyReady] = useState(false);
+
+  useEffect(() => {
+    setPasskeyReady(isPasskeySupported());
+  }, []);
   const [formError, setFormError] = useState<string | null>(
     params.get("oauth") ? "That sign in did not complete. Try again." : null,
   );
@@ -36,7 +50,11 @@ function LoginForm() {
   async function onSubmit(values: Values) {
     setFormError(null);
     try {
-      await signIn(values.email, values.password, mode);
+      const outcome = await signIn(values.email, values.password, mode);
+      if ("mfaRequired" in outcome) {
+        setMfaToken(outcome.mfaToken);
+        return;
+      }
       router.replace("/");
       router.refresh();
     } catch (err) {
@@ -44,14 +62,81 @@ function LoginForm() {
     }
   }
 
+  async function onPasskey() {
+    setFormError(null);
+    try {
+      await signInWithPasskey();
+      router.replace("/");
+      router.refresh();
+    } catch (err) {
+      // A cancelled dialog is a choice, not a failure, so it gets no error.
+      if (err instanceof DOMException && err.name === "NotAllowedError") return;
+      setFormError(err instanceof ApiError ? err.message : "That passkey did not work.");
+    }
+  }
+
+  async function onCode(e: React.FormEvent) {
+    e.preventDefault();
+    if (!mfaToken) return;
+    setFormError(null);
+    try {
+      await completeTwoStep(mfaToken, code);
+      router.replace("/");
+      router.refresh();
+    } catch (err) {
+      setFormError(err instanceof ApiError ? err.message : "That code is not right.");
+    }
+  }
+
   return (
     <main className={styles.page}>
       <div className={styles.card}>
         <h1 className={styles.brand}>
-          <Mark size={28} />
+          <Mark3DLazy size={56} interactive />
           Study Tracker
         </h1>
 
+        {mfaToken ? (
+          <form onSubmit={onCode}>
+            <p className={styles.note}>
+              Enter the six digit code from your authenticator app, or one of your recovery codes.
+            </p>
+            <label className={styles.label} htmlFor="code">
+              Code
+            </label>
+            <input
+              id="code"
+              className={styles.input}
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              autoFocus
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+            />
+            {formError && (
+              <p className={styles.formError} role="alert">
+                {formError}
+              </p>
+            )}
+            <button type="submit" className={styles.primary}>
+              Continue
+            </button>
+            <p className={styles.divider}>
+              <button
+                type="button"
+                className={styles.linkButton}
+                onClick={() => {
+                  setMfaToken(null);
+                  setCode("");
+                  setFormError(null);
+                }}
+              >
+                Start again
+              </button>
+            </p>
+          </form>
+        ) : (
+        <>
         <div className={styles.segmented} role="tablist" aria-label="Sign in or create an account">
           <button
             type="button"
@@ -135,10 +220,18 @@ function LoginForm() {
           </a>
         </div>
 
+        {passkeyReady && mode === "login" && (
+          <button type="button" className={styles.passkey} onClick={onPasskey}>
+            Use a passkey
+          </button>
+        )}
+
         {mode === "login" && (
           <p className={styles.note}>
             <Link href="/forgot-password">Forgotten your password?</Link>
           </p>
+        )}
+        </>
         )}
       </div>
     </main>
