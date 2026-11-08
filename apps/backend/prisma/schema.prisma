@@ -19,6 +19,28 @@ model User {
   logs          StudyLogEntry[]
   mockExams     MockExam[]
   pushSubscriptions PushSubscription[]
+  passwordResets    PasswordResetToken[]
+}
+
+// A pending password reset.
+//
+// The token is stored HASHED, never in plaintext: this table is the one place
+// a database leak would otherwise hand an attacker working reset links for
+// every pending request. The hash is SHA-256 rather than scrypt because the
+// token is already 256 bits of CSPRNG output, so there is nothing to brute
+// force and a slow KDF would only add latency.
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  // Set when redeemed, so a token is single use and a replay is detectable
+  // rather than silently succeeding.
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 model OAuthAccount {

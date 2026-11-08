@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -134,12 +135,11 @@ function LoginForm() {
           </a>
         </div>
 
-        {/* Stated rather than hidden: /api/auth/forgot-password has a
-            rate-limit tier in the backend's middleware and no route behind it,
-            so offering a link here would be a dead end. */}
-        <p className={styles.note}>
-          Password recovery is not available yet. Keep your password somewhere safe.
-        </p>
+        {mode === "login" && (
+          <p className={styles.note}>
+            <Link href="/forgot-password">Forgotten your password?</Link>
+          </p>
+        )}
       </div>
     </main>
   );

@@ -36,14 +36,19 @@ function allowed(path: string): boolean {
   return ALLOWED.some((re) => re.test(path));
 }
 
+// Password reset is the one flow that must work WITHOUT a session: a user who
+// has forgotten their password has no token to send. These forward unauthed.
+const PUBLIC = [/^auth\/forgot-password$/, /^auth\/reset-password$/];
+
 async function forward(req: NextRequest, path: string[]): Promise<Response> {
   const joined = path.join("/");
-  if (!allowed(joined)) {
+  const isPublic = PUBLIC.some((re) => re.test(joined));
+  if (!isPublic && !allowed(joined)) {
     return Response.json({ error: "Not found" }, { status: 404 });
   }
 
   const token = await getToken();
-  if (!token) {
+  if (!isPublic && !token) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -51,7 +56,7 @@ async function forward(req: NextRequest, path: string[]): Promise<Response> {
   req.nextUrl.searchParams.forEach((v, k) => url.searchParams.append(k, v));
 
   const headers = new Headers();
-  headers.set("authorization", `Bearer ${token}`);
+  if (token) headers.set("authorization", `Bearer ${token}`);
   const contentType = req.headers.get("content-type");
   if (contentType) headers.set("content-type", contentType);
 
