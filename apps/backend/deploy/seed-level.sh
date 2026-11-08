@@ -50,14 +50,26 @@ run_in_container() {
 # If the deployed image predates the ESM fix, patch a copy and mount it over
 # the original rather than blocking on a rebuild.
 PATCH_MOUNT=()
-if sudo -u deploy docker compose exec -T app grep -q '__dirname' prisma/seed.ts 2>/dev/null; then
+# Matches the CODE, not the word: the fixed version still mentions __dirname
+# in the comment explaining why it no longer uses it.
+if sudo -u deploy docker compose run --rm app grep -q 'join(__dirname' prisma/seed.ts 2>/dev/null; then
   echo "==> Image predates the ESM fix, patching seed.ts for this run"
+  RAW_SEED="$(mktemp /tmp/seed-raw.XXXXXX.ts)"
   TMP_SEED="$(mktemp /tmp/seed-patched.XXXXXX.ts)"
-  sudo -u deploy docker compose exec -T app cat prisma/seed.ts > "$TMP_SEED"
-  sed -i 's|join(__dirname, "seed-data")|join(new URL(".", import.meta.url).pathname, "seed-data")|' "$TMP_SEED"
+  # compose cp, not exec with a redirect: the latter hangs, leaving an empty
+  # file that then mounts cleanly and makes the seed a silent no-op.
+  sudo -u deploy docker compose cp app:/app/apps/backend/prisma/seed.ts "$RAW_SEED"
+  # Written to a new file rather than sed -i, because /tmp is sticky and the
+  # in-place rename fails when the extracted file is not owned by the caller.
+  sed 's|join(__dirname, "seed-data")|join(new URL(".", import.meta.url).pathname, "seed-data")|' "$RAW_SEED" > "$TMP_SEED"
   chmod 644 "$TMP_SEED"
+  # Refuse to mount something truncated: an empty mount fails silently.
+  if ! grep -q 'import.meta.url' "$TMP_SEED"; then
+    echo "    patch did not apply, refusing to seed with a bad file" >&2
+    exit 1
+  fi
   PATCH_MOUNT=(-v "$TMP_SEED:/app/apps/backend/prisma/seed.ts:ro")
-  trap 'rm -f "$TMP_SEED"' EXIT
+  trap 'rm -f "$TMP_SEED" "$RAW_SEED"' EXIT
 fi
 
 echo "==> Validating"
