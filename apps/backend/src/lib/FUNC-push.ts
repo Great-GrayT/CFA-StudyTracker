@@ -14,8 +14,23 @@ const vapidPublicKey = process.env.VAPID_PUBLIC_KEY;
 const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
 const vapidSubject = process.env.VAPID_SUBJECT;
 
+// Wrapped, because setVapidDetails validates and THROWS on a malformed
+// subject or key. Unguarded that throw happens at module load, which takes
+// down every route importing this file (the cron tick and push/subscribe
+// among them) rather than merely disabling push. The commonest cause is a
+// VAPID_SUBJECT set to a bare email address: it has to be a mailto: or
+// https: URL, so "mailto:you@example.com", never "you@example.com".
+let pushReady = false;
 if (vapidPublicKey && vapidPrivateKey && vapidSubject) {
-  webpush.setVapidDetails(vapidSubject, vapidPublicKey, vapidPrivateKey);
+  try {
+    webpush.setVapidDetails(vapidSubject, vapidPublicKey, vapidPrivateKey);
+    pushReady = true;
+  } catch (err) {
+    console.error(
+      "FUNC-push: VAPID details rejected, push sending disabled.",
+      err instanceof Error ? err.message : err,
+    );
+  }
 } else {
   console.error("FUNC-push: VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY/VAPID_SUBJECT not fully set; push sending disabled");
 }
@@ -34,6 +49,12 @@ export type PushPayload = { title: string; body: string };
  * place, since it may be transient.
  */
 export async function sendPushToUser(userId: string, payload: PushPayload): Promise<void> {
+  // Without this, a bad VAPID config would make every send throw inside the
+  // loop below and be swallowed as a per-subscription failure, which reads in
+  // the logs as "the push service rejected us" rather than "this server is
+  // misconfigured".
+  if (!pushReady) return;
+
   const subscriptions = await db.pushSubscription.findMany({ where: { userId } });
 
   for (const sub of subscriptions) {
