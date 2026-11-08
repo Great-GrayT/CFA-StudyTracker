@@ -86,7 +86,9 @@ run_in_container "${PATCH_MOUNT[@]}" app node prisma/seed.ts
 
 echo "==> Verifying what is now in the database"
 sudo -u deploy docker compose exec -T app node -e '
-const {PrismaClient}=require("/app/node_modules/@prisma/client");
+// Plain specifier, not an absolute path: pnpm does not place the client
+// at /app/node_modules/@prisma/client, so hardcoding that path fails.
+const {PrismaClient}=require("@prisma/client");
 const db=new PrismaClient();
 (async()=>{
   const levels=await db.level.findMany({include:{_count:{select:{topics:true}}},orderBy:{id:"asc"}});
