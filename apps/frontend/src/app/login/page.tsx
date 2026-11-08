@@ -241,9 +241,24 @@ function LoginForm() {
 // useSearchParams opts the subtree into client rendering, so the boundary has
 // to exist for the shell around it to prerender. The fallback is the same card
 // without the OAuth error line, which is the only part that needs the query.
+// The fallback renders the real card, not an empty shell. The fallback is
+// what the server sends, so an empty one leaves the user staring at a blank
+// page whenever hydration is delayed or blocked.
 export default function LoginPage() {
   return (
-    <Suspense fallback={<main className={styles.page} />}>
+    <Suspense
+      fallback={
+        <main className={styles.page}>
+          <div className={styles.card}>
+            <h1 className={styles.brand}>
+              <Mark size={28} />
+              Study Tracker
+            </h1>
+            <p className={styles.note}>Loading sign in.</p>
+          </div>
+        </main>
+      }
+    >
       <LoginForm />
     </Suspense>
   );

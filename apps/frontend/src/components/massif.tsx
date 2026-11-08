@@ -70,8 +70,8 @@ function Stacks({ discs, onSelect }: { discs: Disc[]; onSelect?: (id: string) =>
   const ref = useRef<THREE.InstancedMesh>(null);
   const [hovered, setHovered] = useState<number | null>(null);
 
-  const brass = useMemo(() => new THREE.Color("#C8A24A"), []);
-  const untouched = useMemo(() => new THREE.Color("#2C4149"), []);
+  const brass = useMemo(() => new THREE.Color("#4476FF"), []);
+  const untouched = useMemo(() => new THREE.Color("#242C5C"), []);
 
   useEffect(() => {
     const mesh = ref.current;
@@ -148,7 +148,7 @@ export function Massif({ topics, readingCounts, onSelect }: Props) {
         // away, so a screen reader is pointed there rather than at a mesh.
         aria-hidden="true"
       >
-        <color attach="background" args={["#0F1A1E"]} />
+        <color attach="background" args={["#070B26"]} />
         <ambientLight intensity={0.6} />
         <directionalLight position={[5, 8, 3]} intensity={1.1} />
         <Stacks discs={discs} onSelect={onSelect} />

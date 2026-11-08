@@ -88,7 +88,7 @@ function ArmInstance() {
 
   return (
     <mesh ref={meshRef} geometry={geometry}>
-      <meshStandardMaterial color="#C8A24A" metalness={0.6} roughness={0.35} />
+      <meshStandardMaterial color="#4476FF" metalness={0.6} roughness={0.35} />
     </mesh>
   );
 }
@@ -168,7 +168,7 @@ function Vortex3D({ interactive, size = 64 }: Omit<Props, "className">) {
         aria-hidden="true"
         style={{ position: "absolute", width: "100%", height: "100%" }}
       >
-        <color attach="background" args={["#0F1A1E"]} />
+        <color attach="background" args={["#070B26"]} />
         <ambientLight intensity={0.7} />
         <directionalLight position={[1.2, 1.5, 0.8]} intensity={1.3} />
 

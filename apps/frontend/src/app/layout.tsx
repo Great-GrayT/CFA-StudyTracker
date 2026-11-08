@@ -3,6 +3,8 @@ import { ThemeProvider } from "next-themes";
 import { Toaster } from "sonner";
 import { QueryProvider } from "@/lib/query-provider";
 import { ServiceWorkerRegistrar } from "@/components/service-worker-registrar";
+import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./tokens.css";
 
 export const metadata: Metadata = {
@@ -23,8 +25,8 @@ export const viewport: Viewport = {
   // resizing the page out from under it.
   interactiveWidget: "resizes-content",
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#e9edea" },
-    { media: "(prefers-color-scheme: dark)", color: "#0f1a1e" },
+    { media: "(prefers-color-scheme: light)", color: "#eef0f8" },
+    { media: "(prefers-color-scheme: dark)", color: "#070b26" },
   ],
 };
 
@@ -40,6 +42,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </a>
             <div id="main">{children}</div>
             <Toaster position="top-center" closeButton />
+            {/* Both serve their scripts and beacons from this origin, so the
+                same-origin CSP covers them with no exception. */}
+            <Analytics />
+            <SpeedInsights />
           </QueryProvider>
         </ThemeProvider>
       </body>
