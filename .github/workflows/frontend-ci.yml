@@ -1,0 +1,50 @@
+name: Frontend CI
+
+# Vercel builds and deploys the frontend from its own Git integration, so this
+# workflow does not deploy. It exists to fail a pull request before Vercel ever
+# builds it, which is faster feedback and keeps a broken build off the preview
+# URL reviewers are looking at.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/frontend/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/frontend-ci.yml"
+  pull_request:
+    paths:
+      - "apps/frontend/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/frontend-ci.yml"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile --filter frontend...
+
+      - name: Typecheck
+        run: pnpm --filter frontend typecheck
+
+      - name: Test
+        run: pnpm --filter frontend test
+
+      - name: Build
+        # A placeholder is enough: the build never calls the backend, it only
+        # needs the variable to exist so the proxy module can be evaluated.
+        env:
+          BACKEND_BASE_URL: https://cfa.polarislab.ir
+        run: pnpm --filter frontend build

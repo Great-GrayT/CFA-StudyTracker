@@ -19,6 +19,90 @@ model User {
   logs          StudyLogEntry[]
   mockExams     MockExam[]
   pushSubscriptions PushSubscription[]
+  passwordResets    PasswordResetToken[]
+  passkeys          Passkey[]
+  recoveryCodes     RecoveryCode[]
+
+  // Two-step sign in. The secret is only meaningful once totpEnabledAt is set:
+  // setup writes the secret, and confirming a code is what turns it on. That
+  // split stops a half-finished setup locking anyone out.
+  totpSecret    String?
+  totpEnabledAt DateTime?
+}
+
+// A pending password reset.
+//
+// The token is stored HASHED, never in plaintext: this table is the one place
+// a database leak would otherwise hand an attacker working reset links for
+// every pending request. The hash is SHA-256 rather than scrypt because the
+// token is already 256 bits of CSPRNG output, so there is nothing to brute
+// force and a slow KDF would only add latency.
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  // Set when redeemed, so a token is single use and a replay is detectable
+  // rather than silently succeeding.
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// A registered passkey (WebAuthn credential).
+//
+// `counter` is the authenticator's signature counter. Verifying it never goes
+// backwards is how a cloned authenticator is detected, which is the whole
+// reason the field is persisted rather than ignored.
+model Passkey {
+  id             String   @id @default(cuid())
+  userId         String
+  credentialId   String   @unique
+  publicKey      Bytes
+  counter        BigInt   @default(0)
+  transports     String[] @default([])
+  deviceType     String?
+  backedUp       Boolean  @default(false)
+  // User-facing name, so someone with three passkeys can tell which is which.
+  label          String?
+  createdAt      DateTime @default(now())
+  lastUsedAt     DateTime?
+  user           User     @relation(fields: [userId], references: [id])
+  @@index([userId])
+}
+
+// A short-lived WebAuthn challenge.
+//
+// Stored server side rather than round-tripped to the client: a challenge the
+// client could choose is not a challenge, and replaying one would defeat the
+// whole ceremony.
+model WebAuthnChallenge {
+  id        String   @id @default(cuid())
+  // Null during a usernameless login, where the user is not known until the
+  // authenticator answers.
+  userId    String?
+  challenge String   @unique
+  kind      String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  @@index([expiresAt])
+}
+
+// One recovery code for two-step sign in, stored hashed.
+//
+// These are the fallback when the authenticator app is gone, so they are as
+// powerful as the second factor itself and get the same treatment as a
+// password: never stored in a readable form.
+model RecoveryCode {
+  id        String    @id @default(cuid())
+  userId    String
+  codeHash  String
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id])
+  @@index([userId])
 }
 
 model OAuthAccount {
@@ -32,6 +116,12 @@ model OAuthAccount {
 
 model Level {
   id     String  @id // "I" | "II" | "III"
+  // Set by the seed script from the curriculum data it loads. The frontend
+  // caches the tree in IndexedDB with a long max-age, and the curriculum is
+  // reseeded yearly, so cached clients eventually hold LOS ids this database
+  // no longer has. Echoing a version lets the client notice and refetch
+  // instead of silently rendering blank rows.
+  version String  @default("unknown")
   topics Topic[]
   plans  StudyPlan[]
 }
@@ -132,6 +222,24 @@ model ProgressSnapshot {
   actualCumulative Int
   plan             StudyPlan @relation(fields: [planId], references: [id])
   @@unique([planId, date])
+}
+
+// One row per nightly tick. The tick already computes these counts and
+// previously discarded them, which left the watchdogs screen with nothing to
+// show and no way to tell "ran, nothing to do" from "never ran".
+model CronRun {
+  id              String   @id @default(cuid())
+  startedAt       DateTime @default(now())
+  finishedAt      DateTime?
+  ok              Boolean  @default(false)
+  plansProcessed  Int      @default(0)
+  plansFailed     Int      @default(0)
+  plansSkipped    Int      @default(0)
+  // Null for the nightly global run; set when a user triggered a scoped run,
+  // so one user's manual run is never mistaken for the scheduled sweep.
+  triggeredByUserId String?
+  error           String?
+  @@index([startedAt])
 }
 
 model PushSubscription {

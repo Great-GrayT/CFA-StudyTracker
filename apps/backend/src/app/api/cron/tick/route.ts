@@ -1,36 +1,26 @@
-// Nightly host-cron endpoint: freezes today's targetCumulative/actualCumulative
-// into a ProgressSnapshot row per active StudyPlan. Hit by the host's cron
-// scheduler, not a browser - authenticated via a shared Bearer secret
-// (CRON_SECRET), not a user JWT, so there is no requireUser/db.user lookup here.
+// Nightly host-cron endpoint: freezes each active plan's progress for the day
+// into a ProgressSnapshot, and sends the missed-day push.
+//
+// Hit by the host's cron scheduler, not a browser, so it authenticates with a
+// shared Bearer secret (CRON_SECRET) rather than a user JWT. There is no
+// requireUser here on purpose.
+//
+// The snapshot maths lives in lib/snapshot.ts because POST /api/cron/run runs
+// the same computation for a single plan. Two copies would drift, and a manual
+// run that disagreed with the nightly one would be worse than no manual run.
 import { timingSafeEqual } from "node:crypto";
 import { db } from "../../../../lib/db";
-import {
-  targetDailyPace,
-  remainingHours,
-  splitProgress,
-  missedStudyDays,
-  missedDaysWindow,
-  type WeeklyAvailability,
-} from "../../../../core/pace";
-// Namespace import, not destructured: tests spy on
-// `pushModule.sendPushToUser` directly, which only intercepts calls made
-// through this same object (see FUNC-push.ts's own top comment).
+import { writeSnapshotForPlan, startOfUTCDay, addUTCDays } from "../../../../lib/snapshot";
+import { missedStudyDays, missedDaysWindow } from "../../../../core/pace";
+// Namespace import, not destructured: tests spy on pushModule.sendPushToUser
+// directly, which only intercepts calls made through this same object.
 import * as pushModule from "../../../../lib/FUNC-push";
 
 const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-// Same UTC-calendar-day convention as progress/route.ts (Task 10) and pace.ts.
-function startOfUTCDay(d: Date): Date {
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-}
-
-function addUTCDays(d: Date, days: number): Date {
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + days));
-}
-
-// Constant-time Bearer-secret check, mirroring FUNC-auth.ts's verifyJwt
-// signature comparison: never string/`===` compare a secret, and guard the
-// length check before timingSafeEqual (which throws on a length mismatch).
+// Constant-time Bearer-secret check, mirroring verifyJwt's signature
+// comparison: never compare a secret with ===, and guard the length before
+// timingSafeEqual, which throws on a length mismatch.
 function isAuthorized(req: Request): boolean {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false;
@@ -51,100 +41,45 @@ export async function GET(req: Request): Promise<Response> {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const now = new Date();
-  const today = startOfUTCDay(now);
+  const today = startOfUTCDay(new Date());
+
+  // Recorded from the start, not at the end: a run that crashes midway must
+  // still leave a row, otherwise a crash looks identical to "never ran".
+  const run = await db.cronRun.create({ data: {} });
 
   const activePlans = await db.studyPlan.findMany({ where: { isActive: true } });
 
   // Each plan is isolated behind its own try/catch: this is an unattended
-  // nightly batch, so one bad record (malformed data, a deleted curriculum
-  // row, etc.) must never cost every OTHER plan its snapshot for the day.
-  // Failures are logged with planId (diagnosable) and counted, not swallowed
-  // silently, so a caller can tell the batch didn't silently drop plans.
+  // nightly batch, so one bad record must never cost every other plan its
+  // snapshot. Failures are counted and logged with the planId, not swallowed.
   let plansFailed = 0;
   let plansSkipped = 0;
   for (const plan of activePlans) {
     try {
-      // Once the exam date has passed, this plan gets neither a fresh
-      // snapshot nor a missed-day push, ever again - otherwise a candidate
-      // keeps getting "you missed a study day" pushes forever post-exam.
-      if (startOfUTCDay(plan.examDate).getTime() < today.getTime()) {
+      const { outcome, weeklyAvailability, holidays, logDates } = await writeSnapshotForPlan(
+        plan,
+        today,
+      );
+      if (outcome === "skipped") {
         plansSkipped += 1;
         continue;
       }
 
-      const weeklyAvailability = plan.weeklyAvailability as unknown as WeeklyAvailability;
-
-      const [holidayRows, losRows, logs] = await Promise.all([
-        db.planHoliday.findMany({ where: { planId: plan.id } }),
-        db.lOS.findMany({
-          where: { reading: { topic: { levelId: plan.levelId } } },
-          include: { reading: { include: { topic: true } } },
-        }),
-        // Sorted ascending so the first log per losId (in this array order) is
-        // that LOS's first-ever log - used below for isFirstEverLog, same as
-        // Task 10's /api/progress.
-        db.studyLogEntry.findMany({ where: { planId: plan.id }, orderBy: [{ date: "asc" }, { id: "asc" }] }),
-      ]);
-
-      const holidays = holidayRows.map((h) => ({ start: h.startDate, end: h.endDate }));
-
-      // Same fixed-baseline-pace math as Task 10's /api/progress: the rate is
-      // fixed from the plan's own whole start-to-exam span, not recomputed from
-      // today's live remaining backlog/hours.
-      const totalLosCount = losRows.length;
-      const totalHoursWhole = remainingHours(weeklyAvailability, plan.startDate, plan.examDate, holidays);
-      const basePaceRate = targetDailyPace(totalLosCount, totalLosCount, totalHoursWhole);
-      const hoursElapsedBeforeToday = remainingHours(
-        weeklyAvailability,
-        plan.startDate,
-        addUTCDays(today, -1),
-        holidays,
-      );
-      const targetCumulative = Math.max(
-        0,
-        Math.min(totalLosCount, Math.round(basePaceRate * hoursElapsedBeforeToday)),
-      );
-
-      // First log (in the date/id-ascending array above) per losId is that
-      // LOS's first-ever log on this plan - everything after it is review work.
-      const seenLos = new Set<string>();
-      const isFirstEverLogById = new Map<string, boolean>();
-      for (const log of logs) {
-        if (!seenLos.has(log.losId)) {
-          isFirstEverLogById.set(log.id, true);
-          seenLos.add(log.losId);
-        } else {
-          isFirstEverLogById.set(log.id, false);
-        }
-      }
-      const { newCoverage, reviewWork } = splitProgress(
-        logs.map((l) => ({ isFirstEverLog: isFirstEverLogById.get(l.id) ?? false })),
-      );
-      const actualCumulative = newCoverage + reviewWork;
-
-      await db.progressSnapshot.upsert({
-        where: { planId_date: { planId: plan.id, date: today } },
-        create: { planId: plan.id, date: today, targetCumulative, actualCumulative },
-        update: { targetCumulative, actualCumulative },
-      });
-
-      // Missed-day push: yesterday only (not today - still in progress - and
-      // not the trailing week Task 10's /api/progress checks), clipped to
-      // the plan's valid window by the same shared missedDaysWindow helper
-      // /api/progress uses - a brand-new plan (startDate today) has no
-      // valid "yesterday" to have missed yet, so window is null and no push
-      // fires.
+      // Missed-day push: yesterday only, not today (still in progress) and not
+      // the trailing week the progress route reports. Clipped to the plan's
+      // valid window by the same helper the progress route uses, so a
+      // brand-new plan has no "yesterday" to have missed.
       const yesterday = addUTCDays(today, -1);
       const window = missedDaysWindow(plan, { from: yesterday, to: yesterday }, today);
       const missedYesterday = window
         ? missedStudyDays(
             weeklyAvailability,
-            logs.map((l) => l.date),
+            logDates,
             { from: window.start, to: window.end },
             holidays,
           )
         : [];
+
       if (missedYesterday.length > 0) {
         const subscriptionCount = await db.pushSubscription.count({ where: { userId: plan.userId } });
         if (subscriptionCount > 0) {
@@ -161,13 +96,11 @@ export async function GET(req: Request): Promise<Response> {
     }
   }
 
-  return Response.json(
-    {
-      ok: true,
-      plansProcessed: activePlans.length - plansFailed - plansSkipped,
-      plansFailed,
-      plansSkipped,
-    },
-    { status: 200 },
-  );
+  const plansProcessed = activePlans.length - plansFailed - plansSkipped;
+  await db.cronRun.update({
+    where: { id: run.id },
+    data: { finishedAt: new Date(), ok: true, plansProcessed, plansFailed, plansSkipped },
+  });
+
+  return Response.json({ ok: true, plansProcessed, plansFailed, plansSkipped }, { status: 200 });
 }

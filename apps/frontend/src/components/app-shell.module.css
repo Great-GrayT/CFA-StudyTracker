@@ -1,0 +1,172 @@
+.shell {
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: 1fr;
+  /* Space for the fixed bottom bar, plus the home indicator on iOS. */
+  padding-bottom: calc(64px + env(safe-area-inset-bottom));
+}
+
+.main {
+  padding: var(--space-4);
+  padding-top: max(var(--space-4), env(safe-area-inset-top));
+  max-width: 44rem;
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* Desktop rail, hidden on phones where the bottom bar takes over. */
+.rail {
+  display: none;
+}
+
+.bar {
+  position: fixed;
+  inset: auto 0 0 0;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-2) calc(var(--space-2) + env(safe-area-inset-bottom));
+  background: var(--raised);
+  border-top: 1px solid var(--rule-strong);
+}
+
+.barLink {
+  display: grid;
+  place-items: center;
+  /* 44px is the floor for a touch target, not a target to aim at. */
+  min-height: 44px;
+  padding: var(--space-1);
+  font-size: 12px;
+  color: var(--muted);
+  text-decoration: none;
+  border-radius: var(--radius-input);
+}
+
+.barLink[aria-current="page"] {
+  color: var(--claimed-ink);
+  font-weight: 600;
+}
+
+.compose {
+  display: grid;
+  place-items: center;
+  gap: 2px;
+  min-height: 44px;
+  padding: var(--space-1);
+  background: transparent;
+  border: 0;
+  color: var(--claimed-ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.composeGlyph {
+  display: block;
+  width: 28px;
+  height: 28px;
+  background: var(--claimed);
+  /* The only pill in the bar: shape marks the primary action. */
+  border-radius: var(--radius-pill);
+  position: relative;
+}
+
+.composeGlyph::before,
+.composeGlyph::after {
+  content: "";
+  position: absolute;
+  background: var(--ground);
+  inset: 50% auto auto 50%;
+  translate: -50% -50%;
+}
+
+.composeGlyph::before {
+  width: 12px;
+  height: 2px;
+}
+
+.composeGlyph::after {
+  width: 2px;
+  height: 12px;
+}
+
+.compose:active .composeGlyph {
+  opacity: 0.8;
+}
+
+@media (min-width: 52rem) {
+  .shell {
+    grid-template-columns: 14rem 1fr;
+    padding-bottom: 0;
+  }
+
+  .rail {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-5) var(--space-4);
+    border-right: 1px solid var(--rule-strong);
+    position: sticky;
+    top: 0;
+    height: 100dvh;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    color: var(--claimed-ink);
+    text-decoration: none;
+    font-weight: 600;
+    margin-bottom: var(--space-4);
+  }
+
+  .brandName {
+    font-size: 16px;
+  }
+
+  .railList {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--space-1);
+  }
+
+  .railLink {
+    display: block;
+    padding: var(--space-2) var(--space-3);
+    color: var(--muted);
+    text-decoration: none;
+    border-radius: var(--radius-input);
+  }
+
+  .railLink:hover {
+    background: var(--raised);
+    color: var(--text);
+  }
+
+  .railLink[aria-current="page"] {
+    color: var(--claimed-ink);
+    background: var(--raised);
+    font-weight: 600;
+  }
+
+  .railCompose {
+    margin-top: var(--space-4);
+    padding: var(--space-3);
+    background: var(--claimed);
+    color: var(--ground);
+    border: 0;
+    border-radius: var(--radius-pill);
+    font-weight: 600;
+  }
+
+  .bar {
+    display: none;
+  }
+
+  .main {
+    padding: var(--space-6);
+  }
+}

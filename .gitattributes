@@ -1,1 +1,5 @@
 *.sh text eol=lf
+# Prisma hashes migration files and compares against _prisma_migrations. A
+# CRLF conversion on checkout changes that hash, and Prisma then demands a
+# database reset. Pin them to LF so a Windows clone stays usable.
+*.sql text eol=lf

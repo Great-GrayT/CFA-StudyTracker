@@ -11,6 +11,17 @@ const DEFAULT_TTL_HOURS = 72;
 interface JwtPayload {
   userId: string;
   tokenVersion: number;
+  /**
+   * What the token is allowed to do.
+   *
+   * Absent or "access" means a full session. "mfa" means the password was
+   * correct but the second step is outstanding, so the bearer is NOT signed in
+   * yet. requireUser rejects anything that is not a full session, which is the
+   * whole reason this field exists: without it an intermediate token would be
+   * indistinguishable from a real one and two-step sign in would be bypassable
+   * by simply using the token it hands out.
+   */
+  scope?: "access" | "mfa";
 }
 
 function getSecret(): string {
@@ -79,12 +90,22 @@ export function verifyJwt(token: string): JwtPayload | null {
   if (typeof decoded.userId !== "string" || typeof decoded.tokenVersion !== "number") {
     return null;
   }
+  if (decoded.scope !== undefined && decoded.scope !== "access" && decoded.scope !== "mfa") {
+    return null;
+  }
   const nowSeconds = Math.floor(Date.now() / 1000);
   if (typeof decoded.exp !== "number" || decoded.exp < nowSeconds) {
     return null;
   }
 
-  return { userId: decoded.userId, tokenVersion: decoded.tokenVersion };
+  // scope must be carried through: dropping it here would make every token
+  // look like a full session to the callers below, silently defeating the
+  // two-step check.
+  return {
+    userId: decoded.userId,
+    tokenVersion: decoded.tokenVersion,
+    scope: decoded.scope,
+  };
 }
 
 // Every protected route's auth check. A verified JWT alone is not enough:
@@ -104,6 +125,12 @@ export async function requireUser(req: Request): Promise<{ userId: string } | nu
 
   const payload = verifyJwt(token);
   if (!payload) {
+    return null;
+  }
+
+  // Fail closed on anything that is not a full session. An mfa-scoped token
+  // proves a password, not an identity.
+  if (payload.scope === "mfa") {
     return null;
   }
 
@@ -148,3 +175,26 @@ export async function linkOrCreateOauthUser(
 
   return { id: user.id, tokenVersion: user.tokenVersion };
 }
+
+/**
+ * Verifies a short-lived token issued between the password step and the
+ * second step of sign in.
+ *
+ * Deliberately separate from requireUser: these two must never accept each
+ * other's tokens, and expressing that as one function with a flag is how the
+ * flag eventually gets passed wrong.
+ */
+export async function requireMfaToken(token: string): Promise<{ userId: string } | null> {
+  const payload = verifyJwt(token);
+  if (!payload || payload.scope !== "mfa") {
+    return null;
+  }
+  const user = await db.user.findUnique({ where: { id: payload.userId } });
+  if (!user || user.tokenVersion !== payload.tokenVersion) {
+    return null;
+  }
+  return { userId: user.id };
+}
+
+/** Five minutes is long enough to read a code off a phone, short enough to matter. */
+export const MFA_TOKEN_TTL_SECONDS = 300;

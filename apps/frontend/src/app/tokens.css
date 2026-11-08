@@ -1,0 +1,206 @@
+/*
+  Design tokens. Every colour below was checked against its background with the
+  WCAG contrast formula; the ratios are in the design document's token table.
+  Two rules the names encode:
+
+  - A `-ink` token is the text-safe member of a pair (4.5:1). The bare token is
+    the fill-safe member (3:1). They are different values because a fill that
+    passes as a shape does not pass as type.
+  - `--rule` is 1.65:1 and is DECORATIVE ONLY. It may never draw an axis, a
+    target line, or any border that carries meaning. That is `--rule-strong`.
+*/
+
+:root {
+  color-scheme: light dark;
+
+  /* Light is defined on bare :root so a colour always has a value outside any
+     media or attribute block. */
+  --ground: #e9edea;
+  --raised: #f6f8f5;
+  --rule: #c2ccc6;
+  --rule-strong: #6f837e;
+  --text: #14201f;
+  --muted: #4f605d;
+  --focus: #15635a;
+  --claimed: #8a6718;
+  --claimed-ink: #7c6128;
+  --strong: #1f6b4f;
+  --alarm: #a5332b;
+  --alarm-ink: #8e2a23;
+
+  /* Confidence ramp, single hue, monotonic in L*: 66.0, 54.8, 42.7, 29.8.
+     Untouched is deliberately NOT a step on this ramp; absence is a different
+     kind of thing from a low value. */
+  --conf-1: #be9c55;
+  --conf-2: #9e7f3b;
+  --conf-3: #7c6128;
+  --conf-4: #564414;
+  --untouched: var(--raised);
+
+  --shadow-float: 0 8px 24px -8px rgb(20 32 31 / 0.18);
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  --radius-data: 0;
+  --radius-input: 2px;
+  --radius-pill: 999px;
+
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --ease-enter: cubic-bezier(0, 0, 0.2, 1);
+  --ease-settle: cubic-bezier(0.23, 1, 0.32, 1);
+  --dur-tap: 120ms;
+  --dur-move: 200ms;
+  --dur-sheet: 300ms;
+
+  --font-ui: "Archivo", ui-sans-serif, system-ui, sans-serif;
+  --font-prose: "Newsreader", ui-serif, Georgia, serif;
+}
+
+/* System preference, but only when the user has not chosen explicitly. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #0f1a1e;
+    --raised: #17272d;
+    --rule: #2c4149;
+    --rule-strong: #58757e;
+    --text: #e6edea;
+    --muted: #93abad;
+    --focus: #7fd4c1;
+    --claimed: #c8a24a;
+    --claimed-ink: #d9b868;
+    --strong: #6fb79a;
+    --alarm: #c2453c;
+    --alarm-ink: #e8796b;
+
+    /* L*: 37.3, 51.4, 65.6, 79.7 */
+    --conf-1: #6b5520;
+    --conf-2: #96762a;
+    --conf-3: #c09a45;
+    --conf-4: #e3c271;
+    --untouched: var(--raised);
+
+    --shadow-float: 0 8px 24px -8px rgb(0 0 0 / 0.45);
+  }
+}
+
+/* Explicit choice wins in both directions. */
+:root[data-theme="dark"] {
+  --ground: #0f1a1e;
+  --raised: #17272d;
+  --rule: #2c4149;
+  --rule-strong: #58757e;
+  --text: #e6edea;
+  --muted: #93abad;
+  --focus: #7fd4c1;
+  --claimed: #c8a24a;
+  --claimed-ink: #d9b868;
+  --strong: #6fb79a;
+  --alarm: #c2453c;
+  --alarm-ink: #e8796b;
+  --conf-1: #6b5520;
+  --conf-2: #96762a;
+  --conf-3: #c09a45;
+  --conf-4: #e3c271;
+  --untouched: var(--raised);
+  --shadow-float: 0 8px 24px -8px rgb(0 0 0 / 0.45);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  /* 100dvh, not 100vh: mobile browser chrome makes vh lie. */
+  min-height: 100dvh;
+}
+
+body {
+  margin: 0;
+  /* The viewer paints its own ground behind the page, so this must be explicit. */
+  background: var(--ground);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 16px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  /* Stops the whole page rubber-banding behind fixed chrome on iOS. */
+  overscroll-behavior-y: none;
+}
+
+/* Every interactive element gets a visible ring. The token has no other job,
+   so it can never be accidentally restyled by a component. */
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-input);
+}
+
+/* Inputs never below 16px: iOS zooms the viewport on focus below that. */
+input,
+select,
+textarea,
+button {
+  font: inherit;
+  font-size: max(16px, 1rem);
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  cursor: pointer;
+}
+
+.prose {
+  font-family: var(--font-prose);
+  line-height: 1.6;
+  max-width: 68ch;
+}
+
+/* Tabular figures belong on things that change in place, not on prose. The
+   Today hero is a sentence and deliberately does not get this. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Windows high contrast: fills are ignored there, so data surfaces must fall
+   back to system colours and borders rather than disappearing. */
+@media (forced-colors: active) {
+  .data-fill {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+  .data-surface {
+    border: 1px solid CanvasText;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

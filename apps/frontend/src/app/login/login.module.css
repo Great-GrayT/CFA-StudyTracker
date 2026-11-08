@@ -1,0 +1,164 @@
+.page {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: var(--space-5);
+  /* Safe areas matter here too: this is the first screen an installed PWA
+     shows, and on iOS it sits under the status bar without them. */
+  padding-top: max(var(--space-5), env(safe-area-inset-top));
+  padding-bottom: max(var(--space-5), env(safe-area-inset-bottom));
+}
+
+.card {
+  width: 100%;
+  max-width: 24rem;
+}
+
+.brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  font-size: 26px;
+  letter-spacing: -0.01em;
+  font-weight: 600;
+  margin: 0 0 var(--space-6);
+  color: var(--claimed-ink);
+}
+
+.segmented {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  background: var(--raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-input);
+  margin-bottom: var(--space-5);
+}
+
+.seg,
+.segOn {
+  padding: var(--space-2) var(--space-3);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-input);
+  color: var(--muted);
+  transition: color var(--dur-tap) var(--ease-enter);
+}
+
+.segOn {
+  background: var(--ground);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.label {
+  display: block;
+  font-size: 14px;
+  color: var(--muted);
+  margin-bottom: var(--space-1);
+}
+
+.input {
+  width: 100%;
+  padding: var(--space-3);
+  margin-bottom: var(--space-4);
+  background: var(--raised);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-input);
+  color: var(--text);
+}
+
+.input[aria-invalid="true"] {
+  border-color: var(--alarm);
+}
+
+.fieldError,
+.formError {
+  margin: calc(var(--space-4) * -1) 0 var(--space-4);
+  font-size: 14px;
+  /* The ink variant, not the fill: this is type and needs 4.5:1. */
+  color: var(--alarm-ink);
+}
+
+.formError {
+  margin: 0 0 var(--space-4);
+}
+
+.primary {
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  background: var(--claimed);
+  color: var(--ground);
+  border: 0;
+  /* The one primary action on this screen, so it gets the pill. */
+  border-radius: var(--radius-pill);
+  font-weight: 600;
+  transition: opacity var(--dur-tap) var(--ease-enter);
+}
+
+.primary:active {
+  opacity: 0.85;
+}
+
+.primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.divider {
+  text-align: center;
+  font-size: 14px;
+  color: var(--muted);
+  margin: var(--space-5) 0 var(--space-3);
+}
+
+.providers {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+
+.provider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  /* 44px floor: these are the two largest tap targets on the screen and the
+     ones most often hit one-handed. */
+  min-height: 44px;
+  padding: var(--space-3);
+  background: var(--raised);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-input);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.note {
+  margin-top: var(--space-5);
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.passkey {
+  width: 100%;
+  min-height: 44px;
+  margin-top: var(--space-3);
+  background: transparent;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-input);
+  color: var(--claimed-ink);
+  font-weight: 600;
+}
+
+.linkButton {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: var(--claimed-ink);
+  text-decoration: underline;
+  font-size: 14px;
+}

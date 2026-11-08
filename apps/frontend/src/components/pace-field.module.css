@@ -1,0 +1,128 @@
+.figure {
+  margin: 0;
+}
+
+.caption {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 14px;
+  color: var(--muted);
+  margin-bottom: var(--space-2);
+}
+
+.toggle {
+  background: transparent;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-input);
+  color: var(--muted);
+  padding: var(--space-1) var(--space-2);
+  font-size: 14px;
+}
+
+.chartWrap {
+  /* Wide content scrolls inside its own box; the page body never does. */
+  overflow-x: auto;
+}
+
+.svg {
+  display: block;
+  width: 100%;
+  min-width: 320px;
+  height: 200px;
+  background: var(--raised);
+  border: 1px solid var(--rule-strong);
+}
+
+.spark {
+  display: block;
+  width: 100%;
+  height: 48px;
+}
+
+.tick {
+  fill: var(--muted);
+  font-size: 11px;
+  font-family: var(--font-ui);
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.legend li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.swatchNew,
+.swatchReview,
+.swatchTarget,
+.swatchMissed {
+  display: inline-block;
+  width: 14px;
+  height: 10px;
+}
+
+.swatchNew {
+  background: var(--claimed);
+}
+
+/* The hatch is the second channel that distinguishes review from new coverage
+   without relying on opacity alone. */
+.swatchReview {
+  background: repeating-linear-gradient(
+    45deg,
+    var(--claimed) 0 2px,
+    transparent 2px 4px
+  );
+}
+
+.swatchTarget {
+  height: 0;
+  border-top: 2px dashed var(--rule-strong);
+}
+
+.swatchMissed {
+  width: 3px;
+  height: 12px;
+  background: var(--alarm);
+}
+
+.tableWrap {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.table th,
+.table td {
+  text-align: left;
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--rule-strong);
+  white-space: nowrap;
+}
+
+.table td {
+  color: var(--muted);
+}
+
+.empty {
+  color: var(--muted);
+  margin: 0;
+  padding: var(--space-5);
+  background: var(--raised);
+  border: 1px solid var(--rule);
+}

@@ -1,0 +1,12 @@
+# Local environment. Carries real keys, so it never enters the repo.
+.env
+.env.local
+.env.*.local
+
+# Build output
+.next/
+next-env.d.ts
+tsconfig.tsbuildinfo
+
+# Third party brand files and licensed stock, served at run time only.
+brand/

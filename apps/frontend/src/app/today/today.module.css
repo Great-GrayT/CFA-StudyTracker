@@ -1,0 +1,172 @@
+.hero {
+  margin-bottom: var(--space-5);
+}
+
+/* The hero is a sentence, so it gets proportional figures. Tabular numerals
+   belong on things that change in place (ticks, tables, counts), not on prose. */
+.heroLine {
+  font-size: 26px;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  font-weight: 500;
+  margin: 0 0 var(--space-3);
+}
+
+.behind {
+  color: var(--alarm-ink);
+  font-weight: 700;
+}
+
+.ahead {
+  color: var(--strong);
+  font-weight: 700;
+}
+
+.unrealistic,
+.missed {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3);
+  background: var(--raised);
+  border-left: 3px solid var(--alarm);
+  color: var(--text);
+  font-size: 15px;
+}
+
+.missed {
+  border-left-color: var(--rule-strong);
+}
+
+.split {
+  margin-bottom: var(--space-5);
+}
+
+.stack {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.stackBar {
+  display: flex;
+  height: 14px;
+  border: 1px solid var(--rule-strong);
+}
+
+.stackNew {
+  background: var(--claimed);
+}
+
+/* Hatched, matching the pace chart, so review work reads the same way in both
+   places and growth from re-drilling is never mistaken for new breadth. */
+.stackReview {
+  background: repeating-linear-gradient(
+    45deg,
+    var(--claimed) 0 2px,
+    transparent 2px 4px
+  );
+}
+
+.stackLabel {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  margin: 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.stackFigure {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.stackSep {
+  width: var(--space-4);
+}
+
+.plan {
+  margin-bottom: var(--space-5);
+  padding: var(--space-4);
+  background: var(--raised);
+  border: 1px solid var(--rule-strong);
+}
+
+.sectionTitle {
+  font-size: 20px;
+  letter-spacing: -0.005em;
+  font-weight: 600;
+  margin: 0 0 var(--space-3);
+}
+
+.ratio {
+  display: flex;
+  height: 12px;
+  border: 1px solid var(--rule-strong);
+  margin-bottom: var(--space-2);
+}
+
+.ratioContent {
+  background: var(--rule-strong);
+}
+
+.ratioPractice {
+  background: var(--claimed);
+}
+
+.planHint {
+  margin: 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.endState {
+  padding: var(--space-6) 0;
+}
+
+.endTitle {
+  font-size: 26px;
+  letter-spacing: -0.01em;
+  margin: 0 0 var(--space-3);
+}
+
+.endBody {
+  color: var(--muted);
+  margin: 0 0 var(--space-4);
+}
+
+.endAction {
+  display: inline-block;
+  padding: var(--space-3) var(--space-5);
+  background: var(--claimed);
+  color: var(--ground);
+  border-radius: var(--radius-pill);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+/* Skeletons are shaped like the real thing, so the layout never jumps when
+   data lands. */
+.skeleton {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.skelLine,
+.skelBlock,
+.skelRow {
+  background: var(--raised);
+  border: 1px solid var(--rule);
+}
+
+.skelLine {
+  height: 34px;
+  width: 80%;
+}
+
+.skelBlock {
+  height: 48px;
+}
+
+.skelRow {
+  height: 64px;
+}

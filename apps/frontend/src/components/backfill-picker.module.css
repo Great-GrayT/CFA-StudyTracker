@@ -1,0 +1,181 @@
+.h2 {
+  font-size: 20px;
+  letter-spacing: -0.005em;
+  margin: 0 0 var(--space-2);
+}
+
+.muted {
+  color: var(--muted);
+  margin: 0 0 var(--space-4);
+  font-size: 15px;
+}
+
+.label {
+  display: block;
+  font-size: 14px;
+  color: var(--muted);
+  margin-bottom: var(--space-1);
+}
+
+.segmented {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  background: var(--raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-input);
+  margin-bottom: var(--space-4);
+}
+
+.seg,
+.segOn {
+  min-height: 44px;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-input);
+  color: var(--muted);
+}
+
+.segOn {
+  background: var(--ground);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.confidenceWrap {
+  border: 0;
+  padding: 0;
+  margin: 0 0 var(--space-4);
+}
+
+.confidence {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: var(--space-2);
+}
+
+.conf,
+.confOn {
+  min-height: 44px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-input);
+  background: var(--ground);
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.confOn {
+  background: var(--step);
+  border-color: var(--step);
+  color: var(--ground);
+}
+
+.tree {
+  border: 1px solid var(--rule-strong);
+  max-height: 340px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.topic {
+  border-bottom: 1px solid var(--rule);
+}
+
+.topicSummary {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  min-height: 44px;
+  align-items: center;
+  cursor: pointer;
+  background: var(--raised);
+  font-weight: 500;
+}
+
+.topicWeight {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.readingList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.readingRow,
+.outcomeRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  min-height: 44px;
+  border-top: 1px solid var(--rule);
+  cursor: pointer;
+}
+
+.readingName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+}
+
+.readingCount {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.outcomeMode {
+  margin-bottom: var(--space-4);
+}
+
+.input {
+  width: 100%;
+  padding: var(--space-3);
+  margin-bottom: var(--space-3);
+  background: var(--ground);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-input);
+  color: var(--text);
+}
+
+.results {
+  border: 1px solid var(--rule-strong);
+}
+
+.outcomeRow {
+  align-items: start;
+}
+
+.outcomeText {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.outcomeMeta {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.tally {
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--rule-strong);
+}
+
+.tallyMain {
+  margin: 0 0 var(--space-1);
+  font-size: 16px;
+}
+
+.tallyMeta {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}

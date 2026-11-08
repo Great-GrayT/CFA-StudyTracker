@@ -254,3 +254,44 @@ export async function listLogs(user: RegisteredUser, planId: string): Promise<an
   const body = await readJson(res);
   return body.items.map((item: any) => ({ ...item, date: new Date(item.date) }));
 }
+
+/**
+ * Seeds a small but realistically shaped curriculum: several topics with
+ * different exam weights, each with readings, each with outcomes.
+ *
+ * Rows are inserted in deliberately scrambled `order` sequence so a route that
+ * returns them in insertion or id order fails the ordering test instead of
+ * passing by accident.
+ */
+export async function seedLevel(levelId: "I" | "II" | "III" = "I"): Promise<void> {
+  await db.level.upsert({
+    where: { id: levelId },
+    create: { id: levelId, version: "2026-test" },
+    update: { version: "2026-test" },
+  });
+
+  const topics = [
+    { name: "Ethical and Professional Standards", order: 1, examWeightMin: 15, examWeightMax: 20 },
+    { name: "Quantitative Methods", order: 2, examWeightMin: 8, examWeightMax: 12 },
+    { name: "Financial Statement Analysis", order: 3, examWeightMin: 13, examWeightMax: 17 },
+  ];
+
+  // Reversed so insertion order is the opposite of curriculum order.
+  for (const t of [...topics].reverse()) {
+    const topic = await db.topic.create({ data: { levelId, ...t } });
+    for (const rOrder of [2, 1]) {
+      const reading = await db.reading.create({
+        data: { topicId: topic.id, name: `${t.name} reading ${rOrder}`, order: rOrder },
+      });
+      for (const lOrder of [3, 1, 2]) {
+        await db.lOS.create({
+          data: {
+            readingId: reading.id,
+            text: `Describe outcome ${lOrder} of ${reading.name}`,
+            order: lOrder,
+          },
+        });
+      }
+    }
+  }
+}

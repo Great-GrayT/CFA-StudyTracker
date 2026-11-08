@@ -54,7 +54,17 @@ type SeedTopic = {
   examWeightMax: number;
   readings: SeedReading[];
 };
-type SeedLevel = { id: "I" | "II" | "III"; topics: SeedTopic[] };
+type SeedLevel = {
+  id: "I" | "II" | "III";
+  /**
+   * Which curriculum edition this file holds, e.g. "2027". Echoed by
+   * /api/curriculum so a client holding a cached tree can tell when the
+   * outcome ids it knows are no longer the ones the server has. Optional so an
+   * older seed file still loads, falling back to the file's own date.
+   */
+  version?: string;
+  topics: SeedTopic[];
+};
 
 const SEED_DATA_DIR = join(__dirname, "seed-data");
 
@@ -75,10 +85,14 @@ function loadSeedLevels(): SeedLevel[] {
 }
 
 async function seedLevel(level: SeedLevel, counts: Counts): Promise<void> {
+  // The version is written on every run, not just on create: a reseed with a
+  // new curriculum edition must update it, or cached clients would never learn
+  // their outcome ids changed.
+  const version = level.version ?? new Date().toISOString().slice(0, 10);
   await prisma.level.upsert({
     where: { id: level.id },
-    create: { id: level.id },
-    update: {},
+    create: { id: level.id, version },
+    update: { version },
   });
   counts.levels += 1;
 

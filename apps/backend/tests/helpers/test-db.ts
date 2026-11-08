@@ -14,6 +14,11 @@ import { db } from "../../src/lib/db";
  */
 export async function resetDb(): Promise<void> {
   // Delete in FK-safe order: each table after tables that reference it.
+  await db.passkey.deleteMany({});
+  await db.webAuthnChallenge.deleteMany({});
+  await db.recoveryCode.deleteMany({});
+  await db.passwordResetToken.deleteMany({});
+  await db.cronRun.deleteMany({});
   await db.progressSnapshot.deleteMany({});
   await db.studyLogEntry.deleteMany({});
   await db.mockExam.deleteMany({});

@@ -1,0 +1,157 @@
+.container {
+  padding: var(--space-4);
+  max-width: 100%;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-5);
+  gap: var(--space-3);
+}
+
+.title {
+  font-size: 26px;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  font-weight: 500;
+  margin: 0;
+}
+
+.rangeControl,
+.rollupControls {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.rangeButton,
+.rollupButton {
+  padding: var(--space-2) var(--space-3);
+  background: var(--raised);
+  border: 1px solid var(--rule-strong);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: var(--radius-input);
+  cursor: pointer;
+  transition: background-color var(--dur-tap) var(--ease-settle),
+    color var(--dur-tap) var(--ease-settle);
+}
+
+.rangeButton:hover,
+.rollupButton:hover {
+  background: var(--ground);
+}
+
+.rangeButtonActive,
+.rollupButtonActive {
+  background: var(--focus);
+  color: var(--raised);
+  border-color: var(--focus);
+}
+
+.hero {
+  margin-bottom: var(--space-5);
+}
+
+.paceText {
+  font-size: 18px;
+  line-height: 1.4;
+  margin: 0;
+  color: var(--text);
+}
+
+.unrealistic {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3);
+  background: var(--raised);
+  border-left: 3px solid var(--alarm);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.rollupControls {
+  margin: var(--space-5) 0 var(--space-3);
+  justify-content: center;
+}
+
+.tableWrap {
+  overflow-x: auto;
+  margin-bottom: var(--space-5);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.table thead {
+  background: var(--raised);
+  border-bottom: 1px solid var(--rule-strong);
+}
+
+.table th,
+.table td {
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  color: var(--text);
+}
+
+.table th {
+  font-weight: 600;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.table tbody tr {
+  border-bottom: 1px solid var(--rule);
+}
+
+.table tbody tr:hover {
+  background: var(--raised);
+}
+
+.tableLabel {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.tableDeltaBehind {
+  color: var(--alarm-ink);
+  font-weight: 600;
+}
+
+.tableDeltaAhead {
+  color: var(--strong);
+  font-weight: 600;
+}
+
+.empty {
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.skeleton {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.skelLine,
+.skelBlock {
+  background: var(--raised);
+  border: 1px solid var(--rule);
+}
+
+.skelLine {
+  height: 34px;
+  width: 60%;
+}
+
+.skelBlock {
+  height: 200px;
+}

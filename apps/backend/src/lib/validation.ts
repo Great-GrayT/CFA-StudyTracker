@@ -125,3 +125,14 @@ export const createLogSchema = z
     message: "questionsCorrect cannot exceed questionsAnswered",
     path: ["questionsCorrect"],
   });
+
+export const forgotPasswordSchema = z.object({
+  email: z.string().email(),
+});
+
+// The minimum matches registerSchema: a reset must not be a way to set a
+// weaker password than signing up would allow.
+export const resetPasswordSchema = z.object({
+  token: z.string().min(1),
+  password: z.string().min(8),
+});
