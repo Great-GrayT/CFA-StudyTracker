@@ -1,0 +1,83 @@
+/* Theme and install, as icon buttons. Wired to the same tokens as the rest of
+   the chrome: currentColor on the icon, the muted ink at rest, the claimed
+   ink when it wants attention. */
+
+.strip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  /* Holds its height before the icons mount, so nothing shifts under the
+     pointer when they arrive. */
+  min-height: 44px;
+}
+
+.button {
+  position: relative;
+  display: grid;
+  place-items: center;
+  /* 44px is the floor for a touch target, not a target to aim at. */
+  min-width: 44px;
+  min-height: 44px;
+  padding: var(--space-2);
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  border-radius: var(--radius-input);
+}
+
+.button:hover {
+  color: var(--text);
+  background: var(--ground);
+}
+
+.button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* The install button, until it is used. It is the one control people want and
+   never go looking for, so it behaves like a notification: it arrives, it
+   pulses a few times, and then it stops rather than blinking at the candidate
+   for the whole session. */
+.pulse {
+  color: var(--claimed-ink);
+  animation: arrive 420ms var(--ease-settle) both;
+}
+
+.dot {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-pill);
+  background: var(--claimed);
+  /* Three beats, then still. */
+  animation: beat 1.6s var(--ease-settle) 3;
+}
+
+@keyframes arrive {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes beat {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.5);
+    opacity: 0.55;
+  }
+}
+
+/* tokens.css already flattens every animation under prefers-reduced-motion,
+   so the dot simply appears and stays put there. */

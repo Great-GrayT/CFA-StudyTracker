@@ -6,6 +6,7 @@ import { AppShell } from "@/components/app-shell";
 
 import { DeviationSparkline, buildSeries } from "@/components/pace-field";
 import { DayPlan } from "@/components/day-plan";
+import { DayCountdown } from "@/components/day-countdown";
 import { WeekStrip, weekOf, buildWeek } from "@/components/week-strip";
 import { Countdown } from "@/components/countdown";
 import {
@@ -52,6 +53,7 @@ export default function TodayPage() {
   const prescription = usePrescription(planId, week[0], week[6]);
   const [selectedDate, setSelectedDate] = useState(todayISO);
   const selectedDay = prescription.data?.days.find((d) => d.date === selectedDate);
+  const todayDay = prescription.data?.days.find((d) => d.date === todayISO);
 
   const weekDays = useMemo(
     () =>
@@ -221,6 +223,18 @@ export default function TodayPage() {
               </p>
             </section>
           )}
+
+          {/* Only for today. A countdown on a day the candidate is merely
+              looking at would be counting down somebody else's deadline. */}
+          {selectedDate === todayISO ? (
+            <DayCountdown
+              remainingMinutes={Math.max(
+                0,
+                (todayDay?.totalMinutes ?? 0) - (todayDay?.doneMinutes ?? 0),
+              )}
+              totalMinutes={todayDay?.totalMinutes ?? 0}
+            />
+          ) : null}
 
           <WeekStrip week={weekDays} selected={selectedDate} onSelect={setSelectedDate} />
 
