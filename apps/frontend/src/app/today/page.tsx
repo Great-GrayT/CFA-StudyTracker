@@ -132,6 +132,17 @@ export default function TodayPage() {
 
   return (
     <AppShell onCompose={() => setComposing(true)}>
+      {/* First thing on the page, and the biggest: how long is left of today.
+          Not tied to the day the candidate has selected below, because that
+          selection is for reading a plan, and this is their own deadline. */}
+      <DayCountdown
+        remainingMinutes={Math.max(
+          0,
+          (todayDay?.totalMinutes ?? 0) - (todayDay?.doneMinutes ?? 0),
+        )}
+        totalMinutes={todayDay?.totalMinutes ?? 0}
+      />
+
       {plan.data && <Countdown examDate={plan.data.examDate} startDate={plan.data.startDate} />}
 
       {examPassed ? (
@@ -223,18 +234,6 @@ export default function TodayPage() {
               </p>
             </section>
           )}
-
-          {/* Only for today. A countdown on a day the candidate is merely
-              looking at would be counting down somebody else's deadline. */}
-          {selectedDate === todayISO ? (
-            <DayCountdown
-              remainingMinutes={Math.max(
-                0,
-                (todayDay?.totalMinutes ?? 0) - (todayDay?.doneMinutes ?? 0),
-              )}
-              totalMinutes={todayDay?.totalMinutes ?? 0}
-            />
-          ) : null}
 
           <WeekStrip week={weekDays} selected={selectedDate} onSelect={setSelectedDate} />
 

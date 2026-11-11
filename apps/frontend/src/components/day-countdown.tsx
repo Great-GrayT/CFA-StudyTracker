@@ -1,38 +1,29 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import styles from "./day-countdown.module.css";
 
 /**
- * How long is left to finish today, and whether that is actually enough.
+ * How long is left to finish today. The first thing on the screen, and the
+ * biggest.
  *
- * The deadline is the coach's night debrief at 22:30 local, because that is
- * the moment the day is judged: it is the message that tells the candidate
- * what they did and did not do. Counting to midnight would be counting to
- * nothing.
+ * It counts to 22:30 local, the coach's night debrief, because that is the
+ * moment the day is judged: it is the message that says what was and was not
+ * done. Counting to midnight would be counting to nothing.
  *
- * The number that matters is not the clock, it is the clock MINUS the work
- * still owed. An hour left with twenty minutes of plan is a comfortable
- * evening; an hour left with ninety minutes of plan is a problem, and the
- * screen should say so before the coach does.
+ * Hundredths, not seconds. A clock that ticks once a second reads as a
+ * status line; one that never stops moving reads as time running out, which
+ * is the entire point of putting it here.
  */
 
 // 22:30, the night debrief. Mirrored from the coach's slots.
 const DEADLINE_HOUR = 22;
 const DEADLINE_MINUTE = 30;
 
-function msUntilDeadline(now: Date): number {
+function msUntilDeadline(now: number): number {
   const deadline = new Date(now);
   deadline.setHours(DEADLINE_HOUR, DEADLINE_MINUTE, 0, 0);
-  return deadline.getTime() - now.getTime();
-}
-
-function clock(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const seconds = total % 60;
-  return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  return deadline.getTime() - now;
 }
 
 function minutesLabel(minutes: number): string {
@@ -50,80 +41,75 @@ export function DayCountdown({
   remainingMinutes: number;
   totalMinutes: number;
 }) {
-  // Rendered only after mount: the server and the browser are in different
-  // time zones often enough that a server-rendered clock hydrates to a
-  // different string and React throws it away.
-  const [now, setNow] = useState<Date | null>(null);
+  const [left, setLeft] = useState<number | null>(null);
+  const frame = useRef<number | undefined>(undefined);
 
   useEffect(() => {
-    setNow(new Date());
-    const timer = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(timer);
+    // requestAnimationFrame, not setInterval(10): hundredths need roughly
+    // 60fps to look continuous, and rAF stops when the tab is hidden instead
+    // of burning a timer in the background.
+    const tick = () => {
+      setLeft(msUntilDeadline(Date.now()));
+      frame.current = requestAnimationFrame(tick);
+    };
+    frame.current = requestAnimationFrame(tick);
+    return () => {
+      if (frame.current !== undefined) cancelAnimationFrame(frame.current);
+    };
   }, []);
 
-  if (!now) {
-    return <div className={styles.placeholder} aria-hidden="true" />;
-  }
+  // Nothing planned, nothing to count down to.
+  if (totalMinutes === 0) return null;
 
-  const left = msUntilDeadline(now);
+  // Held before the clock mounts, so the page does not jump when it arrives.
+  // The server and the browser are in different time zones often enough that
+  // rendering a time on the server guarantees a hydration mismatch.
+  if (left === null) return <div className={styles.placeholder} aria-hidden="true" />;
+
+  const done = remainingMinutes <= 0;
+  const expired = left <= 0;
   const minutesLeft = Math.floor(left / 60000);
-  const slack = minutesLeft - remainingMinutes;
+  const tight = !done && !expired && minutesLeft < remainingMinutes;
 
-  if (totalMinutes === 0) {
-    return null;
-  }
-
-  if (remainingMinutes <= 0) {
+  if (done) {
     return (
-      <section className={styles.sectionDone} aria-labelledby="countdown">
-        <p id="countdown" className={styles.label}>
-          Today is done
-        </p>
-        <p className={styles.clockDone}>All {minutesLabel(totalMinutes)} of it.</p>
+      <section className={styles.wrap} aria-label="Today is finished">
+        <p className={`${styles.clock} ${styles.clockDone} tnum`}>00:00:00</p>
+        <p className={styles.note}>Done</p>
       </section>
     );
   }
 
-  // Past the debrief with work outstanding. No countdown to show, and a
-  // ticking zero would be worse than the plain fact.
-  if (left <= 0) {
+  if (expired) {
     return (
-      <section className={styles.sectionLate} aria-labelledby="countdown">
-        <p id="countdown" className={styles.label}>
-          The coach has been
-        </p>
-        <p className={styles.clockLate}>{minutesLabel(remainingMinutes)} unfinished</p>
-        <p className={styles.note}>It carries to tomorrow. Tomorrow gets heavier.</p>
+      <section className={styles.wrap} aria-label="Past the coach's deadline">
+        <p className={`${styles.clock} ${styles.clockLate} tnum`}>00:00:00</p>
+        <p className={styles.note}>{minutesLabel(remainingMinutes)} unfinished</p>
       </section>
     );
   }
 
-  const tight = slack < 0;
-  const close = !tight && slack < 45;
+  const total = Math.floor(left / 10); // hundredths
+  const hh = Math.floor(total / 360000);
+  const mm = Math.floor((total % 360000) / 6000);
+  const ss = Math.floor((total % 6000) / 100);
+  const cs = total % 100;
+  const pad = (n: number) => String(n).padStart(2, "0");
 
   return (
-    <section
-      className={tight ? styles.sectionTight : styles.section}
-      aria-labelledby="countdown"
-    >
-      <p id="countdown" className={styles.label}>
-        {tight ? "Not enough time left" : "Left before the coach writes"}
+    <section className={styles.wrap} aria-label={`${minutesLeft} minutes until the coach writes`}>
+      {/* aria-hidden: a figure changing sixty times a second must never reach
+          a screen reader. The section's own label carries the meaning. */}
+      <p
+        className={`${styles.clock} ${tight ? styles.clockTight : ""} tnum`}
+        aria-hidden="true"
+      >
+        {pad(hh)}:{pad(mm)}:{pad(ss)}
+        <span className={styles.fraction}>.{pad(cs)}</span>
       </p>
-
-      {/* The clock is the hero: big, tabular, and the one thing readable from
-          across a room. aria-live is off on purpose, because a figure that
-          changes every second would be announced every second. */}
-      <p className={`${styles.clock} tnum`} aria-live="off">
-        {clock(left)}
-      </p>
-
       <p className={styles.note}>
-        {minutesLabel(remainingMinutes)} of today&rsquo;s plan still to do
-        {tight
-          ? `, and only ${minutesLabel(minutesLeft)} to do it in. Something gives tonight.`
-          : close
-            ? `. That leaves ${minutesLabel(slack)} spare. Start now.`
-            : `, out of ${minutesLabel(totalMinutes)}.`}
+        {minutesLabel(remainingMinutes)} left
+        {tight ? ", more than the clock" : ""}
       </p>
     </section>
   );

@@ -1,64 +1,43 @@
-/* The clock is the loudest thing on the screen, and the only place in the app
-   that shouts. Everything around it stays quiet so it can. */
+/* The clock. No card, no border, no fill: it sits directly on the page as
+   the first thing there, and anything drawn around it would make it a widget
+   instead of the headline. */
 
-.section,
-.sectionTight,
-.sectionLate,
-.sectionDone {
+.wrap {
   display: grid;
-  gap: var(--space-2);
-  padding: var(--space-4);
-  margin: var(--space-5) 0;
-  background: var(--raised);
-  border: 1px solid var(--rule-strong);
-}
-
-/* Short of time. The border carries it rather than a fill, so the number
-   stays the thing being read and the panel does not become a warning sign
-   with a clock inside it. */
-.sectionTight {
-  border-color: var(--alarm);
-}
-
-.sectionLate {
-  border-color: var(--alarm);
-}
-
-.sectionDone {
-  border-color: var(--strong);
-}
-
-.label {
-  margin: 0;
-  font-size: 14px;
-  color: var(--muted);
+  gap: var(--space-1);
+  margin: 0 0 var(--space-5);
 }
 
 .clock {
   margin: 0;
-  /* Fluid, so it is huge on a phone and still huge on a desktop without
-     overflowing a 320px screen: 3.5rem at the small end, 5rem at the large. */
-  font-size: clamp(3.5rem, 18vw, 5rem);
-  line-height: 1;
+  /* Fluid, and sized to fill the width it is given: 320px phone through to
+     the 44rem content column. The cap stops it growing past the measure on a
+     desktop, where the viewport is far wider than the column. */
+  font-size: clamp(3rem, 21vw, 6.5rem);
+  line-height: 0.95;
   font-weight: 700;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.045em;
   color: var(--text);
-  /* Tabular figures, or the whole line reflows every second as digit widths
-     change, which is the one thing a clock must never do. */
+  /* Tabular figures are not optional on a clock running at sixty frames a
+     second: without them every digit change reflows the line. */
   font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  white-space: nowrap;
 }
 
-.sectionTight .clock {
-  color: var(--alarm-ink);
-}
-
-.clockLate,
-.clockDone {
-  margin: 0;
-  font-size: clamp(2rem, 10vw, 2.75rem);
-  line-height: 1.1;
-  font-weight: 700;
+/* Hundredths are the motion, not the information, so they are smaller and
+   quieter. At full size they would pull the eye off the minutes, which are
+   the part anybody actually reads. */
+.fraction {
+  font-size: 0.45em;
+  color: var(--muted);
   letter-spacing: -0.02em;
+}
+
+/* Less clock left than work left. The colour is the whole warning; there is
+   no panel to tint and no icon to add. */
+.clockTight {
+  color: var(--alarm-ink);
 }
 
 .clockLate {
@@ -71,15 +50,12 @@
 
 .note {
   margin: 0;
-  font-size: 15px;
-  line-height: 1.45;
+  font-size: 14px;
   color: var(--muted);
-  max-width: 60ch;
 }
 
-/* Holds the space before the clock mounts, so the page does not jump when it
-   arrives. Matches the rendered height closely enough not to be noticed. */
+/* Reserves the clock's height before it mounts, so nothing below it jumps. */
 .placeholder {
-  margin: var(--space-5) 0;
-  min-height: 190px;
+  margin: 0 0 var(--space-5);
+  min-height: clamp(3.4rem, 22vw, 7rem);
 }

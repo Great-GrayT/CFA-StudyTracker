@@ -59,18 +59,25 @@
   padding: 0;
 }
 
-/* Three options, so three controls. Wraps rather than shrinks below the point
- * where all three fit, which keeps every target at a thumb-sized width instead
- * of squeezing "All three" into something unreadable on a narrow phone. */
+/* Three options, so three controls, on one row at every width.
+ *
+ * They used to wrap below the point where all three fit, on the reasoning
+ * that a wrapped control beats a squeezed one. On a 375px phone that put two
+ * on the first row and left "Off" stretched across the whole second, which
+ * reads as a broken layout rather than a considered one, and it cost the
+ * group the thing that made it legible: that these are three alternatives of
+ * equal weight. Three equal columns keep that, and each one still clears the
+ * 44px touch floor by height. */
 .choices {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-2);
-  flex-wrap: wrap;
 }
 
 .choiceWrap {
-  flex: 1 1 auto;
-  min-width: 6.5rem;
+  /* A 0 floor, so the column divides the row rather than the label setting
+     the width and pushing the group wider than its card. */
+  min-width: 0;
   display: flex;
   /* Contains the absolutely positioned input below. Without a positioned
    * ancestor it resolves against the page and can push the scroll extent. */
@@ -95,8 +102,11 @@
 
 .choiceLabel {
   flex: 1 1 auto;
+  min-width: 0;
   min-height: 44px;
-  padding: var(--space-2) var(--space-4);
+  /* Padding shrinks with the column rather than forcing it open: on a narrow
+     phone the words need the space more than the gutters do. */
+  padding: var(--space-2) clamp(var(--space-1), 2.5vw, var(--space-4));
   border: 1px solid var(--rule-strong);
   border-radius: var(--radius-pill);
   font-size: 15px;
