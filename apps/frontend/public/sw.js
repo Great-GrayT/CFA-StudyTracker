@@ -110,13 +110,19 @@ self.addEventListener("fetch", (event) => {
 self.addEventListener("push", (event) => {
   let title = "Study Tracker";
   let body = "You have a notification";
+  // Per-slot by default from the sender, so the morning prescription, the
+  // evening nudge and the night debrief do not silently replace one another.
+  // A single shared tag meant the debrief overwrote an unread prescription.
   let tag = "study-tracker-notification";
+  let url = "/";
 
   if (event.data) {
     try {
       const data = event.data.json();
       title = data.title || title;
       body = data.body || body;
+      tag = data.tag || tag;
+      url = data.url || url;
     } catch {
       // If the push event data is not valid JSON, use the text as the body.
       body = event.data.text() || body;
@@ -129,6 +135,9 @@ self.addEventListener("push", (event) => {
       tag,
       badge: "/icon-192.png",
       icon: "/icon-192.png",
+      // Carried through to notificationclick, which is the only way the click
+      // handler can know where this particular notification should land.
+      data: { url },
     }),
   );
 });
@@ -136,20 +145,32 @@ self.addEventListener("push", (event) => {
 // Handle notification clicks.
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
+
+  // The notification says which day's plan it is about, so the click has to
+  // land there. Opening the root instead made the coach's "start with Fixed
+  // Income LM2" arrive as a home screen with no task in sight.
+  const target = (event.notification.data && event.notification.data.url) || "/";
+  const targetUrl = new URL(target, self.location.origin);
+
   event.waitUntil(
     clients
       .matchAll({ type: "window", includeUncontrolled: true })
       .then((clientList) => {
-        // If a client is already open, focus it.
-        for (let i = 0; i < clientList.length; i++) {
-          const client = clientList[i];
-          if (client.url === "/" && "focus" in client) {
+        for (const client of clientList) {
+          // client.url is absolute, so comparing it to a path never matched and
+          // an already-open tab was never focused. Compare like with like, and
+          // navigate the existing tab rather than opening a duplicate.
+          if (new URL(client.url).pathname === targetUrl.pathname && "focus" in client) {
             return client.focus();
           }
         }
-        // Otherwise, open the app at the root.
+        for (const client of clientList) {
+          if ("navigate" in client && "focus" in client) {
+            return client.navigate(targetUrl.href).then((c) => (c ? c.focus() : undefined));
+          }
+        }
         if (clients.openWindow) {
-          return clients.openWindow("/");
+          return clients.openWindow(targetUrl.href);
         }
       }),
   );

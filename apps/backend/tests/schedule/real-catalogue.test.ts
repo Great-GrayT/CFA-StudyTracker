@@ -13,6 +13,12 @@ import { setupPlanWithRealCatalogue } from "../helpers/fixtures";
  * nothing: only that the max date stayed in the horizon and that some
  * tasks existed. The real invariants were merely console.logged.
  */
+// Seeds the entire real catalogue (51 readings, 2 editions, ~230 resources) and
+// then generates a full horizon over it, so it is legitimately slower than the
+// 5s default. The timeout is generous rather than tight on purpose: a tight one
+// here fails on a loaded machine and teaches everyone to ignore the suite.
+const REAL_CATALOGUE_TIMEOUT_MS = 60_000;
+
 test("real catalogue: generate horizon and report first seven days", async () => {
   await resetDb();
 
@@ -124,4 +130,4 @@ test("real catalogue: generate horizon and report first seven days", async () =>
   expect(kinds.has("content-video")).toBe(true);
   expect(kinds.has("eocq")).toBe(true);
   expect(kinds.size).toBeGreaterThan(1);
-});
+}, REAL_CATALOGUE_TIMEOUT_MS);

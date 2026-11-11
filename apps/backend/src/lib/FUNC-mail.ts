@@ -1,17 +1,16 @@
 import { createTransport, type Transporter } from "nodemailer";
 
-// Transactional mail, used only for password reset.
-//
-// The product spec rules out email reminders, and this does not reintroduce
-// them: it is auth infrastructure, not a notification channel. Nothing else in
-// the codebase sends mail, and nothing should without that decision being
-// revisited.
+// Mail transport, shared by password reset and the email study coach
+// (FUNC-coach.ts). The v1 spec's "no email reminders" non-goal has been
+// revisited and reversed for the coach - see
+// docs/superpowers/specs/2026-11-11-email-coach-design.md - so this file no
+// longer carries that restriction, only the plumbing both callers need.
 //
 // SMTP rather than a provider SDK, so the deployment can point at whatever it
 // already has (a mailbox, a relay, a transactional service with SMTP) without
 // this code knowing or caring.
 
-export type Mail = { to: string; subject: string; text: string };
+export type Mail = { to: string; subject: string; text: string; html?: string };
 
 let cached: Transporter | null = null;
 
@@ -55,5 +54,6 @@ export async function sendMail(mail: Mail): Promise<void> {
     to: mail.to,
     subject: mail.subject,
     text: mail.text,
+    html: mail.html,
   });
 }

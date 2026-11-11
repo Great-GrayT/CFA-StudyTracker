@@ -191,6 +191,16 @@ model StudyPlan {
   timeZone           String             @default("UTC")
   // Email coaching preference: one of "all", "debrief-only", "off". Defaults to "all" (all three emails daily).
   emailCoach         String             @default("all")
+  // Where the candidate says they are, used to colour the coach's copy with local
+  // weather and daylight. All four are nullable and optional: the candidate may
+  // decline to say, and every downstream path treats absence as normal rather
+  // than exceptional. City-level only, typed by the candidate rather than
+  // inferred from their IP address, because a location we guessed is both less
+  // accurate (VPNs) and considerably more unsettling than one they volunteered.
+  city               String?
+  countryCode        String?
+  latitude           Float?
+  longitude          Float?
   createdAt          DateTime           @default(now())
   user               User               @relation(fields: [userId], references: [id])
   level              Level              @relation(fields: [levelId], references: [id])
@@ -474,4 +484,26 @@ model EmailSend {
   // even when the cron re-runs, retries overlap, or the scheduler crashes mid-flight.
   @@unique([planId, localDate, slot])
   @@index([planId, localDate])
+}
+
+// One day's weather for one place, cached so the coach makes at most a single
+// forecast call per city per day no matter how many candidates live there.
+//
+// Keyed by a rounded coordinate grid rather than by plan, so two candidates in
+// the same city share one reading. Rounding to two decimals is roughly a
+// kilometre, which is far finer than the buckets in `core/weather.ts` need.
+model WeatherReading {
+  id            String   @id @default(cuid())
+  // Rounded "lat,lon", built by roundToGrid in lib/FUNC-weather.ts.
+  gridKey       String
+  // The candidate's own calendar day as a plain string, matching EmailSend.
+  // A date here would invite a timezone conversion and reintroduce the exact
+  // bug the whole timezone layer exists to prevent.
+  localDate     String
+  weatherCode   Int
+  tempMaxC      Float
+  daylightHours Float
+  fetchedAt     DateTime @default(now())
+
+  @@unique([gridKey, localDate])
 }

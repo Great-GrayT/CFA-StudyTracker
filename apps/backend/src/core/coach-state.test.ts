@@ -1,19 +1,12 @@
 import { test, expect } from "vitest";
-import type { CoachState, StreakBand, DayShape, LoggingState } from "./coach-state";
+import type {
+  CoachState,
+  CoachInput,
+  StreakBand,
+  DayShape,
+  LoggingState,
+} from "./coach-state";
 import { classify } from "./coach-state";
-
-// Input type as specified in the task brief
-type CoachInput = {
-  streakDays: number;
-  taskMinutes: number;
-  availableMinutes: number;
-  isHoliday: boolean;
-  hasRequeued: boolean;
-  hasMock: boolean;
-  taskCount: number;
-  tasksDone: number;
-  extraLogged: number;
-};
 
 // Helper to create test inputs with sensible defaults for a normal day
 function input(overrides: Partial<CoachInput>): CoachInput {
@@ -27,6 +20,12 @@ function input(overrides: Partial<CoachInput>): CoachInput {
     taskCount: 5,
     tasksDone: 3,
     extraLogged: 0,
+    daysToExam: 120,
+    planTotalDays: 200,
+    planElapsedDays: 80,
+    holidayStartsTomorrow: false,
+    holidayYesterday: false,
+    holidayTomorrow: false,
     ...overrides,
   };
 }

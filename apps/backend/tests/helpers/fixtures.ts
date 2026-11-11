@@ -551,3 +551,125 @@ export async function setupPlanWithRealCatalogue(): Promise<{ planId: string }> 
 
   return { planId: plan.id };
 }
+
+/**
+ * A catalogue-backed plan (so generateHorizon can actually regenerate it)
+ * with "today" fixed at 2027-01-04 and two hand-placed PlanTask rows on it
+ * (40 minutes each: 80 total, a "normal" day shape - not light, not heavy),
+ * built for Task 5's sender tests.
+ *
+ * `missedDays`, when positive, pushes the plan's startDate back that many
+ * days with nothing logged in between, so the sender's own streak
+ * computation (walking StudyLogEntry rows via missedStudyDays) finds
+ * exactly that many consecutive missed study days - a real absence of
+ * logs, not a hand-fed streakDays number. Left at 0, startDate is pinned to
+ * "today" itself, so there is no "yesterday" inside the plan's history and
+ * the streak is 0 by construction (every weekday in the catalogue's
+ * weeklyAvailability is > 0 minutes, so a longer lookback would otherwise
+ * always find at least one missed day).
+ *
+ * `breakRegeneration` corrupts orderingStrategy to a value ordering.ts does
+ * not recognise, so a streak-triggered generateHorizon call genuinely
+ * throws (synchronously, before its transaction opens) instead of being
+ * told to by a mock.
+ */
+export async function setupPlanWithTasks(
+  opts: Partial<{
+    timeZone: string;
+    emailCoach: "all" | "debrief-only" | "off";
+    missedDays: number;
+    breakRegeneration: boolean;
+    tasksDone: number;
+  }> = {},
+): Promise<{ planId: string }> {
+  // setupPlanWithCatalogue hardcodes its catalogue's slug and unit refs, so
+  // it collides with itself on a second call inside the same test (no
+  // resetDb between). The emailCoach test needs exactly that - two plans
+  // set up back to back - so this seeds its own catalogue under a random
+  // key instead of sharing that one.
+  const key = randomUUID();
+  await db.level.upsert({ where: { id: "II" }, create: { id: "II", version: "2026-test" }, update: {} });
+
+  const topics = [
+    { name: "Ethical and Professional Standards", order: 1, examWeightMin: 5, examWeightMax: 10 },
+    { name: "Quantitative Methods", order: 2, examWeightMin: 20, examWeightMax: 25 },
+  ];
+
+  const pkg = await db.studyPackage.create({ data: { slug: `coach-${key}`, name: "Coach Test Catalogue", userId: null } });
+  const edition = await db.packageEdition.create({ data: { packageId: pkg.id, levelId: "II", year: "2026" } });
+
+  for (let i = 0; i < topics.length; i++) {
+    const topic = await db.topic.create({ data: { levelId: "II", ...topics[i] } });
+    for (const rOrder of [1, 2]) {
+      const reading = await db.reading.create({
+        data: { topicId: topic.id, name: `${topics[i].name} reading ${rOrder}`, order: rOrder },
+      });
+      const unit = await db.packageUnit.create({
+        data: { editionId: edition.id, ref: `${key}/t${i}/r${rOrder}`, order: i * 10 + rOrder, title: reading.name },
+      });
+      await db.packageResource.create({
+        data: {
+          editionId: edition.id,
+          unitId: unit.id,
+          ref: `${key}/t${i}/r${rOrder}/lecture`,
+          kind: "lecture",
+          pageCount: 20,
+          externalId: `coach-${key}-${i}-${rOrder}`,
+        },
+      });
+      await db.packageUnitReading.create({ data: { unitId: unit.id, readingId: reading.id } });
+    }
+  }
+
+  const user = await registerUser();
+  const plan = await db.studyPlan.create({
+    data: {
+      userId: user.id,
+      levelId: "II",
+      examDate: new Date("2027-06-01"),
+      startDate: new Date("2027-01-04"),
+      weeklyAvailability: { mon: 120, tue: 120, wed: 120, thu: 120, fri: 120, sat: 60, sun: 60 },
+      orderingStrategy: "curriculum",
+    },
+  });
+  const planId = plan.id;
+
+  const today = new Date("2027-01-04T00:00:00Z");
+  const missedDays = opts.missedDays ?? 0;
+  const startDate = new Date(today);
+  if (missedDays > 0) {
+    startDate.setUTCDate(startDate.getUTCDate() - missedDays);
+  }
+
+  await db.studyPlan.update({
+    where: { id: planId },
+    data: {
+      timeZone: opts.timeZone ?? "UTC",
+      emailCoach: opts.emailCoach ?? "all",
+      startDate,
+      orderingStrategy: opts.breakRegeneration ? "not-a-real-strategy" : "curriculum",
+    },
+  });
+
+  // Independent of the pacing engine, so the sender tests' day shape
+  // (taskMinutes, tasksDone) is exact rather than whatever packDays
+  // happens to produce. A streak-triggered regeneration overwrites these -
+  // that is exactly what the regeneration test is checking for.
+  const tasksDone = opts.tasksDone ?? 0;
+  for (let i = 0; i < 2; i++) {
+    await db.planTask.create({
+      data: {
+        planId,
+        date: today,
+        order: i,
+        kind: "content-video",
+        estimatedMinutes: 40,
+        requiresConfidence: false,
+        readingIds: [],
+        status: i < tasksDone ? "done" : "pending",
+      },
+    });
+  }
+
+  return { planId };
+}

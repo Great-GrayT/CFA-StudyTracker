@@ -34,6 +34,9 @@ export async function resetDb(): Promise<void> {
   await db.packageEdition.deleteMany({});
   await db.studyPackage.deleteMany({});
   await db.pushSubscription.deleteMany({});
+  // No foreign key, so order does not matter, but it is shared cache state and
+  // a reading left behind would leak a fixed forecast into the next test file.
+  await db.weatherReading.deleteMany({});
   await db.lOS.deleteMany({});
   await db.reading.deleteMany({});
   await db.topic.deleteMany({});

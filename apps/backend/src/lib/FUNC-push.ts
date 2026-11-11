@@ -35,7 +35,24 @@ if (vapidPublicKey && vapidPrivateKey && vapidSubject) {
   console.error("FUNC-push: VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY/VAPID_SUBJECT not fully set; push sending disabled");
 }
 
-export type PushPayload = { title: string; body: string };
+export type PushPayload = {
+  title: string;
+  body: string;
+  /**
+   * Where tapping the notification should land. Optional so existing callers
+   * are unaffected; the service worker treats its absence as "just open the
+   * app". The coach always sets it, because a notification that says a task is
+   * due and then dumps the candidate on a home screen is worse than none.
+   */
+  url?: string;
+  /**
+   * Notification tag. Two notifications sharing a tag replace one another, so
+   * this must differ per kind of message: with one shared tag the night debrief
+   * silently overwrote a prescription the candidate had not read yet. Repeats
+   * of the SAME kind replacing each other is the desired behaviour.
+   */
+  tag?: string;
+};
 
 /**
  * Sends `payload` to every PushSubscription row the given user has. Each
