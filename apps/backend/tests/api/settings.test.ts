@@ -63,8 +63,13 @@ test("registered devices are listed without exposing their push credentials", as
   // A subscription endpoint plus its keys is a bearer credential for sending to
   // that device. The screen needs a count and a way to revoke, never the keys.
   const { user } = await setupUserWithPlan();
+  // Distinctive values, not "k1"/"k2". Two characters collide with the random
+  // cuids in the same payload often enough to fail this test for the wrong
+  // reason: a plan id of cmwcobi130013v9vk1ly4bw5k contains "k1".
+  const p256dh = "p256dh-must-not-be-returned";
+  const auth = "auth-must-not-be-returned";
   await db.pushSubscription.create({
-    data: { userId: user.id, endpoint: "https://push.example/abc", p256dh: "k1", auth: "k2" },
+    data: { userId: user.id, endpoint: "https://push.example/abc", p256dh, auth },
   });
 
   const res = await GET(authedRequest(user, "/api/settings", undefined, "GET"));
@@ -74,8 +79,8 @@ test("registered devices are listed without exposing their push credentials", as
   expect(body.devices).toHaveLength(1);
   expect(body.devices[0].id).toBeTruthy();
   expect(raw).not.toContain("push.example");
-  expect(raw).not.toContain("k1");
-  expect(raw).not.toContain("k2");
+  expect(raw).not.toContain(p256dh);
+  expect(raw).not.toContain(auth);
 });
 
 test("no password hash, TOTP secret or token ever appears in the payload", async () => {
