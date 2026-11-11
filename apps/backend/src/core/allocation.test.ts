@@ -80,6 +80,9 @@ test("trimming takes notes first, then review video, then questions", () => {
 });
 
 test("a topic never loses all of its practice, however over-served", () => {
+  // cap = 1, estimate = 1000, floor = 36 * 10 = 360.
+  // Trim order: notes (50) then review (50) then questions (540).
+  // Result: noteMinutes=0, reviewMinutes=0, questionMinutes=360.
   const r = allocate(
     [
       topic("eq", {
@@ -94,11 +97,15 @@ test("a topic never loses all of its practice, however over-served", () => {
     100
   );
   const eq = r.byTopic.get("eq")!;
-  expect(eq.minutes).toBeGreaterThan(0);
-  expect(eq.questionMinutes).toBeGreaterThan(0);
+  expect(eq.noteMinutes).toBe(0);
+  expect(eq.reviewMinutes).toBe(0);
+  expect(eq.questionMinutes).toBe(360);
+  expect(eq.minutes).toBe(360);
   expect(r.trimmed.some((t) => t.layer === "questions")).toBe(true);
-  // Floor is 36 * 10 = 360. Verify questions survive at exact floor level.
-  expect(eq.questionMinutes).toBe(360 - (eq.noteMinutes ?? 0) - (eq.reviewMinutes ?? 0));
+  // Floor overflow must be recorded so the plan can explain why it kept material.
+  const floorRecord = r.trimmed.find((t) => t.topic === "eq" && t.layer === "questions");
+  expect(floorRecord).toBeDefined();
+  expect(floorRecord!.reason).toMatch(/floor/i);
 });
 
 test("an under-served topic is not padded", () => {
