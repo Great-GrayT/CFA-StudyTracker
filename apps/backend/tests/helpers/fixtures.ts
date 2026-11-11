@@ -353,3 +353,108 @@ export async function seedCatalogue(opts: { levelId?: "I" | "II" | "III"; slug?:
 
   return { packageId: pkg.id, editionId: edition.id, unitId: unit.id, resourceId: resource.id };
 }
+
+/**
+ * Sets up a complete plan with a seeded level and catalogue for schedule generation tests.
+ * Seeds Level II with three topics, creates a plan, and links readings to catalogue resources.
+ */
+export async function setupPlanWithCatalogue(): Promise<{ planId: string }> {
+  // Seed Level II with topics and readings (like in seedLevel)
+  await db.level.upsert({
+    where: { id: "II" },
+    create: { id: "II", version: "2026-test" },
+    update: { version: "2026-test" },
+  });
+
+  const topics = [
+    { name: "Ethical and Professional Standards", order: 1, examWeightMin: 5, examWeightMax: 10 },
+    { name: "Quantitative Methods", order: 2, examWeightMin: 20, examWeightMax: 25 },
+    { name: "Financial Statement Analysis", order: 3, examWeightMin: 15, examWeightMax: 20 },
+  ];
+
+  const seedTopics = [];
+  for (const t of topics) {
+    const topic = await db.topic.create({ data: { levelId: "II", ...t } });
+    seedTopics.push(topic);
+    for (const rOrder of [1, 2]) {
+      const reading = await db.reading.create({
+        data: { topicId: topic.id, name: `${t.name} reading ${rOrder}`, order: rOrder },
+      });
+    }
+  }
+
+  // Create a catalogue with resources
+  const pkg = await db.studyPackage.upsert({
+    where: { slug: "test-schedule-catalogue" },
+    create: { slug: "test-schedule-catalogue", name: "Test Schedule Catalogue", userId: null },
+    update: {},
+  });
+
+  const edition = await db.packageEdition.upsert({
+    where: { packageId_levelId_year: { packageId: pkg.id, levelId: "II", year: "2026" } },
+    create: { packageId: pkg.id, levelId: "II", year: "2026" },
+    update: {},
+  });
+
+  // Create units with resources for each topic's readings
+  for (let i = 0; i < seedTopics.length; i++) {
+    const topic = seedTopics[i];
+    const readings = await db.reading.findMany({
+      where: { topicId: topic.id },
+      orderBy: { order: "asc" },
+    });
+
+    for (let j = 0; j < readings.length; j++) {
+      const reading = readings[j];
+      const unit = await db.packageUnit.create({
+        data: {
+          editionId: edition.id,
+          ref: `topic${i + 1}/lm${j + 1}`,
+          order: i * 10 + j + 1,
+          title: `${topic.name} Unit ${j + 1}`,
+        },
+      });
+
+      // Create a lecture resource with pageCount
+      await db.packageResource.create({
+        data: {
+          editionId: edition.id,
+          unitId: unit.id,
+          ref: `topic${i + 1}/lm${j + 1}/lecture/1`,
+          kind: "lecture",
+          pageCount: 20,
+          externalId: `lex${i}${j}`,
+        },
+      });
+
+      // Link the unit to the reading
+      await db.packageUnitReading.create({
+        data: { unitId: unit.id, readingId: reading.id },
+      });
+    }
+  }
+
+  // Register a user and create a plan
+  const user = await registerUser();
+
+  const plan = await db.studyPlan.create({
+    data: {
+      userId: user.id,
+      levelId: "II",
+      examDate: new Date("2027-06-01"),
+      startDate: new Date("2027-01-04"),
+      weeklyAvailability: {
+        mon: 120,
+        tue: 120,
+        wed: 120,
+        thu: 120,
+        fri: 120,
+        sat: 60,
+        sun: 60,
+      },
+      orderingStrategy: "curriculum",
+    },
+  });
+
+  return { planId: plan.id };
+}
