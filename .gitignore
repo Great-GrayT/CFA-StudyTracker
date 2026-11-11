@@ -17,3 +17,11 @@ apps/frontend/tsconfig.tsbuildinfo
 /*.jpg
 /*.png
 /*.avif
+
+# Private study-content research notes dropped in the repo root. These quote
+# CFA Institute candidate-only outline text and index two view-only licensed
+# third-party courses, so they feed the seed pipeline from disk and never get
+# committed. See docs/SEEDING.md.
+/CFA_Level_II_2027_Curriculum_Deep_Research.md
+/Mark_Meldrum_L2_2026_Inventory.md
+/UWorld_CFA_L2_Qbank_Inventory.md

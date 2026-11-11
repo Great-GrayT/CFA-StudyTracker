@@ -34,9 +34,23 @@
  * behavior itself.
  *
  * `prisma/seed-data/*.json` is gitignored (private, licensed CFA Institute
- * curriculum text). If no seed-data files are present -- e.g. a fresh CI
- * checkout without the private data -- this script logs a warning and exits
+ * curriculum text). If no seed-data files are present (a fresh CI checkout
+ * without the private data, for example), this script logs a warning and exits
  * 0, so `pnpm install` never fails on missing private data.
+ *
+ * Pass `--prune` to also delete rows this level has in the database but not in
+ * its file. Off by default, because deleting curriculum rows is destructive and
+ * a seed should never do that implicitly.
+ *
+ * Why it exists: matching on `order` means the key is positional, so if a
+ * later edition of a file changes a topic's or reading's position, every child
+ * row silently reattaches to whatever now occupies that number, and any
+ * surplus is simply left behind. That is not theoretical. The Level I data in
+ * development had Fixed Income readings filed under Equities and an Equity
+ * reading under Corporate Finance, plus 118 outcomes belonging to no reading
+ * in the current file, all from an earlier file with a different split. The
+ * damage is invisible: every screen renders, and only the exam-weight share
+ * (which divides a topic's weight by its outcome count) comes out wrong.
  */
 
 import { PrismaClient } from "@prisma/client";
@@ -148,7 +162,100 @@ async function seedLevel(level: SeedLevel, counts: Counts): Promise<void> {
   }
 }
 
+/**
+ * Deletes rows belonging to `level` that its file no longer defines.
+ *
+ * Refuses rather than cascading when a doomed outcome carries study log
+ * entries: those are the candidate's own work, and silently destroying them to
+ * tidy the curriculum would be the worse bug. The operator is told exactly
+ * what blocks the prune and can decide.
+ *
+ * Returns true when the level was left alone.
+ */
+async function pruneLevel(level: SeedLevel, dryRun: boolean): Promise<boolean> {
+  // The file's positional keys, which are what the seed matched on above.
+  const keepTopics = new Set(level.topics.map((t) => t.order));
+  const keepReadings = new Set<string>();
+  const keepLos = new Set<string>();
+  for (const t of level.topics) {
+    for (const r of t.readings) {
+      keepReadings.add(`${t.order}/${r.order}`);
+      for (const l of r.los) keepLos.add(`${t.order}/${r.order}/${l.order}`);
+    }
+  }
+
+  const topics = await prisma.topic.findMany({
+    where: { levelId: level.id },
+    select: {
+      id: true,
+      order: true,
+      readings: {
+        select: {
+          id: true,
+          order: true,
+          los: { select: { id: true, order: true, _count: { select: { logs: true } } } },
+        },
+      },
+    },
+  });
+
+  const doomedTopics: string[] = [];
+  const doomedReadings: string[] = [];
+  const doomedLos: string[] = [];
+  let blockedBy = 0;
+
+  for (const t of topics) {
+    const topicGoes = !keepTopics.has(t.order);
+    if (topicGoes) doomedTopics.push(t.id);
+    for (const r of t.readings) {
+      const readingGoes = topicGoes || !keepReadings.has(`${t.order}/${r.order}`);
+      if (readingGoes) doomedReadings.push(r.id);
+      for (const l of r.los) {
+        if (!readingGoes && keepLos.has(`${t.order}/${r.order}/${l.order}`)) continue;
+        doomedLos.push(l.id);
+        blockedBy += l._count.logs;
+      }
+    }
+  }
+
+  if (doomedLos.length === 0 && doomedReadings.length === 0 && doomedTopics.length === 0) {
+    console.log(`  prune: level ${level.id} already matches its file exactly`);
+    return true;
+  }
+
+  console.log(
+    `  prune: level ${level.id} has ${doomedTopics.length} topic(s), ` +
+      `${doomedReadings.length} reading(s) and ${doomedLos.length} outcome(s) not in its file`,
+  );
+
+  if (blockedBy > 0) {
+    console.error(
+      `  prune: REFUSED for level ${level.id}. ${blockedBy} study log entr(ies) reference outcomes that ` +
+        `would be deleted. Reassign or export them first; nothing was changed.`,
+    );
+    return false;
+  }
+
+  if (dryRun) {
+    console.log(`  prune: dry run, nothing deleted (no study logs would block it)`);
+    return true;
+  }
+
+  // Children first: the schema has no cascade, so a parent delete would fail
+  // on its own foreign keys.
+  await prisma.lOS.deleteMany({ where: { id: { in: doomedLos } } });
+  await prisma.reading.deleteMany({ where: { id: { in: doomedReadings } } });
+  await prisma.topic.deleteMany({ where: { id: { in: doomedTopics } } });
+  console.log(`  prune: level ${level.id} now matches its file`);
+  return true;
+}
+
 async function main(): Promise<void> {
+  const prune = process.argv.includes("--prune");
+  // Pairing --prune with --dry-run reports what would go without touching it,
+  // which is the only safe way to inspect positional drift on a database whose
+  // history you do not know.
+  const dryRun = process.argv.includes("--dry-run");
   const levels = loadSeedLevels();
 
   if (levels.length === 0) {
@@ -160,13 +267,22 @@ async function main(): Promise<void> {
 
   const counts: Counts = { levels: 0, topics: 0, readings: 0, los: 0 };
 
+  let refused = false;
   for (const level of levels) {
     await seedLevel(level, counts);
+    // After seeding, never before: pruning first would delete rows this run is
+    // about to write back, turning a reseed into a needless churn of ids.
+    if (prune && !(await pruneLevel(level, dryRun))) refused = true;
   }
 
   console.log(
     `Seed complete: ${counts.levels} level(s), ${counts.topics} topic(s), ${counts.readings} reading(s), ${counts.los} LOS.`,
   );
+
+  if (refused) {
+    console.error("One or more levels could not be pruned; see above.");
+    process.exitCode = 1;
+  }
 }
 
 main()

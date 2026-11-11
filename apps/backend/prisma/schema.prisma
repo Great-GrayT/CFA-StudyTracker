@@ -115,15 +115,16 @@ model OAuthAccount {
 }
 
 model Level {
-  id     String  @id // "I" | "II" | "III"
+  id       String           @id // "I" | "II" | "III"
   // Set by the seed script from the curriculum data it loads. The frontend
   // caches the tree in IndexedDB with a long max-age, and the curriculum is
   // reseeded yearly, so cached clients eventually hold LOS ids this database
   // no longer has. Echoing a version lets the client notice and refetch
   // instead of silently rendering blank rows.
-  version String  @default("unknown")
-  topics Topic[]
-  plans  StudyPlan[]
+  version  String           @default("unknown")
+  topics   Topic[]
+  plans    StudyPlan[]
+  editions PackageEdition[]
 }
 
 model Topic {
@@ -138,31 +139,35 @@ model Topic {
 }
 
 model Reading {
-  id      String @id @default(cuid())
-  topicId String
-  name    String
-  order   Int
-  topic   Topic  @relation(fields: [topicId], references: [id])
-  los     LOS[]
+  id               String                @id @default(cuid())
+  topicId          String
+  name             String
+  order            Int
+  topic            Topic                 @relation(fields: [topicId], references: [id])
+  los              LOS[]
+  packageUnitItems PackageUnitReading[]
 }
 
 model LOS {
-  id        String          @id @default(cuid())
-  readingId String
-  text      String
-  order     Int
-  reading   Reading         @relation(fields: [readingId], references: [id])
-  logs      StudyLogEntry[]
+  id               String              @id @default(cuid())
+  readingId        String
+  text             String
+  order            Int
+  reading          Reading             @relation(fields: [readingId], references: [id])
+  logs             StudyLogEntry[]
+  packageUnitItems PackageUnitLos[]
 }
 
 model StudyPackage {
-  id        String          @id @default(cuid())
-  userId    String?
-  name      String
-  user      User?           @relation(fields: [userId], references: [id])
-  logs      StudyLogEntry[]
+  id       String           @id @default(cuid())
+  userId   String?
+  name     String
+  slug     String?          @unique
+  user     User?            @relation(fields: [userId], references: [id])
+  logs     StudyLogEntry[]
   mockExams MockExam[]
   planPackages PlanPackage[]
+  editions PackageEdition[]
 }
 
 model StudyPlan {
@@ -269,4 +274,114 @@ model PlanPackage {
   plan      StudyPlan    @relation(fields: [planId], references: [id])
   package   StudyPackage @relation(fields: [packageId], references: [id])
   @@unique([planId, packageId])
+}
+
+// Third-party study provider catalogue: metadata for video lectures, question
+// banks, and other content bundled by external providers (Kaplan, Mark Meldrum,
+// etc). This model holds edition metadata like the provider's source version and
+// the owner's link back to their provider account for refresh/sync operations.
+model PackageEdition {
+  id              String           @id @default(cuid())
+  packageId       String
+  levelId         String
+  year            String
+  ownerUserId     String?
+  sourceUrl       String?
+  snapshotDate    DateTime?
+  note            String?
+  package         StudyPackage     @relation(fields: [packageId], references: [id])
+  level           Level            @relation(fields: [levelId], references: [id])
+  units           PackageUnit[]
+  resources       PackageResource[]
+  @@unique([packageId, levelId, year])
+  @@index([ownerUserId])
+}
+
+// One logical unit (lecture, chapter, etc) within a provider edition. Stores a
+// ref as a deterministic string key rather than a composite key because all
+// seven Quant modules share one notes PDF: a Drive id is not unique per
+// resource, and a composite key containing a nullable column (unitId) enforces
+// nothing in Postgres anyway.
+model PackageUnit {
+  id             String               @id @default(cuid())
+  editionId      String
+  ref            String
+  order          Int
+  providerLabel  String?
+  title          String?
+  topicLabel     String?
+  sourceUrl      String?
+  notesPageStart Int?
+  notesPageCount Int?
+  edition        PackageEdition       @relation(fields: [editionId], references: [id])
+  resources      PackageResource[]
+  readings       PackageUnitReading[]
+  los            PackageUnitLos[]
+  @@unique([editionId, ref])
+  @@unique([editionId, order])
+}
+
+// One resource (video, PDF, question bank) within a unit or edition. The ref
+// (e.g., provider's document id) is deterministic so assets can be detected as
+// duplicates even when refreshed from the provider; a 32-bit int is enough for
+// kilobytes (40 KB worksheets never overflow), and serialize as a normal
+// number rather than throwing on JSON.stringify like BigInt does.
+model PackageResource {
+  id            String       @id @default(cuid())
+  editionId     String
+  unitId        String?
+  ref           String
+  kind          String
+  title         String?
+  externalId    String?
+  sourceUrl     String?
+  sizeKb        Int?
+  durationSeconds Int?
+  pageStart     Int?
+  pageCount     Int?
+  wordCount     Int?
+  questionCount Int?
+  vignetteCount Int?
+  calcCount     Int?
+  stmtCount     Int?
+  exhibitCount  Int?
+  sourceNote    String?
+  edition       PackageEdition @relation(fields: [editionId], references: [id])
+  unit          PackageUnit?   @relation(fields: [unitId], references: [id])
+  @@unique([editionId, ref])
+  @@index([unitId, kind])
+  @@index([externalId])
+}
+
+// One LOS (Learning Outcome Statement) covered by a unit. This binding records
+// whether the unit covers the full LOS or just part of it, so coverage
+// calculations can account for partial overlap. The losId is nullable for
+// edition-level assets like a formula sheet that may not map to any LOS.
+model PackageUnitLos {
+  id            String      @id @default(cuid())
+  unitId        String
+  sourceLabel   String
+  losId         String?
+  questionCount Int?
+  retired       Boolean     @default(false)
+  note          String?
+  unit          PackageUnit @relation(fields: [unitId], references: [id])
+  los           LOS?        @relation(fields: [losId], references: [id])
+  @@unique([unitId, sourceLabel])
+  @@index([losId])
+}
+
+// One Reading covered by a unit. This binding records how much of the reading
+// the unit covers (full, partial, etc), so curriculum coverage can be tracked
+// at the reading level and aggregated up.
+model PackageUnitReading {
+  id        String      @id @default(cuid())
+  unitId    String
+  readingId String
+  coverage  String      @default("full")
+  note      String?
+  unit      PackageUnit @relation(fields: [unitId], references: [id])
+  reading   Reading     @relation(fields: [readingId], references: [id])
+  @@unique([unitId, readingId])
+  @@index([readingId])
 }

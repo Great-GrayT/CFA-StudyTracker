@@ -84,6 +84,26 @@ fi
 echo "==> Seeding"
 run_in_container "${PATCH_MOUNT[@]}" app node prisma/seed.ts
 
+# Optional second phase. The provider catalogue loads only when its files were
+# staged alongside the level, and always AFTER it: the crosswalk's foreign keys
+# point at Reading and LOS rows this level seed just created.
+if ls "$SEED_DIR"/package-*.json >/dev/null 2>&1; then
+  echo "==> Validating the provider catalogue"
+  if sudo -u deploy docker compose exec -T app test -f prisma/validate-packages.ts 2>/dev/null; then
+    for f in "$SEED_DIR"/package-*.json "$SEED_DIR"/crosswalk-*.json; do
+      [ -e "$f" ] || continue
+      run_in_container app node prisma/validate-packages.ts "prisma/seed-data/$(basename "$f")"
+    done
+  else
+    echo "    catalogue validator not in this image, skipping (validate locally instead)"
+  fi
+
+  echo "==> Loading the provider catalogue"
+  run_in_container app node prisma/seed-packages.ts
+else
+  echo "==> No package-*.json staged, skipping the provider catalogue"
+fi
+
 echo "==> Verifying what is now in the database"
 sudo -u deploy docker compose exec -T app node -e '
 // Plain specifier, not an absolute path: pnpm does not place the client
@@ -95,6 +115,13 @@ const db=new PrismaClient();
   for(const l of levels){
     const n=await db.lOS.count({where:{reading:{topic:{levelId:l.id}}}});
     console.log(`    Level ${l.id}: ${l._count.topics} topics, ${n} outcomes, version ${l.version}`);
+  }
+  const eds=await db.packageEdition.findMany({include:{package:true},orderBy:{year:"asc"}});
+  for(const e of eds){
+    const units=await db.packageUnit.count({where:{editionId:e.id}});
+    const res=await db.packageResource.count({where:{editionId:e.id}});
+    const maps=await db.packageUnitReading.count({where:{unit:{editionId:e.id}}});
+    console.log(`    ${e.package.slug} ${e.year} (level ${e.levelId}): ${units} units, ${res} resources, ${maps} mappings`);
   }
   process.exit(0);
 })().catch(e=>{console.error(e.message);process.exit(1)});

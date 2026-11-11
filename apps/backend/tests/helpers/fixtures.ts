@@ -295,3 +295,61 @@ export async function seedLevel(levelId: "I" | "II" | "III" = "I"): Promise<void
     }
   }
 }
+
+/**
+ * A minimal provider catalogue bound to a seeded level, for tests in later
+ * plans that need resources to schedule against.
+ *
+ * Deliberately small: one edition, one unit, one lecture, one reading binding.
+ * A test that needs the real 88-unit catalogue is testing the loader, and that
+ * belongs in tests/catalogue/seed-packages.test.ts instead.
+ */
+export async function seedCatalogue(opts: { levelId?: "I" | "II" | "III"; slug?: string } = {}): Promise<{
+  packageId: string;
+  editionId: string;
+  unitId: string;
+  resourceId: string;
+}> {
+  const levelId = opts.levelId ?? "II";
+  const slug = opts.slug ?? "test-catalogue";
+  await ensureLevel(levelId);
+
+  const pkg = await db.studyPackage.upsert({
+    where: { slug },
+    create: { slug, name: "Test Catalogue", userId: null },
+    update: {},
+  });
+  const edition = await db.packageEdition.upsert({
+    where: { packageId_levelId_year: { packageId: pkg.id, levelId, year: "2026" } },
+    create: { packageId: pkg.id, levelId, year: "2026" },
+    update: {},
+  });
+  const unit = await db.packageUnit.upsert({
+    where: { editionId_ref: { editionId: edition.id, ref: "tc/lm1" } },
+    create: { editionId: edition.id, ref: "tc/lm1", order: 1, title: "Test Unit" },
+    update: {},
+  });
+  const resource = await db.packageResource.upsert({
+    where: { editionId_ref: { editionId: edition.id, ref: "tc/lm1/lecture/1" } },
+    create: {
+      editionId: edition.id,
+      unitId: unit.id,
+      ref: "tc/lm1/lecture/1",
+      kind: "lecture",
+      externalId: "1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      sizeKb: 1024,
+    },
+    update: {},
+  });
+
+  const reading = await db.reading.findFirst({ where: { topic: { levelId } } });
+  if (reading) {
+    await db.packageUnitReading.upsert({
+      where: { unitId_readingId: { unitId: unit.id, readingId: reading.id } },
+      create: { unitId: unit.id, readingId: reading.id },
+      update: {},
+    });
+  }
+
+  return { packageId: pkg.id, editionId: edition.id, unitId: unit.id, resourceId: resource.id };
+}
