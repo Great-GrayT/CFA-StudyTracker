@@ -43,50 +43,64 @@ describe("generateHorizon", () => {
     const { planId } = await setupPlanWithCatalogue();
     await generateHorizon(planId, "2027-01-04");
 
-    // Find any task in the future (not on today) that's unfrozen
-    const todayDate = new Date("2027-01-04T00:00:00Z");
-    const future = await db.planTask.findFirst({
-      where: { planId, date: { gt: todayDate }, frozen: false },
-    });
-
-    if (!future) {
-      throw new Error("No future task found to mark as done");
-    }
-
-    // Mark it done with a logEntryId (simulating candidate work ahead)
-    await db.planTask.update({
-      where: { id: future.id },
-      data: { logEntryId: "fake-log", status: "done" },
-    });
-
-    // Regenerate the window (as if availability changed)
-    await generateHorizon(planId, "2027-01-04");
-
-    // Task should still exist with its done status, even though window regenerated
-    const still = await db.planTask.findUnique({ where: { id: future.id } });
-    expect(still).not.toBeNull();
-    expect(still!.status).toBe("done");
-  });
-
-  test("changing the ordering strategy regenerates the window and nothing else", async () => {
-    const { planId } = await setupPlanWithCatalogue();
-    await generateHorizon(planId, "2027-01-04");
-    const before = await db.planTask.findMany({
+    // Find the first generated task to place our test task after it
+    const firstTask = await db.planTask.findFirst({
       where: { planId },
       orderBy: [{ date: "asc" }, { order: "asc" }],
     });
 
-    // Changing strategy should be possible and not cause errors
-    // (actual strategy implementation may result in same order for this fixture)
+    if (!firstTask) {
+      throw new Error("No tasks generated");
+    }
+
+    // Create a task at an order far beyond what regeneration produces.
+    // This forces its (date, order) slot to NOT be in newPlanSlots after regeneration.
+    // Deletion code WILL reach this task and attempt deletion.
+    // The logEntryId protection is the only thing that saves it.
+    const testTask = await db.planTask.create({
+      data: {
+        planId,
+        date: firstTask.date,
+        order: 99,
+        kind: "content-notes",
+        estimatedMinutes: 60,
+        requiresConfidence: false,
+        readingIds: [],
+        status: "done",
+        logEntryId: "fake-log-entry",
+      },
+    });
+
+    // Regenerate: the plan will only generate tasks at orders 0, 1, 2... (low numbers).
+    // Order 99 will NOT be in newPlanSlots.
+    // Without logEntryId protection, deletion code would destroy this completed work.
+    // With protection, it survives.
+    await generateHorizon(planId, "2027-01-04");
+
+    // Verify the task still exists with its work (logEntryId) intact
+    const still = await db.planTask.findUnique({ where: { id: testTask.id } });
+    expect(still).not.toBeNull();
+    expect(still!.status).toBe("done");
+    expect(still!.logEntryId).toBe("fake-log-entry");
+  });
+
+  test("changing the ordering strategy regenerates without error", async () => {
+    const { planId } = await setupPlanWithCatalogue();
+    await generateHorizon(planId, "2027-01-04");
+    const beforeCount = await db.planTask.count({ where: { planId } });
+
+    // Change strategy and regenerate - should not error
     await db.studyPlan.update({
       where: { id: planId },
       data: { orderingStrategy: "weight" },
     });
 
     const result = await generateHorizon(planId, "2027-01-04");
+    const afterCount = await db.planTask.count({ where: { planId } });
 
-    // The second call should keep existing tasks (since strategy change alone
-    // may not change order for this fixture, but the function is idempotent)
-    expect(result.created + result.kept).toBeGreaterThanOrEqual(before.length);
+    // Result should be stable: created 0 (all slots already exist and aren't changing)
+    expect(result.created).toBe(0);
+    // Task count should remain the same
+    expect(afterCount).toBe(beforeCount);
   });
 });
