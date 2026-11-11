@@ -393,7 +393,14 @@ export async function generateHorizon(
   const weeksUntilExam = Math.ceil(
     (plan.examDate.getTime() - todayDate.getTime()) / (7 * 24 * 60 * 60 * 1000),
   );
-  const totalPlanMinutes = Math.max(1, weekTotal * weeksUntilExam);
+  // weeklyAvailability is in HOURS (the onboarding question is "how many hours
+  // a week?"), and every estimate downstream of this is in minutes. Without
+  // the conversion the whole plan was budgeted at 560 minutes instead of
+  // 33,600 for a 20 hour week, so allocation trimmed every topic to a few
+  // minutes, the packer found nothing that fit a day, and generateHorizon
+  // returned "created: 0". That is why no plan had a single task and the
+  // Today screen had nothing but outcome text to show.
+  const totalPlanMinutes = Math.max(1, weekTotal * 60 * weeksUntilExam);
 
   // Build effort estimates and allocate by topic
   const { estimates: topicEstimates, readingProfiles, topicOtherRaw, topicReviewRaw } =
@@ -490,8 +497,14 @@ export async function generateHorizon(
   }
 
   // Pack into days
+  // packDays budgets a day in MINUTES; StudyPlan.weeklyAvailability is in
+  // hours, which is what onboarding asks for. Passed through unconverted, a
+  // two hour Tuesday became a two minute Tuesday, nothing cleared the 15
+  // minute floor for a task, and every day in the horizon came back empty.
   const calendar: Calendar = {
-    weeklyAvailability,
+    weeklyAvailability: Object.fromEntries(
+      Object.entries(weeklyAvailability).map(([day, hours]) => [day, hours * 60]),
+    ),
     startDate: today,
     horizonDays: HORIZON_DAYS,
     holidays: [],
