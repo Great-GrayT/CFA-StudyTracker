@@ -21,6 +21,7 @@ export async function resetDb(): Promise<void> {
   await db.cronRun.deleteMany({});
   await db.progressSnapshot.deleteMany({});
   await db.studyLogEntry.deleteMany({});
+  await db.planTask.deleteMany({});
   await db.mockExam.deleteMany({});
   await db.planHoliday.deleteMany({});
   await db.planPackage.deleteMany({});

@@ -143,6 +143,12 @@ model Reading {
   topicId          String
   name             String
   order            Int
+  // Refs of readings that must precede this one (curriculum dependency chain)
+  prereqRefs       String[]              @default([])
+  // Which phase of a multi-phase curriculum this reading belongs to (e.g., foundations vs advanced)
+  phaseBand        Int?
+  // Relative importance within phase, lower is higher priority
+  priorityRank     Int?
   topic            Topic                 @relation(fields: [topicId], references: [id])
   los              LOS[]
   packageUnitItems PackageUnitReading[]
@@ -177,6 +183,8 @@ model StudyPlan {
   examDate           DateTime
   startDate          DateTime           @default(now())
   weeklyAvailability Json
+  // Strategy for ordering tasks on each day (e.g., "curriculum", "weakness-first", "practice-dense")
+  orderingStrategy   String             @default("curriculum")
   isActive           Boolean            @default(true)
   createdAt          DateTime           @default(now())
   user               User               @relation(fields: [userId], references: [id])
@@ -186,6 +194,61 @@ model StudyPlan {
   snapshots          ProgressSnapshot[]
   holidays           PlanHoliday[]
   planPackages       PlanPackage[]
+  tasks              PlanTask[]
+}
+
+// One task on a candidate's daily plan. A single task can span multiple readings
+// (e.g., an ethics task covers seven modules). When a task is performed, it may
+// generate multiple StudyLogEntry rows (one per LOS studied), so minutes live
+// here on the task, not the log: one task fans out to many log entries, so a
+// minute count on the log would be duplicated or divided, and calibration needs
+// exactly one estimated-versus-actual pair per task.
+model PlanTask {
+  id                String        @id @default(cuid())
+  planId            String
+  date              DateTime
+  // Position in this day's ordered task list (0-indexed within the day)
+  order             Int
+  // Closed vocabulary: content-notes, content-video, eocq, questions, seminar, review, mock, mock-review
+  kind              String
+  // Optional reference to a provider resource (PackageResource)
+  resourceId        String?
+  // Reading IDs this task covers (plural because one Ethics task covers seven modules)
+  readingIds        String[]      @default([])
+  // Minutes budgeted for this task when it was generated
+  estimatedMinutes  Int
+  // Minutes actually spent on this task (null until marked complete). Stored as generated,
+  // never recomputed on read, so a later recalibration cannot retroactively rewrite frozen history.
+  actualMinutes     Int?
+  // Timestamp when the timer was started (if user clicked start before pausing/stopping)
+  timerStartedAt    DateTime?
+  // Current status: pending, in-progress, completed, skipped
+  status            String        @default("pending")
+  // If this task is a split-off from another task, the original task's ID
+  splitOf           String?
+  // Which piece in a multi-piece split (1-indexed), or null if not split
+  splitIndex        Int?
+  // Total pieces if this task is split, or null if not split
+  splitCount        Int?
+  // Whether this task requires a confidence assessment (for practice questions)
+  requiresConfidence Boolean      @default(false)
+  // Target number of questions to attempt (for question-bank tasks)
+  questionTarget    Int?
+  // Start index of vignette within a resource (for case-study materials)
+  vignetteFrom      Int?
+  // End index of vignette within a resource
+  vignetteTo        Int?
+  // Optional mode or variant (e.g., "timed", "untimed" for mock exams)
+  mode              String?
+  // Whether this task is frozen (immutable for history/audit purposes)
+  frozen            Boolean       @default(false)
+  // Reference to a StudyLogEntry (for tasks that generate exactly one log entry)
+  logEntryId        String?
+  // Reason this task was inserted programmatically (e.g., "retry-weak", "mock-review-inserted")
+  insertedBecause   String?
+  plan              StudyPlan     @relation(fields: [planId], references: [id])
+  @@index([planId, date])
+  @@unique([planId, date, order])
 }
 
 model StudyLogEntry {
