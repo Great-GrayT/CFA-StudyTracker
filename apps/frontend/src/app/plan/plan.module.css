@@ -277,6 +277,10 @@
   justify-content: space-between;
   align-items: center;
   gap: var(--space-3);
+  /* A package name plus three role chips does not fit a 320px phone on one
+     line. Wrapping drops the chips under the name instead of widening the
+     page. */
+  flex-wrap: wrap;
 }
 
 .packageName {
@@ -285,6 +289,9 @@
   margin: 0;
   color: var(--text);
   flex: 1;
+  /* A flex item will not shrink below min-content without this, so a long
+     provider name held the row open. */
+  min-width: 0;
 }
 
 .roles {
