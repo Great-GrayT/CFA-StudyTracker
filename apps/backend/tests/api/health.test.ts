@@ -1,4 +1,6 @@
 import { afterEach, test, expect } from "vitest";
+import { resetDb } from "../helpers/test-db";
+import { anyLosIdForLevel, ensureLevel } from "../helpers/fixtures";
 import { GET } from "../../src/app/api/health/route";
 import { readJson } from "../helpers/request";
 import { checkConfig } from "../../src/lib/FUNC-config";
@@ -11,13 +13,20 @@ afterEach(() => {
   process.env = { ...SAVED };
 });
 
-test("a correctly configured deployment reports healthy", async () => {
+test("a correctly configured and seeded deployment reports healthy", async () => {
+  // Seeded explicitly, because health now depends on it: a deploy applies
+  // migrations and loads no data, so an empty curriculum is a real state the
+  // endpoint has to distinguish rather than an artefact of the test database.
+  await resetDb();
+  await anyLosIdForLevel("II");
+
   const res = await GET();
   const body = await readJson(res);
   // The test environment sets everything the app needs, so anything reported
   // here is a real gap in .env.test rather than a test artefact.
   expect(body.configuration.errors).toEqual([]);
   expect(body.database).toBe(true);
+  expect(body.seeded).toBe(true);
   expect(res.status).toBe(200);
 });
 
@@ -118,4 +127,51 @@ test("the report never contains a secret value", async () => {
   if (process.env.SMTP_PASSWORD) {
     expect(raw).not.toContain(process.env.SMTP_PASSWORD);
   }
+});
+
+// SEED STATE
+//
+// A deploy applies migrations and does NOT seed: the curriculum and provider
+// catalogue are licensed text, so prisma/seed-data/*.json is gitignored and
+// therefore absent from the Docker image, and seed.ts skips quietly when it
+// finds no files. Without this check a fresh deploy reports perfectly healthy
+// while being unable to generate a single study task.
+
+test("an unseeded database is not healthy", async () => {
+  // resetDb has already emptied everything, so this is the exact state a fresh
+  // deploy comes up in.
+  await resetDb();
+  const res = await GET();
+
+  expect(res.status).toBe(503);
+  const body = await readJson(res);
+  expect(body.seeded).toBe(false);
+  expect(body.curriculum.readings).toBe(0);
+  // The distinction that matters to whoever is reading this at 2am: the
+  // database is reachable and the configuration is fine. Only the data is
+  // missing.
+  expect(body.database).toBe(true);
+  expect(body.configuration.ok).toBe(true);
+});
+
+test("a seeded database is healthy", async () => {
+  await resetDb();
+  await anyLosIdForLevel("II");
+  const res = await GET();
+
+  const body = await readJson(res);
+  expect(body.seeded).toBe(true);
+  expect(body.curriculum.readings).toBeGreaterThan(0);
+  expect(res.status).toBe(200);
+});
+
+test("a Level row with no readings still counts as unseeded", async () => {
+  // A half-finished seed is worse than none, because it looks loaded. Probing
+  // for the existence of a Level would pass here.
+  await resetDb();
+  await ensureLevel("II");
+  const body = await readJson(await GET());
+
+  expect(body.seeded).toBe(false);
+  expect(body.curriculum.readings).toBe(0);
 });

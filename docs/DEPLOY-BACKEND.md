@@ -8,10 +8,11 @@ status: active
 
 ## Purpose
 
-Taking the backend from this repository to production, and the three things that
+Taking the backend from this repository to production, and the four things that
 will silently not work if a step is skipped. Written as a checklist because the
-order matters: the schema must exist before the app starts, and the study coach
-does not send a single email until a scheduler is pointed at it.
+order matters: the schema must exist before the app starts, the curriculum must
+be loaded before a plan can hold a single task, and the study coach does not
+send one email until a scheduler is pointed at it.
 
 Steps marked **(you)** need credentials or infrastructure this repository does
 not and should not hold.
@@ -78,16 +79,61 @@ and the per-channel unique key on `EmailSend` makes a repeat attempt a no-op
 rather than a duplicate, so being late costs nothing and firing twice sends
 once.
 
+### Load the curriculum **(you)**
+
+**The deploy does not do this, and nothing in CI can.** The curriculum text and
+the provider inventories are licensed, so `apps/backend/prisma/seed-data/*.json`
+is gitignored, which also means it is absent from the Docker image. `seed.ts`
+finds no files and skips without complaint.
+
+A deploy therefore comes up migrated, configured, and completely unable to
+generate a study task. `/api/health` reports `seeded: false` and returns 503
+for exactly this reason; on a first deploy that 503 is the expected state until
+this step is done.
+
+Copy the six files to the server, out of band, then seed from a one-off
+container with the directory mounted:
+
+```
+scp apps/backend/prisma/seed-data/*.json <server>:/srv/cfa/seed-data/
+
+# on the server, from the compose project directory
+MOUNT=/srv/cfa/seed-data:/app/apps/backend/prisma/seed-data:ro
+
+docker compose run --rm -v $MOUNT app pnpm --filter backend db:seed
+docker compose run --rm -v $MOUNT app pnpm --filter backend db:seed:packages
+```
+
+Order matters: `db:seed` loads levels, topics, readings and outcomes;
+`db:seed:packages` links provider units to readings that must already exist.
+
+Both are idempotent and additive. They upsert and never delete, so re-running
+them is safe and is how a curriculum revision is applied. The flip side is that
+a row whose natural key changed between revisions is not removed: the dev
+database currently carries 9 readings and 118 outcomes from an earlier key
+shape that no seed file describes any more. A database seeded from scratch gets
+the correct 153 readings and 722 outcomes, so this only affects long-lived
+development databases. `prisma/validate-seed.ts` reports the drift, and the
+prune is opt-in and refuses when a study log references a doomed row.
+
+Expected on a clean load:
+
+```
+Seed complete: 2 level(s), 20 topic(s), 153 reading(s), 722 LOS.
+Catalogue seed complete: 2 edition(s), 88 unit(s), 230 resource(s), 100 mapping(s), 40 outcome refinement(s).
+```
+
 ### Verify
 
 ```
 GET /api/health
 ```
 
-200 means usable. 503 means something is set wrongly enough to break a
-user-visible feature, and the body names which variables. Point the platform's
-health check at it so a bad deploy fails to go live rather than sitting there
-serving traffic with a mute coach.
+200 means usable. 503 means something is wrong enough to break a user-visible
+feature, and the body says what: `configuration.errors` names the variables at
+fault, and `seeded: false` means the curriculum has not been loaded. Point the
+platform's health check at it so a bad deploy fails to go live rather than
+sitting there serving traffic with a mute coach and an empty curriculum.
 
 It also catches values left as the examples in `.env.example`, which a presence
 check cannot: a deploy that copied that file and changed only `DATABASE_URL`
@@ -95,11 +141,13 @@ would otherwise look fully configured while signing tokens with a published
 secret.
 
 Warnings keep it at 200. No SMTP and no VAPID are degradations, not faults: the
-app is useful without email and useless while refusing traffic.
+app is useful without email and useless while refusing traffic. An unseeded
+curriculum is not a warning, because an app that cannot produce a single task is
+not degraded, it is not working.
 
 ## Logic
 
-Three failure modes are invisible rather than loud, and each is the reason a
+Four failure modes are invisible rather than loud, and each is the reason a
 check above exists.
 
 A missing `CRON_SECRET` produces no error anywhere. `401` is the correct
@@ -117,7 +165,16 @@ A deploy with no migration for a recent schema change starts normally and fails
 only when a request touches the missing column, which can be days later.
 `migrate status` is the cheap check.
 
+An unseeded database is the quietest of the four, because every component is
+genuinely working. The app serves, the database answers, sign-in succeeds, and
+the first candidate to build a plan gets an empty one. Since the seed data
+cannot travel in the image by design, this step can only ever be manual, so the
+health endpoint reports it rather than relying on anybody remembering.
+
 ## Data flow
+
+Operator -> scp seed-data -> one-off container -> db:seed then db:seed:packages
+-> curriculum, outcomes, provider units and resources.
 
 Scheduler -> GET /api/cron/tick -> per active plan: write snapshot -> run coach
 -> claim EmailSend row per channel -> SMTP and Web Push -> mark sent.

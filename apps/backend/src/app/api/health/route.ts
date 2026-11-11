@@ -31,12 +31,45 @@ export async function GET(): Promise<Response> {
     // and this endpoint has no operator to authenticate.
   }
 
-  const ok = config.ok && database;
+  /**
+   * Whether the curriculum has been loaded.
+   *
+   * This is reported because a deploy does NOT seed. The curriculum and the
+   * provider catalogue are licensed text, so `prisma/seed-data/*.json` is
+   * gitignored and is therefore absent from the Docker image too, and `seed.ts`
+   * skips quietly when it finds no files. A fresh deploy consequently comes up
+   * perfectly healthy by every other measure while being unable to generate a
+   * single study task, and nothing anywhere says so.
+   *
+   * Counted rather than merely probed: a Level row with no readings under it is
+   * a half-finished seed, which is worse than none because it looks loaded.
+   */
+  let curriculumReadings = 0;
+  let catalogueResources = 0;
+  if (database) {
+    try {
+      [curriculumReadings, catalogueResources] = await Promise.all([
+        db.reading.count(),
+        db.packageResource.count(),
+      ]);
+    } catch {
+      // Table missing means migrations have not run, which the database flag
+      // above cannot distinguish and which the seeded flag below reports as
+      // not seeded. Either way the deploy is not ready.
+    }
+  }
+  const seeded = curriculumReadings > 0;
+
+  const ok = config.ok && database && seeded;
 
   return Response.json(
     {
       ok,
       database,
+      // A deploy does not seed. Until this is true the app cannot generate a
+      // task, so it counts toward `ok` rather than being advisory.
+      seeded,
+      curriculum: { readings: curriculumReadings, catalogueResources },
       configuration: {
         ok: config.ok,
         errors: config.errors,
