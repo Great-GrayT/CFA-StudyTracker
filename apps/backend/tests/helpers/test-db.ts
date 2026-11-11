@@ -9,7 +9,7 @@ import { db } from "../../src/lib/db";
  *
  * The base order from the task is: ProgressSnapshot, StudyLogEntry, StudyPlan,
  * StudyPackage, LOS, Reading, Topic, Level, OAuthAccount, User.
- * This implementation adds MockExam, PlanHoliday, PushSubscription, and PlanPackage
+ * This implementation adds MockExam, PlanTask, PlanHoliday, PushSubscription, and PlanPackage
  * in the correct positions to maintain FK safety with the complete schema.
  */
 export async function resetDb(): Promise<void> {

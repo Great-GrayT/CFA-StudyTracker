@@ -215,10 +215,11 @@ model PlanTask {
   resourceId        String?
   // Reading IDs this task covers (plural because one Ethics task covers seven modules)
   readingIds        String[]      @default([])
-  // Minutes budgeted for this task when it was generated
+  // Minutes budgeted for this task when it was generated. Stored as generated, never recomputed
+  // on read, so a later recalibration cannot retroactively rewrite frozen history.
   estimatedMinutes  Int
-  // Minutes actually spent on this task (null until marked complete). Stored as generated,
-  // never recomputed on read, so a later recalibration cannot retroactively rewrite frozen history.
+  // Minutes actually spent on this task (null until completed). Observed measurement that pairs
+  // with estimatedMinutes for calibration: one task generates one estimated-versus-actual pair.
   actualMinutes     Int?
   // Timestamp when the timer was started (if user clicked start before pausing/stopping)
   timerStartedAt    DateTime?
@@ -228,7 +229,6 @@ model PlanTask {
   splitOf           String?
   // Which piece in a multi-piece split (1-indexed), or null if not split
   splitIndex        Int?
-  // Total pieces if this task is split, or null if not split
   splitCount        Int?
   // Whether this task requires a confidence assessment (for practice questions)
   requiresConfidence Boolean      @default(false)
@@ -236,7 +236,6 @@ model PlanTask {
   questionTarget    Int?
   // Start index of vignette within a resource (for case-study materials)
   vignetteFrom      Int?
-  // End index of vignette within a resource
   vignetteTo        Int?
   // Optional mode or variant (e.g., "timed", "untimed" for mock exams)
   mode              String?

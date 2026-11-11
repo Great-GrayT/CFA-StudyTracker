@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { Prisma } from "@prisma/client";
 import { db } from "../../src/lib/db";
 import { resetDb } from "../helpers/test-db";
 import { setupUserWithPlan } from "../helpers/fixtures";
@@ -16,19 +17,21 @@ describe("PlanTask schema", () => {
    * Helper to create a task with reasonable defaults and custom overrides.
    * Reuses the plan created in beforeEach.
    */
-  async function makeTask(overrides: Record<string, any> = {}) {
-    const defaults = {
+  async function makeTask(
+    overrides: Partial<Prisma.PlanTaskUncheckedCreateInput> = {},
+  ) {
+    const defaults: Prisma.PlanTaskUncheckedCreateInput = {
       planId,
       date: new Date("2027-01-05"),
       order: 1,
       kind: "content-notes",
       estimatedMinutes: 45,
       status: "pending",
-      readingIds: [] as string[],
+      readingIds: [],
       requiresConfidence: false,
       frozen: false,
     };
-    return db.planTask.create({ data: { ...defaults, ...overrides } as any });
+    return db.planTask.create({ data: { ...defaults, ...overrides } });
   }
 
   it("a task records the estimate it was generated with", async () => {
