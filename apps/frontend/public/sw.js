@@ -1,11 +1,23 @@
 // Service worker for Study Tracker. Implements a hybrid caching strategy:
 // cache-first for static assets, network-first for navigations, never cache /api/.
 
-const CACHE_VERSION = "v1";
+// Versioned from the registration URL (`/sw.js?v=<build id>`), not from a
+// constant edited by hand. Two things depended on that and both were broken:
+// a hand-edited constant is forgotten on the deploy that needed it, so a new
+// release kept serving the previous build's shell out of the old cache; and
+// the browser decides whether to install a new worker by byte-comparing this
+// file, which never changes between releases, so no update was ever detected
+// at all. The build id moves every deploy, so both now follow the deploy.
+const CACHE_VERSION = new URL(self.location.href).searchParams.get("v") || "dev";
 const CACHE_NAME = `study-tracker-${CACHE_VERSION}`;
 
-// App shell: routes that should be cached for offline read access.
-const SHELL_ROUTES = ["/", "/login", "/register", "/onboarding"];
+// App shell: routes cached for offline read access.
+//
+// Every entry must be a real route that answers 200 without redirecting.
+// "/register" was never a route (creating an account is a tab on /login) and
+// "/" is a 307 to /today or /login depending on the session. Both were fatal
+// rather than cosmetic: see the install handler below.
+const SHELL_ROUTES = ["/login", "/today", "/onboarding"];
 
 // Static asset patterns: cache-first.
 const STATIC_PATTERNS = [
@@ -16,10 +28,35 @@ const STATIC_PATTERNS = [
 ];
 
 // Precache the app shell on install.
+//
+// Deliberately NOT cache.addAll. addAll is all-or-nothing: one 404 among the
+// routes rejects the whole promise, install fails, and the worker never
+// reaches activated. A redirect does the same, because a redirected response
+// cannot be written to a cache at all. The shell list contained one of each,
+// so this worker had never installed on any device - which is not merely an
+// offline problem. `navigator.serviceWorker.ready` waits for an ACTIVE
+// worker, so it never settled, and push subscription awaits it: tapping "Add
+// this device" hung forever and no notification could ever be delivered.
+//
+// Each route is now fetched on its own and a failure is skipped. A shell
+// entry that is missing costs one offline page; it must never cost the
+// install.
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(SHELL_ROUTES);
+    caches.open(CACHE_NAME).then(async (cache) => {
+      await Promise.all(
+        SHELL_ROUTES.map(async (route) => {
+          try {
+            // `redirect: "follow"` would hand back a response cache.put
+            // rejects; "error" turns a redirect into a failure this skips.
+            const response = await fetch(route, { redirect: "error" });
+            if (response.ok) await cache.put(route, response);
+          } catch {
+            // Offline at install time, or the route moved. Neither is worth
+            // failing the install over.
+          }
+        }),
+      );
     }),
   );
 });
@@ -84,7 +121,10 @@ self.addEventListener("fetch", (event) => {
         })
         .catch(() => {
           return caches.match(request).then((response) => {
-            return response || caches.match("/");
+            // "/" is a redirect and is never in the cache, so it was a
+            // fallback that always resolved to undefined. /today is the
+            // signed-in home and is precached.
+            return response || caches.match("/today") || caches.match("/login");
           });
         }),
     );
@@ -176,5 +216,21 @@ self.addEventListener("notificationclick", (event) => {
   );
 });
 
-// Skip waiting: make updates take effect immediately on next load.
-self.skipWaiting();
+// Activate a new worker only when the page asks, never on its own.
+//
+// This file used to call `self.skipWaiting()` at the top level, which runs as
+// soon as the script is parsed. That made the new worker take over while the
+// old page was still running, and an already-loaded page then requested the
+// previous build's JavaScript chunks from a worker that had just deleted the
+// cache holding them: the app half-updated under the person's feet, mid-use.
+// It also meant the worker never sat in `waiting`, so the page had no moment
+// at which to offer an update and nothing could ever tell the person a new
+// version existed.
+//
+// Now the new worker waits, the page notices it waiting and offers a reload,
+// and this message is what the reload sends back.
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
+});
