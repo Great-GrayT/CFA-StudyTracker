@@ -68,31 +68,36 @@ export function estimateResource(
   let minutes = 0;
 
   switch (r.kind) {
-    case "lecture":
+    case "lecture": {
       if (r.notesPages === undefined) return 0;
       minutes = Math.max(15, c.PAGE_RATE * r.notesPages);
       break;
+    }
 
-    case "eocq":
+    case "eocq": {
       if (r.lectureMinutes === undefined) return 0;
       minutes = Math.max(10, c.EOCQ_MULT * r.lectureMinutes);
       break;
+    }
 
-    case "review":
+    case "review": {
       if (r.lectureMinutes === undefined) return 0;
       minutes = Math.max(8, c.REVIEW_MULT * r.lectureMinutes);
       break;
+    }
 
-    case "seminar":
+    case "seminar": {
       minutes = c.SEMINAR_MIN;
       break;
+    }
 
-    case "notes":
+    case "notes": {
       if (r.notesPages === undefined) return 0;
       minutes = c.NOTES_RATE * r.notesPages;
       break;
+    }
 
-    case "question_set":
+    case "question_set": {
       if (
         r.questionCount === undefined ||
         r.calcCount === undefined ||
@@ -105,17 +110,20 @@ export function estimateResource(
         r.questionCount *
         (c.Q_BASE + (c.Q_CALC - c.Q_BASE) * calcShare);
       break;
+    }
 
-    case "answer_set":
+    case "answer_set": {
       if (r.answerWords === undefined) return 0;
       const wordMinutes = r.answerWords / c.WPM;
       const exhibitMinutes = (r.exhibitCount ?? 0) * c.IMG_MIN;
       const calcMinutes = (r.calcCount ?? 0) * c.CALC_REDO;
       minutes = wordMinutes + exhibitMinutes + calcMinutes;
       break;
+    }
 
-    default:
-      return 0;
+    default: {
+      throw new Error(`Unknown resource kind: ${r.kind}`);
+    }
   }
 
   return Math.round(minutes * k);
