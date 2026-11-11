@@ -316,6 +316,13 @@ export default function SettingsPage() {
                 {numbers.format(dataCounts.logCount)} {logWord}, {numbers.format(dataCounts.mockCount)}{" "}
                 mock {mockWord}, {numbers.format(dataCounts.historyDays)} {dayWord} of history.
               </p>
+              {/* The counts were already here; the pages behind them were not
+                  linked from anywhere in the app. This is their natural home on
+                  a phone, where the bottom bar has no room for them. */}
+              <p className={styles.hint}>
+                Browse your <Link href="/logs">study log</Link> or your{" "}
+                <Link href="/mocks">mock exams</Link>.
+              </p>
               <div className={styles.buttonGroup}>
                 <button
                   type="button"
