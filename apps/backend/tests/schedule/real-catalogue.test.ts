@@ -114,8 +114,14 @@ test("real catalogue: generate horizon and report first seven days", async () =>
   // The task-kind distribution must include real question practice, not
   // only notes - this is exactly what would have caught CRITICAL1
   // (vignetteCount hardcoded to 0, so no "questions" task could ever be
-  // generated) on the first pass.
+  // generated) on the first pass. content-video and eocq are both derived
+  // from the same lecture unit's notesPageCount (the catalogue has no
+  // durationSeconds at all), so they must show up too - their absence was
+  // a second hardcoded-zero bug (videoMinutes pinned to 0) plus reading
+  // notes pages off the wrong row (the resource instead of its unit).
   const kinds = new Set(allTasks.map((t) => t.kind));
   expect(kinds.has("questions")).toBe(true);
+  expect(kinds.has("content-video")).toBe(true);
+  expect(kinds.has("eocq")).toBe(true);
   expect(kinds.size).toBeGreaterThan(1);
 });

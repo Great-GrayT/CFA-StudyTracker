@@ -3,7 +3,7 @@ import type {
   EffortConstants,
   ResourceInput,
 } from "../core/effort";
-import { DEFAULT_EFFORT_CONSTANTS, estimateModule } from "../core/effort";
+import { DEFAULT_EFFORT_CONSTANTS, estimateModule, estimateResource } from "../core/effort";
 import type { TopicEstimate } from "../core/allocation";
 import { allocate, weightImpliedMinutes } from "../core/allocation";
 import type {
@@ -78,6 +78,14 @@ type TopicOtherRaw = {
   seminarRaw: number;
 };
 
+/** Raw (pre-trim) lecture(video)/review minutes for a topic. Both share
+ * allocate()'s "reviewMinutes" trim tier (2nd priority), so they need the
+ * same post-trim proportional split as eocq/seminar above. */
+type TopicReviewRaw = {
+  lectureRaw: number;
+  reviewRaw: number;
+};
+
 /**
  * Build TopicEstimate by estimating effort from catalogue resources linked to readings.
  * Also returns, per reading, its question-practice shape (vignetteCount,
@@ -93,11 +101,13 @@ async function buildTopicEstimates(
   estimates: TopicEstimate[];
   readingProfiles: Map<string, ReadingQuestionProfile>;
   topicOtherRaw: Map<string, TopicOtherRaw>;
+  topicReviewRaw: Map<string, TopicReviewRaw>;
 }> {
   const topics = await db.topic.findMany({ where: { levelId } });
   const estimates: TopicEstimate[] = [];
   const readingProfiles = new Map<string, ReadingQuestionProfile>();
   const topicOtherRaw = new Map<string, TopicOtherRaw>();
+  const topicReviewRaw = new Map<string, TopicReviewRaw>();
 
   for (const topic of topics) {
     const readings = await db.reading.findMany({
@@ -114,6 +124,8 @@ async function buildTopicEstimates(
     let otherMinutes = 0;
     let eocqRaw = 0;
     let seminarRaw = 0;
+    let lectureRaw = 0;
+    let reviewRaw = 0;
 
     // For each reading, estimate effort from its linked resources
     for (const reading of readings) {
@@ -139,19 +151,43 @@ async function buildTopicEstimates(
       for (const ur of unitReadings) {
         const provider = ur.unit.edition.package.slug ?? ur.unit.edition.package.id;
 
+        // Notes pages live on the UNIT (notesPageCount), not the resource -
+        // the provider inventory records one page range per lecture unit,
+        // shared by every resource in it. Reading it off the resource row
+        // (which never carries it) silently zeroed every real lecture.
+        const unitNotesPages = ur.unit.notesPageCount ?? undefined;
+
+        // eocq and review also need "how long is the lecture", and the
+        // inventory never records actual video duration (measured by hand,
+        // kept out of the reseedable file - see seed-packages.ts). The
+        // lecture's own computed minutes (from notesPages, the same
+        // formula effort.ts's "lecture" case uses) is the best proxy for
+        // that: it's a measurement of the same lecture, just in pages
+        // instead of seconds. Computed at k=1 - this is an input to other
+        // resources' estimates, not a final estimate of its own.
+        const unitLectureMinutes =
+          unitNotesPages !== undefined
+            ? estimateResource({ kind: "lecture", notesPages: unitNotesPages }, constants, 1)
+            : undefined;
+
         for (const res of ur.unit.resources) {
           if (!KNOWN_EFFORT_KINDS.has(res.kind)) continue;
 
           const input: ResourceInput = { kind: res.kind };
 
-          if (res.kind === "lecture" && res.pageCount) {
-            input.notesPages = res.pageCount;
+          if (res.kind === "lecture" && unitNotesPages !== undefined) {
+            input.notesPages = unitNotesPages;
           }
 
-          // lectureMinutes drives eocq and review too (their formulas both
-          // read it), not only "lecture" - the provider inventory records
-          // one video length per resource regardless of which of the three
-          // kinds that video is.
+          if (
+            (res.kind === "eocq" || res.kind === "review") &&
+            unitLectureMinutes !== undefined
+          ) {
+            input.lectureMinutes = unitLectureMinutes;
+          }
+
+          // A directly measured duration, if one ever exists, overrides the
+          // notes-pages proxy above - it's the real number, not a stand-in.
           if (
             (res.kind === "lecture" || res.kind === "eocq" || res.kind === "review") &&
             res.durationSeconds
@@ -203,9 +239,12 @@ async function buildTopicEstimates(
       );
 
       totalTopicMinutes += est.total;
-      noteMinutes += est.byKind["lecture"] ?? 0;
+      // "lecture" is video (content-video), not notes - only the (currently
+      // nonexistent in this catalogue) "notes" kind belongs in noteMinutes.
       noteMinutes += est.byKind["notes"] ?? 0;
-      reviewMinutes += est.byKind["review"] ?? 0;
+      lectureRaw += est.byKind["lecture"] ?? 0;
+      reviewRaw += est.byKind["review"] ?? 0;
+      reviewMinutes += (est.byKind["lecture"] ?? 0) + (est.byKind["review"] ?? 0);
       questionMinutes += est.byKind["question_set"] ?? 0;
       questionMinutes += est.byKind["answer_set"] ?? 0;
       eocqRaw += est.byKind["eocq"] ?? 0;
@@ -224,9 +263,10 @@ async function buildTopicEstimates(
       moduleCount: readings.length,
     });
     topicOtherRaw.set(topic.id, { eocqRaw, seminarRaw });
+    topicReviewRaw.set(topic.id, { lectureRaw, reviewRaw });
   }
 
-  return { estimates, readingProfiles, topicOtherRaw };
+  return { estimates, readingProfiles, topicOtherRaw, topicReviewRaw };
 }
 
 /** A task represents real work the candidate already did, so regeneration
@@ -328,7 +368,7 @@ export async function generateHorizon(
   const totalPlanMinutes = Math.max(1, weekTotal * weeksUntilExam);
 
   // Build effort estimates and allocate by topic
-  const { estimates: topicEstimates, readingProfiles, topicOtherRaw } =
+  const { estimates: topicEstimates, readingProfiles, topicOtherRaw, topicReviewRaw } =
     await buildTopicEstimates(plan.levelId, totalPlanMinutes, factorTree);
   const allocationResult = allocate(topicEstimates, totalPlanMinutes);
 
@@ -392,6 +432,17 @@ export async function generateHorizon(
     const eocqShare = otherRaw.eocqRaw * otherScale;
     const seminarShare = otherRaw.seminarRaw * otherScale;
 
+    // reviewMinutes is lecture(video)+review folded together for
+    // allocation's trimming purposes (same reason/technique as otherMinutes
+    // above); split it back out scaled by whatever fraction survived
+    // trimming, so videoMinutes + reviewMinutes always sums to
+    // budget.reviewMinutes exactly.
+    const reviewRaw = topicReviewRaw.get(reading.topicId) ?? { lectureRaw: 0, reviewRaw: 0 };
+    const reviewRawTotal = reviewRaw.lectureRaw + reviewRaw.reviewRaw;
+    const reviewScale = reviewRawTotal > 0 ? budget.reviewMinutes / reviewRawTotal : 0;
+    const videoShare = reviewRaw.lectureRaw * reviewScale;
+    const reviewShare = reviewRaw.reviewRaw * reviewScale;
+
     const profile = readingProfiles.get(reading.id) ?? {
       vignetteCount: 0,
       calculationShare: 0.5,
@@ -400,12 +451,10 @@ export async function generateHorizon(
     packable.push({
       ...group,
       noteMinutes: Math.max(0, budget.noteMinutes / readingCountForTopic),
-      // Nothing in the catalogue maps to "content-video" honestly yet
-      // (review has its own kind below); left at 0 rather than fabricated.
-      videoMinutes: 0,
+      videoMinutes: Math.max(0, videoShare / readingCountForTopic),
       eocqMinutes: Math.max(0, eocqShare / readingCountForTopic),
       seminarMinutes: Math.max(0, seminarShare / readingCountForTopic),
-      reviewMinutes: Math.max(0, budget.reviewMinutes / readingCountForTopic),
+      reviewMinutes: Math.max(0, reviewShare / readingCountForTopic),
       questionMinutes: Math.max(0, budget.questionMinutes / readingCountForTopic),
       vignetteCount: profile.vignetteCount,
       calculationShare: profile.calculationShare,
