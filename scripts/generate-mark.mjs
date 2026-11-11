@@ -1,4 +1,4 @@
-// Draws the octagonal rosette mark.
+// Draws the heptagonal rosette mark.
 //
 // Parametric rather than traced. The source artwork is a raster of an
 // interwoven girih rosette, and tracing it would give a mark that is heavy,
@@ -24,6 +24,17 @@ const BRAND = join(root, "apps", "frontend", "brand", "icons");
 const LIB = join(root, "apps", "frontend", "src", "lib");
 
 const C = 32; // centre of the 64 unit canvas
+
+// Seven-fold, not eight. One sector is 360/7 = 51.4285714 degrees, and the
+// motif is drawn from 360/21 = 17.1428571 degrees to 68.5714286, which is
+// exactly that sector start plus one whole sector. Offsetting the motif by a
+// third of a sector rather than centring it on the axis is what gives the
+// mark its shifted, spun look while staying truly seven-fold: the shape still
+// lands on itself after a seventh of a turn.
+const SIDES = 7;
+const SECTOR = 360 / SIDES; // 51.4285714...
+const MOTIF_START = 360 / (SIDES * 3); // 17.1428571...
+const MOTIF_END = MOTIF_START + SECTOR; // 68.5714286...
 const NAVY = "#122063";
 const BLUE = "#1A5CFF";
 const CHANNEL = "#FFFFFF"; // the interlace channel, and the page behind it
@@ -64,6 +75,68 @@ const ring = (count, startDeg = 0) =>
   Array.from({ length: count }, (_, i) => startDeg + (360 / count) * i);
 
 /**
+ * The tile the whole mark is made of: an asymmetric trapezoid whose apex is
+ * exactly one seventh of a turn.
+ *
+ * Its four interior angles are 360/7, 900/7, 540/7 and 720/7 degrees, which
+ * is 51.4286, 128.5714 (the heptagon's own interior angle), 77.1429 and
+ * 102.8571. They sum to 360, and they pair off to 180 across each leg, which
+ * is what makes it a trapezoid: exactly one pair of sides is parallel.
+ *
+ * It is deliberately NOT symmetric. An isosceles tile spun seven times gives
+ * a flower, which is the obvious thing and reads as one. This one has a long
+ * leg and a short one, so the seven copies lean the same way and the figure
+ * turns rather than sits.
+ *
+ * Solved by walking the perimeter from the centre: the exterior turn at each
+ * vertex is 180 minus its interior angle, and the last edge is closed by
+ * intersecting it with the ray the first edge left along. Nothing here is a
+ * measured coordinate, so the angles are exact by construction rather than
+ * right to three decimal places.
+ */
+function trapezoidTile(longLeg, shortSide, targetRadius) {
+  const A1 = 360 / SIDES; // 51.4285714, at the centre
+  const A2 = 900 / SIDES; // 128.5714286, the heptagon's interior angle
+  const A3 = 540 / SIDES; // 77.1428571
+
+  const V0 = [0, 0];
+  let heading = 0;
+  const V1 = [longLeg * Math.cos(rad(heading)), longLeg * Math.sin(rad(heading))];
+  heading += 180 - A2;
+  const V2 = [
+    V1[0] + shortSide * Math.cos(rad(heading)),
+    V1[1] + shortSide * Math.sin(rad(heading)),
+  ];
+  heading += 180 - A3;
+
+  // Close the shape on the ray the first edge left the centre along.
+  const dir = [Math.cos(rad(heading)), Math.sin(rad(heading))];
+  const ray = [Math.cos(rad(A1)), Math.sin(rad(A1))];
+  const det = dir[0] * -ray[1] - dir[1] * -ray[0];
+  const t = ((0 - V2[0]) * -ray[1] - (0 - V2[1]) * -ray[0]) / det;
+  const V3 = [V2[0] + t * dir[0], V2[1] + t * dir[1]];
+
+  // Scale so the furthest vertex lands on the target radius, whatever lengths
+  // were asked for.
+  const pts = [V0, V1, V2, V3];
+  const maxR = Math.max(...pts.map((p) => Math.hypot(p[0], p[1])));
+  const k = targetRadius / maxR;
+  return pts.map(([x, y]) => [x * k, y * k]);
+}
+
+/** Shrink a polygon toward its own centroid, for the inner colour. */
+function inset(pts, factor) {
+  const cx = pts.reduce((sum, p) => sum + p[0], 0) / pts.length;
+  const cy = pts.reduce((sum, p) => sum + p[1], 0) / pts.length;
+  return pts.map(([x, y]) => [cx + (x - cx) * factor, cy + (y - cy) * factor]);
+}
+
+/** Polygon path from centre-relative points. */
+function pathOf(pts) {
+  return `M${pts.map(([x, y]) => `${(C + x).toFixed(2)} ${(C + y).toFixed(2)}`).join(" L")} Z`;
+}
+
+/**
  * What each tier draws, measured at the size it is actually used.
  *
  * The channel widens as the mark shrinks: a 1.25 unit channel on a 64 unit
@@ -72,9 +145,12 @@ const ring = (count, startDeg = 0) =>
  * petals inside 24px leaves three pixels each.
  */
 const TIERS = {
-  large: { channel: 1.25, petals: 8, petal: [2, 22, 5.5], innerPetals: true, centre: 7.5 },
-  medium: { channel: 1.7, petals: 8, petal: [2, 21, 6], innerPetals: false, centre: 6.5 },
-  small: { channel: 2.6, petals: 6, petal: [1.5, 20, 7.5], innerPetals: false, centre: 5 },
+  // `facets` is how far the tile is subdivided. At 24px the facet edges are
+  // sub-pixel and the tile turns to mush, so the small tier draws the tile
+  // and its core and nothing finer.
+  large: { channel: 1.1, reach: 26.4, inset: 0.62, facets: 3, centre: 4.6 },
+  medium: { channel: 1.5, reach: 26.2, inset: 0.6, facets: 2, centre: 4.4 },
+  small: { channel: 2.4, reach: 25.8, inset: 0.58, facets: 1, centre: 4.2 },
 };
 
 /**
@@ -91,61 +167,108 @@ function markShapes(tier, mono = false) {
   const w = spec.channel;
   const shapes = [];
 
-  // The frame: a navy octagon, a blue band inside it, then the navy field the
-  // rosette sits on, so the petals read against navy rather than against the
-  // frame's own blue.
-  shapes.push({ d: polygon(8, 31, 22.5), fill: navy });
-  shapes.push({ d: polygon(8, 25.5, 22.5), fill: blue, stroke: CHANNEL, strokeWidth: w });
-  shapes.push({ d: polygon(8, 23, 22.5), fill: navy, stroke: CHANNEL, strokeWidth: w });
+  const band = (d, fill, strokeWidth = w, transform) =>
+    shapes.push({ d, fill, stroke: CHANNEL, strokeWidth, transform });
 
-  // The rosette: petals wide enough to overlap their neighbours, which is
-  // what makes the shape read as woven rather than as a ring of leaves.
-  const outer = petal(...spec.petal);
-  for (const a of ring(spec.petals)) {
-    shapes.push({
-      d: outer,
-      fill: blue,
-      stroke: CHANNEL,
-      strokeWidth: w,
-      transform: `rotate(${a} ${C} ${C})`,
-    });
-  }
+  // The frame, on the shifted axis so the heptagon's own corners line up with
+  // the tiles that fill it.
+  shapes.push({ d: polygon(SIDES, 31, MOTIF_START), fill: navy });
+  band(polygon(SIDES, 28, MOTIF_START), blue, w);
 
-  if (spec.innerPetals) {
-    // A second layer offset by half a step, so the two interlock rather than
-    // sit on top of one another.
-    const inner = petal(1.5, 15, 4.2);
-    for (const a of ring(8, 22.5)) {
+  // The tile, and the facets cut out of it. Every one of the seven copies is
+  // this same shape: the figure is one trapezoid turned seven times, not
+  // seven shapes arranged to look alike.
+  const tile = trapezoidTile(26, 9.5, spec.reach);
+  const [V0, V1, V2, V3] = tile;
+  const core = inset(tile, spec.inset);
+  const [W0, W1, W2, W3] = core;
+
+  for (const angle of ring(SIDES, MOTIF_START)) {
+    const spin = `rotate(${angle} ${C} ${C})`;
+
+    // The tile itself, in the darker colour: this is the band left around
+    // the core once the core is laid on top.
+    band(pathOf(tile), navy, w, spin);
+
+    if (spec.facets >= 2) {
+      // The core, split along its own diagonal. The two halves take opposite
+      // colours, which is what makes a single tile read as two-toned and
+      // gives the spun figure its pinwheel.
       shapes.push({
-        d: inner,
+        d: pathOf([W0, W1, W2]),
+        fill: blue,
+        stroke: CHANNEL,
+        strokeWidth: w * 0.8,
+        transform: spin,
+      });
+      shapes.push({
+        d: pathOf([W0, W2, W3]),
         fill: navy,
         stroke: CHANNEL,
-        strokeWidth: w,
-        transform: `rotate(${a} ${C} ${C})`,
+        strokeWidth: w * 0.8,
+        transform: spin,
+      });
+    } else {
+      band(pathOf(core), blue, w, spin);
+    }
+
+    if (spec.facets >= 3) {
+      // A third facet on the long leg only. The tile has one long leg and one
+      // short one, and marking the long one is what tells the eye which way
+      // the figure turns.
+      const legMid = [(V1[0] + V2[0]) / 2, (V1[1] + V2[1]) / 2];
+      shapes.push({
+        d: pathOf([V1, legMid, [(W1[0] + W2[0]) / 2, (W1[1] + W2[1]) / 2], W1]),
+        fill: blue,
+        stroke: CHANNEL,
+        strokeWidth: w * 0.7,
+        transform: spin,
+      });
+
+      // And a wedge on the short side, pointing the other way, so the tile
+      // is read as asymmetric rather than as a slightly wonky symmetric one.
+      // A triangle rather than a sliver: anything thinner than the channel
+      // around it reads as a rendering fault, not as a facet.
+      shapes.push({
+        d: pathOf([V3, W3, W0]),
+        fill: blue,
+        stroke: CHANNEL,
+        strokeWidth: w * 0.7,
+        transform: spin,
       });
     }
   }
 
-  // The centre flower, in the channel colour so it reads as a hole through
-  // the weave rather than as another band.
-  const centreOuter = spec.centre;
-  const centre = petal(0, centreOuter, centreOuter * 0.42);
-  for (const a of ring(spec.petals, 360 / spec.petals / 2)) {
-    shapes.push({ d: centre, fill: CHANNEL, transform: `rotate(${a} ${C} ${C})` });
-  }
-  shapes.push({ circle: true, r: Number((centreOuter * 0.2).toFixed(2)), fill: blue });
+  // The centre, where all seven apexes meet. A disc rather than a flower:
+  // seven tile points converging is already the detail, and anything drawn
+  // on top of it reads as a smudge.
+  shapes.push({ circle: true, r: spec.centre, fill: CHANNEL });
+  shapes.push({ circle: true, r: spec.centre * 0.62, fill: blue });
+  shapes.push({ circle: true, r: spec.centre * 0.24, fill: CHANNEL });
 
   return shapes;
 }
 
 function shapeToSvg(s) {
-  if (s.circle) return `<circle cx="${C}" cy="${C}" r="${s.r}" fill="${s.fill}"/>`;
+  if (s.circle) {
+    const attrs = [
+      `cx="${s.cx ?? C}"`,
+      `cy="${s.cy ?? C}"`,
+      `r="${s.r}"`,
+      `fill="${s.fill}"`,
+      s.stroke ? `stroke="${s.stroke}"` : "",
+      s.strokeWidth ? `stroke-width="${s.strokeWidth}"` : "",
+      s.transform ? `transform="${s.transform}"` : "",
+    ].filter(Boolean);
+    return `<circle ${attrs.join(" ")}/>`;
+  }
   const attrs = [
     `d="${s.d}"`,
     `fill="${s.fill}"`,
     s.stroke ? `stroke="${s.stroke}"` : "",
     s.strokeWidth ? `stroke-width="${s.strokeWidth}"` : "",
     s.stroke ? `stroke-linejoin="round"` : "",
+    s.stroke ? `stroke-linecap="round"` : "",
     s.transform ? `transform="${s.transform}"` : "",
   ].filter(Boolean);
   return `<path ${attrs.join(" ")}/>`;
