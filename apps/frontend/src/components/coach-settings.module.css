@@ -1,0 +1,289 @@
+/* Study coach and location, on the Settings page.
+ *
+ * No new colours or type sizes: every value here is an existing token, so these
+ * sections read as part of the page rather than as something bolted on. The
+ * section frame deliberately matches settings.module.css exactly (squared
+ * panel, pill controls, 44px minimum targets) because consistency IS the design
+ * on a settings screen, and a second visual idiom for the same job would only
+ * make the page harder to scan. */
+
+.section {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--raised);
+  border: 1px solid var(--rule-strong);
+}
+
+.sectionTitle {
+  font-size: 20px;
+  letter-spacing: -0.005em;
+  font-weight: 600;
+  margin: 0;
+}
+
+/* Says why the section exists before asking anything of the reader. Measure is
+ * held under 80 characters by the page's own 680px column. */
+.lede {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.hint {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+/* ---------------------------------------------------------------- the channels */
+
+/* A real fieldset, so the browser groups the three options and a screen reader
+ * announces the channel name before reading them. Its default border and
+ * padding are removed because the section already provides the frame. */
+.channel {
+  display: grid;
+  gap: var(--space-2);
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+
+.channelLabel {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+  padding: 0;
+}
+
+/* Three options, so three controls. Wraps rather than shrinks below the point
+ * where all three fit, which keeps every target at a thumb-sized width instead
+ * of squeezing "All three" into something unreadable on a narrow phone. */
+.choices {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.choiceWrap {
+  flex: 1 1 auto;
+  min-width: 6.5rem;
+  display: flex;
+  /* Contains the absolutely positioned input below. Without a positioned
+   * ancestor it resolves against the page and can push the scroll extent. */
+  position: relative;
+}
+
+/* Visually hidden, NOT display:none and NOT hidden: the input must stay in the
+ * accessibility tree and the tab order, because it is the thing providing the
+ * single tab stop and the arrow-key navigation. Removing it would hand back
+ * exactly the broken keyboard behaviour the styled buttons had. */
+.choiceInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.choiceLabel {
+  flex: 1 1 auto;
+  min-height: 44px;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-pill);
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  background: transparent;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.choiceInput:hover + .choiceLabel,
+.choiceLabel:hover {
+  background: var(--ground);
+}
+
+.choiceInput:checked + .choiceLabel {
+  background: var(--claimed);
+  color: var(--ground);
+  border-color: var(--claimed);
+}
+
+/* The focus ring has to be drawn on the label, since the input it belongs to is
+ * visually hidden. Without this the keyboard focus would be invisible, which is
+ * worse than no styling at all. */
+.choiceInput:focus-visible + .choiceLabel {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.choiceInput:disabled + .choiceLabel {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.findButton:focus-visible,
+.quietButton:focus-visible,
+.match:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------- the location */
+
+.current {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+  padding: var(--space-3);
+  background: var(--ground);
+  border: 1px solid var(--rule);
+}
+
+.currentPlace {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+/* Removing a location must be findable without being the loudest thing in the
+ * section. Quiet, not hidden: a privacy control that takes hunting for is worse
+ * than not offering one. */
+.quietButton {
+  padding: var(--space-2) var(--space-4);
+  min-height: 44px;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-pill);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.quietButton:hover:not(:disabled) {
+  background: var(--raised);
+}
+
+.quietButton:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.searchRow {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.searchLabel {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.searchControls {
+  display: flex;
+  gap: var(--space-2);
+  align-items: stretch;
+}
+
+.input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--space-3);
+  font-size: 16px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-input);
+  background: var(--ground);
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.input:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.findButton {
+  flex: 0 0 auto;
+  padding: var(--space-3) var(--space-5);
+  min-height: 44px;
+  background: var(--claimed);
+  color: var(--ground);
+  border: none;
+  border-radius: var(--radius-pill);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.findButton:hover:not(:disabled) {
+  background: var(--claimed-ink);
+}
+
+.findButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* The disambiguation list. Each row carries the zone as well as the place,
+ * because the zone is the consequence the candidate is really choosing: two
+ * cities with the same name are told apart by their region, but what actually
+ * differs for them is when the emails arrive. */
+.matches {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.match {
+  width: 100%;
+  min-height: 44px;
+  padding: var(--space-3);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  text-align: left;
+  background: var(--ground);
+  color: var(--text);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-input);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.match:hover:not(:disabled) {
+  background: var(--raised);
+  border-color: var(--claimed);
+}
+
+.match:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.matchPlace {
+  font-weight: 500;
+}
+
+.matchZone {
+  flex: 0 0 auto;
+  font-size: 13px;
+  color: var(--muted);
+}

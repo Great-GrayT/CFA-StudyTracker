@@ -10,6 +10,7 @@ import { api, signOut } from "@/lib/api";
 import { toast } from "sonner";
 import styles from "./settings.module.css";
 import { SecuritySettings } from "@/components/security-settings";
+import { CoachSettings, LocationSettings } from "@/components/coach-settings";
 
 const numbers = new Intl.NumberFormat("en");
 const plural = new Intl.PluralRules("en");
@@ -32,7 +33,6 @@ export default function SettingsPage() {
   const [showPasswordForm, setShowPasswordForm] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
   const [installPrompt, setInstallPrompt] = useState<any>(null);
-  const [missedDayAlerts, setMissedDayAlerts] = useState(true);
 
   const dataCounts = useMemo(() => {
     if (!logs.data || !mocks.data) return null;
@@ -272,26 +272,18 @@ export default function SettingsPage() {
           </div>
         </section>
 
+        {plan.data ? (
+          <>
+            <CoachSettings plan={plan.data} onSaved={() => plan.refetch()} />
+            <LocationSettings plan={plan.data} onSaved={() => plan.refetch()} />
+          </>
+        ) : null}
+
         <section className={styles.section}>
-          <h2 className={styles.sectionTitle}>Notifications</h2>
-          <div className={styles.toggle}>
-            <label htmlFor="missed-alerts" className={styles.toggleLabel}>
-              Missed day alerts
-            </label>
-            <button
-              id="missed-alerts"
-              type="button"
-              role="switch"
-              aria-checked={missedDayAlerts}
-              className={missedDayAlerts ? styles.switchOn : styles.switchOff}
-              onClick={() => setMissedDayAlerts(!missedDayAlerts)}
-              aria-label={missedDayAlerts ? "Alerts on" : "Alerts off"}
-            >
-              <span className={styles.switchThumb} />
-            </button>
-          </div>
+          <h2 className={styles.sectionTitle}>Devices</h2>
           <p className={styles.hint}>
-            Manage devices on <Link href="/watchdogs">System health</Link>.
+            Phone notifications go to every device you have added. Add or remove one on{" "}
+            <Link href="/watchdogs">System health</Link>.
           </p>
         </section>
 

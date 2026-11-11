@@ -36,6 +36,13 @@ const plan = (p: Partial<Plan> = {}): Plan => ({
   weeklyAvailability: fullWeek,
   isActive: true,
   createdAt: "2026-09-01",
+  timeZone: "UTC",
+  emailCoach: "all",
+  pushCoach: "all",
+  city: null,
+  countryCode: null,
+  latitude: null,
+  longitude: null,
   ...p,
 });
 

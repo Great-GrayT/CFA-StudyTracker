@@ -33,6 +33,9 @@ export const WEEKDAY_LABELS: Record<keyof WeeklyAvailability, string> = {
   sun: "Sunday",
 };
 
+/** How much of the study coach one delivery channel sends. */
+export type CoachPreference = "all" | "debrief-only" | "off";
+
 export type Plan = {
   id: string;
   userId: string;
@@ -42,6 +45,29 @@ export type Plan = {
   weeklyAvailability: WeeklyAvailability;
   isActive: boolean;
   createdAt: string;
+  // IANA zone the coach times its messages to. Set from the chosen city, and
+  // overridable for the candidate who studies in one zone and sits the exam in
+  // another.
+  timeZone: string;
+  // One per channel: wanting the full written briefing by email and only the
+  // night summary on a phone is an ordinary preference.
+  emailCoach: CoachPreference;
+  pushCoach: CoachPreference;
+  // City-level only, user-entered, and all null until they say.
+  city: string | null;
+  countryCode: string | null;
+  latitude: number | null;
+  longitude: number | null;
+};
+
+/** One match from the city lookup, which returns several so the candidate picks. */
+export type GeocodeMatch = {
+  city: string;
+  countryCode: string;
+  latitude: number;
+  longitude: number;
+  timeZone: string;
+  admin1: string | null;
 };
 
 export type Los = { id: string; text: string; order: number };
