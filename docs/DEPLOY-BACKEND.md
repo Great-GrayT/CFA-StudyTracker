@@ -91,6 +91,12 @@ generate a study task. `/api/health` reports `seeded: false` and returns 503
 for exactly this reason; on a first deploy that 503 is the expected state until
 this step is done.
 
+BOTH seeds count. `seeded` is true only when the curriculum AND the provider
+catalogue are loaded, because the scheduler builds tasks out of package
+resources: a curriculum on its own produces empty plans. The first real
+deployment of this app sat with 102 readings and zero catalogue resources, so
+the second script is not optional and is easy to forget.
+
 Copy the six files to the server, out of band, then seed from a one-off
 container with the directory mounted:
 
@@ -103,6 +109,25 @@ MOUNT=/srv/cfa/seed-data:/app/apps/backend/prisma/seed-data:ro
 docker compose run --rm -v $MOUNT app pnpm --filter backend db:seed
 docker compose run --rm -v $MOUNT app pnpm --filter backend db:seed:packages
 ```
+
+If `docker compose` is unavailable to you because the project's `.env` is
+readable only by the deploy user, go through the running container instead. It
+already holds `DATABASE_URL` in its environment, so no `.env` access is needed:
+
+```
+for f in ~/cfa-seed-data/*.json; do
+  docker cp "$f" <container>:/app/apps/backend/prisma/seed-data/
+done
+
+TSX=/app/node_modules/.pnpm/tsx@4.23.15/node_modules/tsx/dist/cli.mjs
+docker exec -w /app/apps/backend <container> node $TSX prisma/seed.ts
+docker exec -w /app/apps/backend <container> node $TSX prisma/seed-packages.ts
+```
+
+The image ships the seed scripts and tsx but no `.bin` shim, so tsx is invoked
+through its `cli.mjs` rather than by name. Files copied this way live in the
+container's writable layer and vanish on the next deploy, which is fine: only
+the database rows need to persist.
 
 Order matters: `db:seed` loads levels, topics, readings and outcomes;
 `db:seed:packages` links provider units to readings that must already exist.

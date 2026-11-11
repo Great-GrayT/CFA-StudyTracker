@@ -41,8 +41,17 @@ export async function GET(): Promise<Response> {
    * perfectly healthy by every other measure while being unable to generate a
    * single study task, and nothing anywhere says so.
    *
-   * Counted rather than merely probed: a Level row with no readings under it is
-   * a half-finished seed, which is worse than none because it looks loaded.
+   * BOTH halves are required, and that is not belt and braces. The first
+   * production deploy reported `seeded: true` on a database holding 102
+   * readings and ZERO catalogue resources, because this check originally asked
+   * only whether any reading existed. A curriculum with no provider catalogue
+   * behind it cannot generate a single task: the scheduler builds tasks from
+   * package resources, so every plan comes out empty while the flag that exists
+   * to catch exactly that says everything is fine.
+   *
+   * Counted rather than merely probed, for the same reason. A Level row with no
+   * readings under it is a half-finished seed, which is worse than none because
+   * it looks loaded.
    */
   let curriculumReadings = 0;
   let catalogueResources = 0;
@@ -58,7 +67,9 @@ export async function GET(): Promise<Response> {
       // not seeded. Either way the deploy is not ready.
     }
   }
-  const seeded = curriculumReadings > 0;
+  // Both seeds must have run. They are separate scripts and the second one is
+  // easy to forget, which is precisely what happened in production.
+  const seeded = curriculumReadings > 0 && catalogueResources > 0;
 
   const ok = config.ok && database && seeded;
 

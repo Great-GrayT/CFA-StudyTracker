@@ -1,6 +1,6 @@
 import { afterEach, test, expect } from "vitest";
 import { resetDb } from "../helpers/test-db";
-import { anyLosIdForLevel, ensureLevel } from "../helpers/fixtures";
+import { anyLosIdForLevel, ensureLevel, setupPlanWithCatalogue } from "../helpers/fixtures";
 import { GET } from "../../src/app/api/health/route";
 import { readJson } from "../helpers/request";
 import { checkConfig } from "../../src/lib/FUNC-config";
@@ -18,7 +18,7 @@ test("a correctly configured and seeded deployment reports healthy", async () =>
   // migrations and loads no data, so an empty curriculum is a real state the
   // endpoint has to distinguish rather than an artefact of the test database.
   await resetDb();
-  await anyLosIdForLevel("II");
+  await setupPlanWithCatalogue();
 
   const res = await GET();
   const body = await readJson(res);
@@ -154,14 +154,36 @@ test("an unseeded database is not healthy", async () => {
   expect(body.configuration.ok).toBe(true);
 });
 
-test("a seeded database is healthy", async () => {
+test("a curriculum with no provider catalogue is NOT healthy", async () => {
+  // Found in production rather than here, which is the whole point of writing
+  // it down. The first deploy reported seeded: true holding 102 readings and
+  // zero catalogue resources. The scheduler builds tasks from package
+  // resources, so every plan came out empty while the flag that exists to catch
+  // exactly this said everything was fine.
   await resetDb();
   await anyLosIdForLevel("II");
-  const res = await GET();
 
+  const res = await GET();
   const body = await readJson(res);
-  expect(body.seeded).toBe(true);
+
   expect(body.curriculum.readings).toBeGreaterThan(0);
+  expect(body.curriculum.catalogueResources).toBe(0);
+  expect(body.seeded).toBe(false);
+  expect(res.status).toBe(503);
+});
+
+test("a database with both seeds loaded is healthy", async () => {
+  // The two seeds are separate scripts and the second is easy to forget, so
+  // only the pair counts as seeded.
+  await resetDb();
+  await setupPlanWithCatalogue();
+
+  const res = await GET();
+  const body = await readJson(res);
+
+  expect(body.curriculum.readings).toBeGreaterThan(0);
+  expect(body.curriculum.catalogueResources).toBeGreaterThan(0);
+  expect(body.seeded).toBe(true);
   expect(res.status).toBe(200);
 });
 
