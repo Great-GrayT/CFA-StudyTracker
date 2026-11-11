@@ -2,7 +2,7 @@
 title: Frontend deployment runbook
 type: spec
 module: apps/frontend
-updated: 2026-11-08
+updated: 2026-11-11
 status: active
 ---
 
@@ -172,6 +172,10 @@ Stated plainly rather than discovered later.
 
 ## Related
 
+- [Backend deployment runbook](DEPLOY-BACKEND.md): the other half of a
+  deployment. Its `FRONTEND_BASE_URL` is this deployment's origin, and the study
+  coach will not send a single email until that variable and a scheduler are
+  both in place.
 - [CFA Study Tracker frontend design](superpowers/specs/2026-11-07-cfa-frontend-design.md): what was built and why.
 - [CFA Study Tracker screens and copy](superpowers/specs/2026-11-07-cfa-frontend-screens.md): the screens and every state's copy.
 - [CFA Study Tracker design](superpowers/specs/2026-11-04-cfa-study-tracker-design.md): the product spec.
