@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { backendBase, getToken } from "@/lib/session";
+import { allowed, isPublicPath } from "../allowlist";
 
 // Same-origin proxy to the study-tracker API.
 //
@@ -13,46 +14,9 @@ import { backendBase, getToken } from "@/lib/session";
 // body, which must be captured into the cookie rather than passed through to
 // the client, so they get their own handlers under /api/session.
 
-// An allowlist, not a passthrough. Without it this route would forward any path
-// a caller invents, including ones added to the backend later that were never
-// meant to be reachable from a browser (the cron tick is the live example: it
-// is protected by a shared secret, not a user JWT).
-const ALLOWED = [
-  /^plans(\/|$)/,
-  /^packages(\/|$)/,
-  /^logs(\/|$)/,
-  /^mock-exams(\/|$)/,
-  /^progress$/,
-  /^curriculum(\/|$)/,
-  /^export\/(all|log)$/,
-  /^push\/subscribe$/,
-  /^push\/subscriptions(\/|$)/,
-  /^cron\/(runs|run)$/,
-  /^auth\/me$/,
-  /^auth\/password$/,
-  /^auth\/2fa\/(setup|enable|disable)$/,
-  /^auth\/passkey\/register-(options|verify)$/,
-  /^auth\/passkeys(\/|$)/,
-];
-
-function allowed(path: string): boolean {
-  return ALLOWED.some((re) => re.test(path));
-}
-
-// Password reset is the one flow that must work WITHOUT a session: a user who
-// has forgotten their password has no token to send. These forward unauthed.
-const PUBLIC = [
-  /^auth\/forgot-password$/,
-  /^auth\/reset-password$/,
-  // Signing in cannot require a session. The second step and passkey login
-  // both happen before one exists.
-  /^auth\/2fa\/verify$/,
-  /^auth\/passkey\/login-(options|verify)$/,
-];
-
 async function forward(req: NextRequest, path: string[]): Promise<Response> {
   const joined = path.join("/");
-  const isPublic = PUBLIC.some((re) => re.test(joined));
+  const isPublic = isPublicPath(joined);
   if (!isPublic && !allowed(joined)) {
     return Response.json({ error: "Not found" }, { status: 404 });
   }
