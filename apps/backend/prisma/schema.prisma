@@ -186,6 +186,11 @@ model StudyPlan {
   // Strategy for ordering tasks on each day (e.g., "curriculum", "weakness-first", "practice-dense")
   orderingStrategy   String             @default("curriculum")
   isActive           Boolean            @default(true)
+  // IANA timezone name (e.g., "Europe/London"). Defaults to UTC so an existing plan without an explicit
+  // zone still behaves correctly without requiring a backfill migration.
+  timeZone           String             @default("UTC")
+  // Email coaching preference: one of "all", "debrief-only", "off". Defaults to "all" (all three emails daily).
+  emailCoach         String             @default("all")
   createdAt          DateTime           @default(now())
   user               User               @relation(fields: [userId], references: [id])
   level              Level              @relation(fields: [levelId], references: [id])
@@ -195,6 +200,7 @@ model StudyPlan {
   holidays           PlanHoliday[]
   planPackages       PlanPackage[]
   tasks              PlanTask[]
+  emailSends         EmailSend[]
 }
 
 // One task on a candidate's daily plan. A single task can span multiple readings
@@ -446,4 +452,26 @@ model PackageUnitReading {
   reading   Reading     @relation(fields: [readingId], references: [id])
   @@unique([unitId, readingId])
   @@index([readingId])
+}
+
+// One email send record for idempotent email scheduling. Tracks which email slots have been sent
+// to a plan on a given date in the candidate's own calendar.
+model EmailSend {
+  id              String   @id @default(cuid())
+  planId          String
+  // The candidate's local calendar date as YYYY-MM-DD, NOT a DateTime. Storing as a DateTime would
+  // invite a timezone conversion somewhere downstream and reintroduce the exact bug the whole timezone
+  // design exists to prevent. A date is a label in their calendar, not an instant.
+  localDate       String
+  // Email slot sent: one of "prescription", "nudge", "debrief"
+  slot            String
+  sentAt          DateTime?
+  failedAttempts  Int      @default(0)
+  lastError       String?
+  createdAt       DateTime @default(now())
+  plan            StudyPlan @relation(fields: [planId], references: [id])
+  // Central guard against duplicate emails: prevents the same slot from being sent twice for one day,
+  // even when the cron re-runs, retries overlap, or the scheduler crashes mid-flight.
+  @@unique([planId, localDate, slot])
+  @@index([planId, localDate])
 }

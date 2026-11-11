@@ -9,8 +9,8 @@ import { db } from "../../src/lib/db";
  *
  * The base order from the task is: ProgressSnapshot, StudyLogEntry, StudyPlan,
  * StudyPackage, LOS, Reading, Topic, Level, OAuthAccount, User.
- * This implementation adds MockExam, PlanTask, PlanHoliday, PushSubscription, and PlanPackage
- * in the correct positions to maintain FK safety with the complete schema.
+ * This implementation adds MockExam, PlanTask, PlanHoliday, PushSubscription, PlanPackage,
+ * and EmailSend in the correct positions to maintain FK safety with the complete schema.
  */
 export async function resetDb(): Promise<void> {
   // Delete in FK-safe order: each table after tables that reference it.
@@ -25,6 +25,7 @@ export async function resetDb(): Promise<void> {
   await db.mockExam.deleteMany({});
   await db.planHoliday.deleteMany({});
   await db.planPackage.deleteMany({});
+  await db.emailSend.deleteMany({});
   await db.studyPlan.deleteMany({});
   await db.packageUnitLos.deleteMany({});
   await db.packageUnitReading.deleteMany({});
