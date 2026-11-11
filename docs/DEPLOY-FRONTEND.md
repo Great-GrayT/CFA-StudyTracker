@@ -149,10 +149,14 @@ In order, because each step depends on the one before:
 3. Complete onboarding. If the level chooser shows no levels, step 5 is
    incomplete.
 4. Log a session. Today's numbers should change immediately.
-5. Open `/watchdogs`. The schedule should read `0 3 * * *`. Press "Run now"
+5. Open `/watchdogs`. The schedule should read `*/15 * * * *`. Press "Run now"
    and confirm a run appears.
-6. Install to a phone home screen, then grant notifications from `/watchdogs`.
-   On iOS this only works once installed; the screen says so.
+6. On `/watchdogs`, use "Install on this phone", then "Add this device" under
+   Push notifications. On iOS there is no install button and the screen gives
+   the Safari steps instead; notifications there only work once installed.
+7. Deploy again and confirm the open app offers "A new version is ready".
+   The service worker is versioned by `NEXT_PUBLIC_BUILD_ID`, so a release
+   with no code change in `apps/frontend/` will not trigger it.
 
 ## Known gaps at launch
 
