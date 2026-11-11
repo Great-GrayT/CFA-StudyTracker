@@ -42,7 +42,20 @@ export type PrescribedTask = {
 
 export type PrescribedDay = {
   date: string;
+  /** Minutes the plan asks for on this day. */
   totalMinutes: number;
+  /** Minutes of that which are finished. */
+  doneMinutes: number;
+  doneTasks: number;
+  totalTasks: number;
+  /**
+   * Outcomes logged on this day that no task scheduled for it covers.
+   *
+   * Counted, not timed: a log entry records an outcome, a confidence and a
+   * question tally, and never a duration, so there are no minutes to report
+   * here and inventing some would be worse than saying nothing.
+   */
+  offPlanLogs: number;
   tasks: PrescribedTask[];
 };
 
@@ -98,6 +111,13 @@ function refLabel(ref: string): string {
     })
     .join(" ");
 }
+
+/**
+ * The curriculum's own learning platform, which every registered candidate
+ * has. It is the fallback whenever the provider packages do not cover a
+ * module in the form the plan asked for.
+ */
+const CFA_STUDY_TOOLS = "https://cfaprogram.cfainstitute.org/studytools";
 
 const ACTIONS: Record<string, string> = {
   "content-notes": "Read",
@@ -236,19 +256,24 @@ export async function getPrescription(
       }
     }
 
-    // Say so rather than render an empty row. The planner budgets time per
-    // kind from a topic's overall shape, so it can set aside twenty minutes
-    // for an end-of-chapter walkthrough on a module where the candidate's
-    // package ships none. Silence there reads as a bug; naming it lets them
-    // spend the time on something else.
+    // Fall back to the curriculum's own material rather than reporting a
+    // dead end.
+    //
+    // The planner budgets time per kind from a topic's overall shape, so it
+    // can set aside twenty minutes for an end-of-chapter walkthrough on a
+    // module where the candidate's package ships none. Every candidate has
+    // CFA Institute's own study tools by virtue of being registered, so that
+    // gap has an answer: send them there instead of telling them their
+    // packages have failed them.
     if (materials.length === 0) {
       materials.push({
-        // No verb: there is nothing to do, and "Watch nothing in your
-        // packages covers this" reads as a broken sentence.
-        action: "",
-        label: "Nothing in your packages covers this module in that form.",
-        packageName: "",
-        url: null,
+        // "Use", not the task's own verb: nobody watches a study-tools site,
+        // and the task kind only says what the plan budgeted for, not what
+        // the fallback actually is.
+        action: "Use",
+        label: "CFA Institute study tools",
+        packageName: "Included with your exam registration",
+        url: CFA_STUDY_TOOLS,
         questionCount: null,
       });
     }
@@ -269,13 +294,55 @@ export async function getPrescription(
     byDate.set(dateStr, list);
   }
 
+  // What was actually logged in the window, so a day can say how much of its
+  // plan is behind the candidate and how much they did off it.
+  const logs = await db.studyLogEntry.findMany({
+    where: { planId, date: { gte: from, lt: new Date(to.getTime() + 86_400_000) } },
+    select: { date: true, losId: true },
+  });
+  const loggedLos = [...new Set(logs.map((l) => l.losId))];
+  const losReading = await db.lOS.findMany({
+    where: { id: { in: loggedLos } },
+    select: { id: true, readingId: true },
+  });
+  const readingOfLos = new Map(losReading.map((l) => [l.id, l.readingId]));
+
+  // Which readings each day's plan covers. A log counts as on-plan when its
+  // outcome belongs to a reading that day was scheduled to study; anything
+  // else is work the candidate chose for themselves, which is worth showing
+  // rather than quietly folding into the same number.
+  const plannedReadingsByDate = new Map<string, Set<string>>();
+  for (const task of tasks) {
+    const dateStr = task.date.toISOString().slice(0, 10);
+    const set = plannedReadingsByDate.get(dateStr) ?? new Set<string>();
+    for (const id of task.readingIds) set.add(id);
+    plannedReadingsByDate.set(dateStr, set);
+  }
+
+  const offPlanByDate = new Map<string, number>();
+  for (const log of logs) {
+    const dateStr = log.date.toISOString().slice(0, 10);
+    const planned = plannedReadingsByDate.get(dateStr);
+    const reading = readingOfLos.get(log.losId);
+    if (!planned || !reading || !planned.has(reading)) {
+      offPlanByDate.set(dateStr, (offPlanByDate.get(dateStr) ?? 0) + 1);
+    }
+  }
+
+  const isDone = (status: string) => status === "done" || status === "completed";
+
   const days: PrescribedDay[] = [];
   for (let d = new Date(from); d <= to; d.setUTCDate(d.getUTCDate() + 1)) {
     const dateStr = d.toISOString().slice(0, 10);
     const dayTasks = byDate.get(dateStr) ?? [];
+    const done = dayTasks.filter((t) => isDone(t.status));
     days.push({
       date: dateStr,
       totalMinutes: dayTasks.reduce((sum, t) => sum + t.estimatedMinutes, 0),
+      doneMinutes: done.reduce((sum, t) => sum + t.estimatedMinutes, 0),
+      doneTasks: done.length,
+      totalTasks: dayTasks.length,
+      offPlanLogs: offPlanByDate.get(dateStr) ?? 0,
       tasks: dayTasks,
     });
   }

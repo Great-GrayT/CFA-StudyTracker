@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { useTheme } from "next-themes";
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { usePlan, useLogs, useMocks } from "@/lib/hooks";
@@ -19,7 +18,6 @@ type User = { email: string; twoStepEnabled?: boolean; hasPassword?: boolean };
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { theme, setTheme } = useTheme();
   const plan = usePlan();
   const logs = useLogs(plan.data?.id);
   const mocks = useMocks(plan.data?.id);
@@ -245,32 +243,10 @@ export default function SettingsPage() {
           ) : null}
         </section>
 
-        <section className={styles.section}>
-          <h2 className={styles.sectionTitle}>Appearance</h2>
-          <div className={styles.themeButtons}>
-            <button
-              type="button"
-              className={theme === "system" ? styles.themeButtonActive : styles.themeButton}
-              onClick={() => setTheme("system")}
-            >
-              System
-            </button>
-            <button
-              type="button"
-              className={theme === "light" ? styles.themeButtonActive : styles.themeButton}
-              onClick={() => setTheme("light")}
-            >
-              Light
-            </button>
-            <button
-              type="button"
-              className={theme === "dark" ? styles.themeButtonActive : styles.themeButton}
-              onClick={() => setTheme("dark")}
-            >
-              Dark
-            </button>
-          </div>
-        </section>
+        {/* Appearance is not here any more. It is an icon in the navigation,
+            because changing the theme is a thing people do at a moment, when
+            the room gets dark, not a setting they come to this page to
+            configure. */}
 
         {plan.isLoading ? (
           <section className={styles.section}>

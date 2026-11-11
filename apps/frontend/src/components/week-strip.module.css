@@ -127,13 +127,57 @@
   outline-offset: 2px;
 }
 
+.divergence {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text);
+  max-width: 60ch;
+}
+
+/* Done work, drawn inside the planned bar. A lighter step of the same hue,
+   never a second colour: it is a portion of that measure, not a rival to it. */
+.done {
+  position: absolute;
+  inset: auto 0 0 0;
+  display: block;
+  background: var(--conf-4);
+}
+
+/* Work chosen outside the plan. A tick above the bar rather than stacked on
+   it, because it is not part of the planned height. */
+.offPlan {
+  position: absolute;
+  inset: 0 35% auto 35%;
+  height: 3px;
+  background: var(--strong);
+}
+
 .key {
   margin: 0;
+  display: grid;
+  gap: var(--space-1);
   font-size: 13px;
   color: var(--muted);
+}
+
+.keyRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.keyRow dt {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  margin: 0;
+}
+
+.keyRow dd {
+  margin: 0;
+  color: var(--text);
 }
 
 .keyMark {
@@ -141,4 +185,18 @@
   width: 16px;
   height: 2px;
   background: var(--rule-strong);
+}
+
+.keyDone {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  background: var(--conf-4);
+}
+
+.keyOffPlan {
+  display: inline-block;
+  width: 10px;
+  height: 3px;
+  background: var(--strong);
 }

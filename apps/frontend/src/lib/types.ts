@@ -206,7 +206,17 @@ export type PrescribedTask = {
 
 export type PrescribedDay = {
   date: string;
+  /** Minutes the plan asks for on this day. */
   totalMinutes: number;
+  /** Minutes of that which are finished. */
+  doneMinutes: number;
+  doneTasks: number;
+  totalTasks: number;
+  /**
+   * Outcomes logged on this day that no task scheduled for it covers.
+   * Counted, not timed: a log entry never records a duration.
+   */
+  offPlanLogs: number;
   tasks: PrescribedTask[];
 };
 
