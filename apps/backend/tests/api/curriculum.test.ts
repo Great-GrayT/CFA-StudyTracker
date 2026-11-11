@@ -157,3 +157,91 @@ describe("GET /api/curriculum/levels", () => {
     expect(one.available).toBe(true);
   });
 });
+
+// THE LEVEL CHOOSER'S CACHE
+//
+// This response decides whether a level is OFFERED at all, so a client pinned
+// to a stale copy is told a level does not exist rather than merely shown old
+// numbers. That happened in production: Level II was seeded and candidates kept
+// seeing Level I only, because their cached copy predated the seed and nothing
+// made them ask again.
+
+describe("GET /api/curriculum/levels caching", () => {
+  test("carries an ETag so a client can revalidate cheaply", async () => {
+    const user = await registerUser();
+    await seedLevel("II");
+
+    const res = await LEVELS(authed(user.token, "/api/curriculum/levels"));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("etag")).toMatch(/^"[0-9a-f]{32}"$/);
+    // max-age=0 with must-revalidate: always ask, almost always get a 304.
+    // Being wrong about which levels exist costs far more than a round trip.
+    expect(res.headers.get("cache-control")).toContain("must-revalidate");
+    expect(res.headers.get("cache-control")).toContain("private");
+  });
+
+  test("an unchanged list returns 304 with no body", async () => {
+    const user = await registerUser();
+    await seedLevel("II");
+
+    const first = await LEVELS(authed(user.token, "/api/curriculum/levels"));
+    const etag = first.headers.get("etag")!;
+
+    const req = authed(user.token, "/api/curriculum/levels");
+    req.headers.set("if-none-match", etag);
+    const second = await LEVELS(req);
+
+    expect(second.status).toBe(304);
+    expect(await second.text()).toBe("");
+  });
+
+  test("seeding a new level moves the ETag, so a cached client stops matching", async () => {
+    // The regression this exists for. If the ETag did not move, a candidate
+    // whose cache predated the seed would go on being told the level is
+    // unavailable, which is precisely the production symptom.
+    const user = await registerUser();
+    await seedLevel("I");
+
+    const before = await LEVELS(authed(user.token, "/api/curriculum/levels"));
+    const etagBefore = before.headers.get("etag")!;
+
+    // A second level arrives, exactly as a seed would deliver it.
+    await seedLevel("II");
+
+    const after = await LEVELS(authed(user.token, "/api/curriculum/levels"));
+    expect(after.headers.get("etag")).not.toBe(etagBefore);
+
+    // And the previously cached validator no longer short-circuits.
+    const stale = authed(user.token, "/api/curriculum/levels");
+    stale.headers.set("if-none-match", etagBefore);
+    expect((await LEVELS(stale)).status).toBe(200);
+  });
+
+  test("a level with curriculum is reported available", async () => {
+    const user = await registerUser();
+    await seedLevel("II");
+
+    const body = await readJson(await LEVELS(authed(user.token, "/api/curriculum/levels")));
+    const two = body.levels.find((l: { id: string }) => l.id === "II");
+    expect(two.available).toBe(true);
+    expect(two.topicCount).toBeGreaterThan(0);
+    expect(two.losCount).toBeGreaterThan(0);
+  });
+
+  test("a level row with no curriculum is reported unavailable, not hidden", async () => {
+    // Shown as disabled with a reason rather than silently omitted, so somebody
+    // looking for Level III learns it is not seeded yet instead of wondering.
+    const user = await registerUser();
+    await seedLevel("I");
+    await db.level.upsert({
+      where: { id: "III" },
+      create: { id: "III", version: "2026-test" },
+      update: {},
+    });
+
+    const body = await readJson(await LEVELS(authed(user.token, "/api/curriculum/levels")));
+    const three = body.levels.find((l: { id: string }) => l.id === "III");
+    expect(three).toBeDefined();
+    expect(three.available).toBe(false);
+  });
+});

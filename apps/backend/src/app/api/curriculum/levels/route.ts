@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { db } from "../../../../lib/db";
 import { requireUser } from "../../../../lib/FUNC-auth";
 
@@ -50,8 +51,7 @@ export async function GET(req: Request): Promise<Response> {
     losByTopic.set(topicId, (losByTopic.get(topicId) ?? 0) + row._count._all);
   }
 
-  return Response.json(
-    {
+  const body = {
       levels: levels.map((level) => {
         const topics = level.topics.map((t) => ({
           id: t.id,
@@ -72,7 +72,34 @@ export async function GET(req: Request): Promise<Response> {
           topics,
         };
       }),
-    },
-    { status: 200 },
-  );
+  };
+
+  const payload = JSON.stringify(body);
+  // Hashed like the full tree's ETag, and for a sharper reason here. This is
+  // the response that decides whether the chooser shows a level at all, so a
+  // client pinned to a stale copy is told a level does not exist. That happened
+  // in production: a seed loaded Level II and candidates kept seeing Level I
+  // only, because their cached copy predated it and nothing made them ask
+  // again. Hashing the payload rather than the version means even a partial
+  // reseed that forgets to bump a version produces a new ETag.
+  const etag = `"${createHash("sha256").update(payload).digest("hex").slice(0, 32)}"`;
+
+  // Private, not public: this sits behind a user token, so no shared cache may
+  // keep a copy even though the content is identical for every user.
+  // must-revalidate with max-age=0 so the client always asks, and almost always
+  // gets a 304 for its trouble. The body is a couple of kilobytes; being wrong
+  // about which levels exist is far more expensive than the round trip.
+  const cacheHeaders = {
+    etag,
+    "cache-control": "private, max-age=0, must-revalidate",
+  };
+
+  if (req.headers.get("if-none-match") === etag) {
+    return new Response(null, { status: 304, headers: cacheHeaders });
+  }
+
+  return new Response(payload, {
+    status: 200,
+    headers: { ...cacheHeaders, "content-type": "application/json" },
+  });
 }

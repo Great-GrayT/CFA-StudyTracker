@@ -52,11 +52,27 @@ export function useCurriculum(levelId: string | undefined): UseQueryResult<Curri
   });
 }
 
+/**
+ * The level chooser's list, and the one query that must never serve a stale
+ * answer from disk.
+ *
+ * It used to cache for an hour. Combined with the IndexedDB persister that is
+ * an hour ACROSS SESSIONS, so a reload does not help: the cache rehydrates and
+ * no request is made. This response decides whether a level is offered at all,
+ * so a stale copy does not merely show old numbers, it tells the candidate a
+ * level does not exist. That is exactly what happened in production after Level
+ * II was seeded.
+ *
+ * Revalidating on mount costs almost nothing now that the route sends an ETag:
+ * the usual answer is a 304 with no body. React Query keeps showing the cached
+ * list while that happens, so nothing flickers and nothing waits.
+ */
 export function useLevels(): UseQueryResult<{ levels: LevelSummary[] }> {
   return useQuery({
     queryKey: keys.levels,
     queryFn: () => api.get<{ levels: LevelSummary[] }>("curriculum/levels"),
-    staleTime: 1000 * 60 * 60,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 }
 
