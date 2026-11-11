@@ -272,12 +272,31 @@ export default function SettingsPage() {
           </div>
         </section>
 
-        {plan.data ? (
+        {plan.isLoading ? (
+          <section className={styles.section}>
+            <h2 className={styles.sectionTitle}>Study coach</h2>
+            <div className={styles.skeleton} />
+          </section>
+        ) : plan.data ? (
           <>
             <CoachSettings plan={plan.data} onSaved={() => plan.refetch()} />
             <LocationSettings plan={plan.data} onSaved={() => plan.refetch()} />
           </>
-        ) : null}
+        ) : (
+          /* Rendered rather than omitted. These preferences live on the plan,
+             so with no plan there is genuinely nothing to set, but an absent
+             section is indistinguishable from a missing feature: somebody
+             hunting for where to switch the emails off would find nothing at
+             all and conclude the setting does not exist. */
+          <section className={styles.section}>
+            <h2 className={styles.sectionTitle}>Study coach</h2>
+            <p className={styles.hint}>
+              The coach writes you a plan each morning, a nudge in the evening, and a summary at
+              night. Its settings live with your study plan, so they appear here once you have
+              one. <Link href="/onboarding">Create a plan</Link> to turn it on.
+            </p>
+          </section>
+        )}
 
         <section className={styles.section}>
           <h2 className={styles.sectionTitle}>Devices</h2>
