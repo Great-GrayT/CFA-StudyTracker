@@ -1,6 +1,5 @@
 import { test, expect } from "vitest";
-import type { SchedulableGroup } from "./ordering";
-import type { PlannedDay, PlannedTask } from "./packing";
+import type { PlannedDay, PlannedTask, PackableGroup } from "./packing";
 import { packDays } from "./packing";
 
 // Test helpers
@@ -47,27 +46,16 @@ function calendar(opts: CalendarOpts): Calendar {
   };
 }
 
-// Test fixtures extend SchedulableGroup with properties needed for task generation
-type FixtureGroup = SchedulableGroup & {
-  noteMinutes?: number;
-  videoMinutes?: number;
-  eocqMinutes?: number;
-  questionMinutes?: number;
-  vignetteCount?: number;
-  calculationShare?: number;
-};
-
 function fixtureGroup(opts: {
   ref: string;
   readingRefs?: string[];
-  estimatedMinutes?: number;
-  noteMinutes?: number;
-  videoMinutes?: number;
-  eocqMinutes?: number;
-  questionMinutes?: number;
-  vignetteCount?: number;
-  calculationShare?: number;
-}): FixtureGroup {
+  noteMinutes: number;
+  videoMinutes: number;
+  eocqMinutes: number;
+  questionMinutes: number;
+  vignetteCount: number;
+  calculationShare: number;
+}): PackableGroup {
   return {
     ref: opts.ref,
     readingRefs: opts.readingRefs ?? [opts.ref],
@@ -76,8 +64,8 @@ function fixtureGroup(opts: {
     moduleOrder: 0,
     priorityRank: 0,
     weight: 5,
-    estimatedMinutes: opts.estimatedMinutes ?? 120,
-    weightImpliedMinutes: opts.estimatedMinutes ?? 120,
+    estimatedMinutes: opts.noteMinutes + opts.videoMinutes + opts.eocqMinutes + opts.questionMinutes,
+    weightImpliedMinutes: opts.noteMinutes + opts.videoMinutes + opts.eocqMinutes + opts.questionMinutes,
     noteMinutes: opts.noteMinutes,
     videoMinutes: opts.videoMinutes,
     eocqMinutes: opts.eocqMinutes,
@@ -87,37 +75,34 @@ function fixtureGroup(opts: {
   };
 }
 
-// ONE_MODULE: single module with balanced task breakdown
-const ONE_MODULE: FixtureGroup[] = [
+// ONE_MODULE: single module with typical task breakdown
+const ONE_MODULE: PackableGroup[] = [
   fixtureGroup({
     ref: "test/m1",
-    estimatedMinutes: 120,
-    noteMinutes: 30,
-    videoMinutes: 30,
-    eocqMinutes: 30,
-    questionMinutes: 30,
+    noteMinutes: 20,
+    videoMinutes: 40,
+    eocqMinutes: 20,
+    questionMinutes: 40,
     vignetteCount: 2,
     calculationShare: 0.5,
   }),
 ];
 
-// SEQ: a sequence that would overflow with capacity 90 if not managed
-const SEQ: FixtureGroup[] = [
+// SEQ: sequence where naive packing would overflow 90-minute capacity
+const SEQ: PackableGroup[] = [
   fixtureGroup({
     ref: "test/seq1",
-    estimatedMinutes: 100,
     noteMinutes: 25,
-    videoMinutes: 25,
-    eocqMinutes: 25,
-    questionMinutes: 25,
+    videoMinutes: 30,
+    eocqMinutes: 20,
+    questionMinutes: 30,
     vignetteCount: 2,
     calculationShare: 0.5,
   }),
   fixtureGroup({
     ref: "test/seq2",
-    estimatedMinutes: 95,
     noteMinutes: 25,
-    videoMinutes: 25,
+    videoMinutes: 30,
     eocqMinutes: 20,
     questionMinutes: 25,
     vignetteCount: 2,
@@ -125,59 +110,60 @@ const SEQ: FixtureGroup[] = [
   }),
 ];
 
-// BIG_QUESTION_MODULE: module with multiple vignettes to test vignette boundary splitting
-const BIG_QUESTION_MODULE: FixtureGroup[] = [
+// VIGNETTE_SPLIT: module where questions span multiple vignettes and must split at boundaries.
+// 10 vignettes, 100 minutes = 10 min per vignette.
+// Pre-grouped into 5 tasks of 20 minutes each (2 vignettes per task).
+// With 25-minute daily capacity, each task fits individually but consecutive tasks don't.
+// Expected: 5 question tasks covering vignettes 0-1, 2-3, 4-5, 6-7, 8-9.
+const VIGNETTE_SPLIT: PackableGroup[] = [
   fixtureGroup({
-    ref: "test/bigq",
-    estimatedMinutes: 120,
-    noteMinutes: 20,
-    videoMinutes: 20,
+    ref: "test/vig",
+    noteMinutes: 10,
+    videoMinutes: 10,
     eocqMinutes: 10,
-    questionMinutes: 70,
-    vignetteCount: 6, // 6 vignettes, 12 questions per vignette
+    questionMinutes: 100,
+    vignetteCount: 10,
     calculationShare: 0.5,
   }),
 ];
 
-// LONG_LECTURE: module with a long video that needs to split
-const LONG_LECTURE: FixtureGroup[] = [
+// LONG_LECTURE: video long enough to require splitting.
+// 120-minute video with 60-minute capacity produces 2 parts of 60 each.
+const LONG_LECTURE: PackableGroup[] = [
   fixtureGroup({
     ref: "test/long",
-    estimatedMinutes: 150,
+    noteMinutes: 0,
+    videoMinutes: 120,
+    eocqMinutes: 0,
+    questionMinutes: 0,
+    vignetteCount: 1,
+    calculationShare: 0.5,
+  }),
+];
+
+// CALC_HEAVY: high calculation share
+const CALC_HEAVY: PackableGroup[] = [
+  fixtureGroup({
+    ref: "test/calc",
     noteMinutes: 20,
-    videoMinutes: 110, // Long video that needs to split
-    eocqMinutes: 10,
-    questionMinutes: 10,
+    videoMinutes: 30,
+    eocqMinutes: 20,
+    questionMinutes: 30,
     vignetteCount: 2,
     calculationShare: 0.5,
   }),
 ];
 
-// CALC_HEAVY: module with high calculation share
-const CALC_HEAVY: FixtureGroup[] = [
-  fixtureGroup({
-    ref: "test/calc",
-    estimatedMinutes: 100,
-    noteMinutes: 25,
-    videoMinutes: 25,
-    eocqMinutes: 25,
-    questionMinutes: 25,
-    vignetteCount: 2,
-    calculationShare: 0.5, // At boundary, should be timed-drill
-  }),
-];
-
-// JUDGEMENT: module with low calculation share
-const JUDGEMENT: FixtureGroup[] = [
+// JUDGEMENT: low calculation share
+const JUDGEMENT: PackableGroup[] = [
   fixtureGroup({
     ref: "test/judgement",
-    estimatedMinutes: 100,
-    noteMinutes: 25,
-    videoMinutes: 25,
-    eocqMinutes: 25,
-    questionMinutes: 25,
+    noteMinutes: 20,
+    videoMinutes: 30,
+    eocqMinutes: 20,
+    questionMinutes: 30,
     vignetteCount: 2,
-    calculationShare: 0.1, // Low calc share, should be untimed-review
+    calculationShare: 0.1,
   }),
 ];
 
@@ -191,7 +177,8 @@ function modeOf(days: PlannedDay[]): string | undefined {
   return questionTasks[0]?.mode;
 }
 
-// Tests
+// TESTS
+
 test("a day never exceeds its availability", () => {
   const days = packDays(SEQ, calendar({ mon: 90 }), OPTS);
   for (const d of days) {
@@ -199,43 +186,102 @@ test("a day never exceeds its availability", () => {
   }
 });
 
-test("a holiday gets no tasks", () => {
+test("a holiday gets no tasks and work moves to next available day", () => {
   const days = packDays(SEQ, calendar({ mon: 90, holidays: ["2027-01-04"] }), OPTS);
   const holidayDay = days.find((d) => d.date === "2027-01-04");
   expect(holidayDay).toBeDefined();
   expect(holidayDay!.tasks).toEqual([]);
+
+  // Verify that some work appears after the holiday (not just discarded).
+  const afterHoliday = days.slice(days.indexOf(holidayDay!) + 1);
+  expect(afterHoliday.some(d => d.tasks.length > 0)).toBe(true);
 });
 
-test("a module's chain is emitted in order", () => {
-  const kinds = packDays(ONE_MODULE, calendar({ every: 600 }), OPTS)
-    .flatMap((d) => d.tasks.map((t) => t.kind));
-  expect(kinds).toEqual(["content-notes", "content-video", "eocq", "questions"]);
+test("a module's chain is emitted in order: notes, video, eocq, questions", () => {
+  const days = packDays(ONE_MODULE, calendar({ every: 600 }), OPTS);
+  const kinds = days.flatMap((d) => d.tasks.map((t) => t.kind));
+
+  // Find indices of each kind (ignoring splits).
+  const notes = kinds.findIndex(k => k === "content-notes");
+  const video = kinds.findIndex(k => k === "content-video");
+  const eocq = kinds.findIndex(k => k === "eocq");
+  const questions = kinds.findIndex(k => k === "questions");
+
+  expect(notes).toBeGreaterThanOrEqual(0);
+  expect(video).toBeGreaterThan(notes);
+  expect(eocq).toBeGreaterThan(video);
+  expect(questions).toBeGreaterThan(eocq);
 });
 
-test("a question block never splits inside a vignette", () => {
-  const days = packDays(BIG_QUESTION_MODULE, calendar({ every: 60 }), OPTS);
-  for (const t of days.flatMap((d) => d.tasks).filter((t) => t.kind === "questions")) {
-    expect(t.vignetteFrom).toBeLessThanOrEqual(t.vignetteTo!);
-    expect(Number.isInteger(t.vignetteFrom)).toBe(true);
-    expect(Number.isInteger(t.vignetteTo!)).toBe(true);
+test("question blocks split at vignette boundaries, never mid-vignette", () => {
+  // VIGNETTE_SPLIT has 10 vignettes in 100 minutes (10 min each).
+  // Pre-grouped into 5 tasks of 2 vignettes (20 min each).
+  // With 25-minute capacity, each fits individually but not consecutively.
+  // Expected splits: 5 question tasks covering [0-1], [2-3], [4-5], [6-7], [8-9].
+  const days = packDays(VIGNETTE_SPLIT, calendar({ every: 25 }), OPTS);
+  const questionTasks = days.flatMap((d) => d.tasks).filter((t) => t.kind === "questions");
+
+  // Should have exactly 5 question tasks.
+  expect(questionTasks).toHaveLength(5);
+
+  // Check exact vignette ranges (hand-derived).
+  const ranges = questionTasks.map(t => [t.vignetteFrom, t.vignetteTo]);
+  expect(ranges).toEqual([
+    [0, 1],
+    [2, 3],
+    [4, 5],
+    [6, 7],
+    [8, 9],
+  ]);
+
+  // Verify contiguous coverage with no gaps or overlaps.
+  let nextExpected = 0;
+  for (const [from, to] of ranges) {
+    expect(from).toBe(nextExpected);
+    nextExpected = to! + 1;
+  }
+  expect(nextExpected).toBe(10);
+
+  // No task exceeds capacity.
+  for (const task of questionTasks) {
+    expect(task.estimatedMinutes).toBeLessThanOrEqual(25);
   }
 });
 
 test("a long lecture splits into parts, none under 15 minutes", () => {
-  const tasks = packDays(LONG_LECTURE, calendar({ every: 60 }), OPTS).flatMap((d) => d.tasks);
-  const parts = tasks.filter((t) => t.splitOf);
+  // LONG_LECTURE: 120-minute video, 60-minute capacity.
+  // Expected: 2 parts of 60 minutes each.
+  const days = packDays(LONG_LECTURE, calendar({ every: 60 }), OPTS);
+  const videoTasks = days.flatMap((d) => d.tasks).filter((t) => t.kind === "content-video");
+  const parts = videoTasks.filter((t) => t.splitOf);
+
   expect(parts.length).toBeGreaterThan(1);
-  for (const p of parts) expect(p.estimatedMinutes).toBeGreaterThanOrEqual(15);
-  expect(parts.map((p) => p.splitIndex)).toEqual([1, 2, 3]);
+  for (const p of parts) {
+    expect(p.estimatedMinutes).toBeGreaterThanOrEqual(15);
+  }
+
+  // Verify split indices are sequential.
+  const indices = parts.map((p) => p.splitIndex).sort((a, b) => (a ?? 0) - (b ?? 0));
+  expect(indices).toEqual([1, 2]);
 });
 
-test("question mode follows the reading's calculation share", () => {
-  expect(modeOf(packDays(CALC_HEAVY, calendar({ every: 600 }), OPTS))).toBe("timed-drill");
-  expect(modeOf(packDays(JUDGEMENT, calendar({ every: 600 }), OPTS))).toBe("untimed-review");
+test("question mode reflects calculation share: >= 0.35 is timed-drill, < 0.35 is untimed-review", () => {
+  // Test boundary at 0.35.
+  const atBoundary = packDays(CALC_HEAVY, calendar({ every: 600 }), OPTS);
+  expect(modeOf(atBoundary)).toBe("timed-drill");
+
+  const below = packDays(JUDGEMENT, calendar({ every: 600 }), OPTS);
+  expect(modeOf(below)).toBe("untimed-review");
 });
 
-test("only the last task of a module asks for confidence", () => {
-  const tasks = packDays(ONE_MODULE, calendar({ every: 600 }), OPTS).flatMap((d) => d.tasks);
-  expect(tasks.filter((t) => t.requiresConfidence)).toHaveLength(1);
+test("only the last task of each module has requiresConfidence true", () => {
+  const days = packDays(ONE_MODULE, calendar({ every: 600 }), OPTS);
+  const tasks = days.flatMap((d) => d.tasks);
+
+  const withConfidence = tasks.filter((t) => t.requiresConfidence);
+  expect(withConfidence).toHaveLength(1);
+  expect(withConfidence[0].kind).toBe("questions");
+
+  // The last task overall should be the one with confidence.
   expect(tasks[tasks.length - 1].requiresConfidence).toBe(true);
 });

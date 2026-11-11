@@ -32,6 +32,17 @@ export type Calendar = {
 
 export type PackOptions = Record<string, unknown>;
 
+// Input requires per-kind minutes from effort model, not invented.
+// Extends SchedulableGroup with outputs from the effort model (effort.ts -> byKind).
+export type PackableGroup = SchedulableGroup & {
+  noteMinutes: number;
+  videoMinutes: number;
+  eocqMinutes: number;
+  questionMinutes: number;
+  vignetteCount: number;
+  calculationShare: number;
+};
+
 type UnscheduledTask = PlannedTask & {
   moduleRef: string;
   isLastInModule: boolean;
@@ -82,59 +93,87 @@ function getAvailableMinutes(cal: Calendar, date: string): number {
   return cal.weeklyAvailability[weekday] ?? 0;
 }
 
-// Generate all task kinds for a module
+// Generate all task kinds for a module, with questions split into vignette groups.
+// Vignettes are grouped to ensure each question task is >= 15 minutes.
 function generateModuleTasks(
-  group: SchedulableGroup & { [key: string]: any }, // Allow access to additional properties
-  moduleIndex: number
+  group: PackableGroup
 ): UnscheduledTask[] {
   let tasks: UnscheduledTask[] = [];
-  const kinds = ["content-notes", "content-video", "eocq", "questions"];
 
-  // Use provided minutes or distribute equally
-  const noteMinutes = group.noteMinutes ?? Math.round(group.estimatedMinutes / 4);
-  const videoMinutes = group.videoMinutes ?? Math.round(group.estimatedMinutes / 4);
-  const eocqMinutes = group.eocqMinutes ?? Math.round(group.estimatedMinutes / 4);
-  const questionMinutes = group.questionMinutes ?? Math.round(group.estimatedMinutes / 4);
+  const noteMinutes = group.noteMinutes;
+  const videoMinutes = group.videoMinutes;
+  const eocqMinutes = group.eocqMinutes;
+  const questionMinutes = group.questionMinutes;
+  const vignetteCount = group.vignetteCount;
+  const calculationShare = group.calculationShare;
 
-  const minutesByKind = {
-    "content-notes": noteMinutes,
-    "content-video": videoMinutes,
-    "eocq": eocqMinutes,
-    "questions": questionMinutes,
-  };
+  // Notes task
+  if (noteMinutes > 0) {
+    tasks.push({
+      kind: "content-notes",
+      resourceId: undefined,
+      readingIds: group.readingRefs,
+      estimatedMinutes: noteMinutes,
+      requiresConfidence: false,
+      moduleRef: group.ref,
+      isLastInModule: false,
+    });
+  }
 
-  // Generate vignette boundaries for questions
-  const vignetteCount = group.vignetteCount ?? 1;
+  // Video task
+  if (videoMinutes > 0) {
+    tasks.push({
+      kind: "content-video",
+      resourceId: undefined,
+      readingIds: group.readingRefs,
+      estimatedMinutes: videoMinutes,
+      requiresConfidence: false,
+      moduleRef: group.ref,
+      isLastInModule: false,
+    });
+  }
 
-  for (const kind of kinds) {
-    const isLastKind = kind === "questions";
-    const minutes = minutesByKind[kind as keyof typeof minutesByKind];
+  // EOCQ task
+  if (eocqMinutes > 0) {
+    tasks.push({
+      kind: "eocq",
+      resourceId: undefined,
+      readingIds: group.readingRefs,
+      estimatedMinutes: eocqMinutes,
+      requiresConfidence: false,
+      moduleRef: group.ref,
+      isLastInModule: false,
+    });
+  }
 
-    if (kind === "questions") {
-      // For questions, create task with vignette range
-      const vigFrom = 0;
-      const vigTo = vignetteCount - 1;
+  // Question tasks: generate multiple tasks (one per vignette group) such that
+  // each task covers complete vignettes and is >= 15 minutes if possible.
+  if (questionMinutes > 0 && vignetteCount > 0) {
+    const minutesPerVignette = questionMinutes / vignetteCount;
+
+    // Calculate how many vignettes to group together to ensure >= 15 minutes per task.
+    // If any single vignette is >= 15 min, group size is 1.
+    // Otherwise, group them to meet the minimum.
+    const vignettesPerGroup = Math.max(1, Math.ceil(MIN_TASK_MINUTES / minutesPerVignette));
+    const groupCount = Math.ceil(vignetteCount / vignettesPerGroup);
+
+    for (let i = 0; i < groupCount; i++) {
+      const vigFrom = i * vignettesPerGroup;
+      const vigTo = Math.min((i + 1) * vignettesPerGroup - 1, vignetteCount - 1);
+      const groupMinutes = Math.round((vigTo - vigFrom + 1) * minutesPerVignette);
+      const isLastOfModule = i === groupCount - 1;
+
       tasks.push({
-        kind,
+        kind: "questions",
         resourceId: undefined,
         readingIds: group.readingRefs,
-        estimatedMinutes: minutes,
-        requiresConfidence: isLastKind,
-        mode: group.calculationShare !== undefined && group.calculationShare >= 0.35 ? "timed-drill" : "untimed-review",
+        estimatedMinutes: groupMinutes,
+        requiresConfidence: isLastOfModule,
+        mode: calculationShare >= 0.35 ? "timed-drill" : "untimed-review",
         vignetteFrom: vigFrom,
         vignetteTo: vigTo,
         moduleRef: group.ref,
-        isLastInModule: isLastKind,
-      });
-    } else {
-      tasks.push({
-        kind,
-        resourceId: undefined,
-        readingIds: group.readingRefs,
-        estimatedMinutes: minutes,
-        requiresConfidence: isLastKind,
-        moduleRef: group.ref,
-        isLastInModule: isLastKind,
+        isLastInModule: isLastOfModule,
       });
     }
   }
@@ -158,8 +197,13 @@ function mergeSmallTasks(tasks: UnscheduledTask[]): UnscheduledTask[] {
       // Merge into preceding task
       const lastTask = result[result.length - 1];
       lastTask.estimatedMinutes += task.estimatedMinutes;
-      lastTask.requiresConfidence = task.requiresConfidence; // Update if last task changed
-      lastTask.isLastInModule = task.isLastInModule;
+      // If merged task is last, transfer requiresConfidence
+      if (task.requiresConfidence) {
+        lastTask.requiresConfidence = true;
+      }
+      if (task.isLastInModule) {
+        lastTask.isLastInModule = true;
+      }
     } else {
       result.push(task);
     }
@@ -168,54 +212,75 @@ function mergeSmallTasks(tasks: UnscheduledTask[]): UnscheduledTask[] {
   return result;
 }
 
-// Split a task into parts
-function splitTask(task: UnscheduledTask, maxMinutes: number): { head: UnscheduledTask; tail: UnscheduledTask } {
+// Split a task into parts at natural boundaries.
+// For questions, split at vignette boundaries (never mid-vignette).
+// Returns null if the task cannot be split while respecting boundaries.
+function splitTask(task: UnscheduledTask, maxMinutes: number): { head: UnscheduledTask; tail: UnscheduledTask } | null {
   const headMinutes = Math.max(MIN_TASK_MINUTES, maxMinutes);
 
   if (task.kind === "questions") {
-    // Split questions at vignette boundaries
+    // Split questions at vignette boundaries.
     const vigFrom = task.vignetteFrom ?? 0;
     const vigTo = task.vignetteTo ?? 0;
     const totalVignettes = vigTo - vigFrom + 1;
-    const vignettesPerPart = Math.max(1, Math.floor(totalVignettes * (headMinutes / task.estimatedMinutes)));
+    const minutesPerVignette = task.estimatedMinutes / totalVignettes;
 
-    const headVigTo = Math.min(vigFrom + vignettesPerPart - 1, vigTo);
+    // Determine how many complete vignettes fit in the head capacity.
+    const vignettesForHead = Math.max(1, Math.floor(headMinutes / minutesPerVignette));
+
+    // Check if the head would be < 15 minutes (less than one vignette group).
+    const actualHeadMinutes = vignettesForHead * minutesPerVignette;
+    if (actualHeadMinutes < MIN_TASK_MINUTES && vignettesForHead < totalVignettes) {
+      // Cannot split without violating the 15-minute minimum.
+      return null;
+    }
+
+    // Ensure we don't exceed the vignette range.
+    const headVigTo = Math.min(vigFrom + vignettesForHead - 1, vigTo);
+
     const headTask: UnscheduledTask = {
       ...task,
-      estimatedMinutes: headMinutes,
+      estimatedMinutes: Math.round(actualHeadMinutes),
       vignetteFrom: vigFrom,
       vignetteTo: headVigTo,
       splitOf: task.splitOf ?? task.moduleRef,
+      requiresConfidence: false, // Only last task of module has this.
     };
 
+    const tailMinutes = task.estimatedMinutes - Math.round(actualHeadMinutes);
     const tailTask: UnscheduledTask = {
       ...task,
-      estimatedMinutes: task.estimatedMinutes - headMinutes,
+      estimatedMinutes: tailMinutes,
       vignetteFrom: headVigTo + 1,
       vignetteTo: vigTo,
       splitOf: task.splitOf ?? task.moduleRef,
+      requiresConfidence: task.requiresConfidence, // Preserve for last task.
+      isLastInModule: task.isLastInModule, // Preserve for last task.
     };
 
     return { head: headTask, tail: tailTask };
   } else {
-    // For other tasks, split at any boundary
+    // For other tasks, split at any boundary.
     const headTask: UnscheduledTask = {
       ...task,
       estimatedMinutes: headMinutes,
       splitOf: task.splitOf ?? task.moduleRef,
+      requiresConfidence: false,
     };
 
     const tailTask: UnscheduledTask = {
       ...task,
       estimatedMinutes: task.estimatedMinutes - headMinutes,
       splitOf: task.splitOf ?? task.moduleRef,
+      requiresConfidence: task.requiresConfidence,
+      isLastInModule: task.isLastInModule,
     };
 
     return { head: headTask, tail: tailTask };
   }
 }
 
-// Ensure split counts are set and indices are sequential
+// Assign splitIndex and splitCount based on placement order.
 function finalizeSplits(tasks: UnscheduledTask[]): UnscheduledTask[] {
   const splitGroups = new Map<string, UnscheduledTask[]>();
 
@@ -228,7 +293,7 @@ function finalizeSplits(tasks: UnscheduledTask[]): UnscheduledTask[] {
     }
   }
 
-  // Assign splitIndex and splitCount based on actual order
+  // Assign splitIndex and splitCount based on actual order.
   for (const [key, group] of splitGroups.entries()) {
     for (let i = 0; i < group.length; i++) {
       group[i].splitIndex = i + 1;
@@ -240,18 +305,18 @@ function finalizeSplits(tasks: UnscheduledTask[]): UnscheduledTask[] {
 }
 
 export function packDays(
-  seq: SchedulableGroup[],
+  seq: PackableGroup[],
   cal: Calendar,
   opts: PackOptions
 ): PlannedDay[] {
-  // Generate all tasks for all modules
+  // Generate all tasks for all modules.
   const allTasks: UnscheduledTask[] = [];
   for (let i = 0; i < seq.length; i++) {
-    const moduleTasks = generateModuleTasks(seq[i], i);
+    const moduleTasks = generateModuleTasks(seq[i]);
     allTasks.push(...moduleTasks);
   }
 
-  // Create day queue
+  // Create day queue.
   const allDayTasks: UnscheduledTask[] = [];
   const days: Array<{ date: string; taskIndices: number[] }> = [];
   const startDate = fromISODate(cal.startDate);
@@ -265,10 +330,10 @@ export function packDays(
     const availableMinutes = getAvailableMinutes(cal, dateStr);
 
     if (availableMinutes === 0) {
-      // Holiday: add empty day
+      // Holiday: add empty day.
       days.push({ date: dateStr, taskIndices: [] });
     } else {
-      // Fill the day with tasks
+      // Fill the day with tasks.
       const dayTaskIndices: number[] = [];
       let usedMinutes = 0;
 
@@ -277,20 +342,26 @@ export function packDays(
         const remainingCapacity = availableMinutes - usedMinutes;
 
         if (task.estimatedMinutes <= remainingCapacity) {
-          // Task fits
+          // Task fits.
           allDayTasks.push(task);
           dayTaskIndices.push(allDayTasks.length - 1);
           usedMinutes += task.estimatedMinutes;
           taskIndex++;
         } else if (remainingCapacity >= MIN_TASK_MINUTES) {
-          // Try to split
-          const { head, tail } = splitTask(task, remainingCapacity);
-          allDayTasks.push(head);
-          dayTaskIndices.push(allDayTasks.length - 1);
-          usedMinutes += head.estimatedMinutes;
-          allTasks[taskIndex] = tail;
+          // Try to split.
+          const split = splitTask(task, remainingCapacity);
+          if (split) {
+            const { head, tail } = split;
+            allDayTasks.push(head);
+            dayTaskIndices.push(allDayTasks.length - 1);
+            usedMinutes += head.estimatedMinutes;
+            allTasks[taskIndex] = tail;
+          } else {
+            // Cannot split (e.g., questions with large vignettes).
+            break;
+          }
         } else {
-          // Can't fit, move to next day
+          // Can't fit, move to next day.
           break;
         }
       }
@@ -301,10 +372,10 @@ export function packDays(
     currentDate = addDays(currentDate, 1);
   }
 
-  // Finalize all splits at once
+  // Finalize all splits at once.
   const finalizedTasks = finalizeSplits(allDayTasks);
 
-  // Build result with finalized tasks
+  // Build result with finalized tasks.
   const result: PlannedDay[] = days.map((dayInfo) => ({
     date: dayInfo.date,
     tasks: dayInfo.taskIndices.map((idx) => finalizedTasks[idx] as PlannedTask),
