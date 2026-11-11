@@ -1,5 +1,15 @@
-// Nightly host-cron endpoint: freezes each active plan's progress for the day
-// into a ProgressSnapshot, and sends the missed-day push.
+// Host-cron endpoint: freezes each active plan's progress for the day into a
+// ProgressSnapshot, then runs the email coach for every active plan.
+//
+// Must be scheduled FREQUENTLY, not nightly. The coach has three delivery slots
+// in the candidate's own local time (06:30, 20:00, 22:30) and candidates are in
+// different zones, so a single nightly tick would miss almost all of them.
+// Every 15 to 30 minutes is right. The snapshot half upserts on [planId, date],
+// so running it repeatedly within a day costs a write and changes nothing.
+//
+// Being late is safe by design: dueSlots has no upper bound, so a slot stays
+// due until it is actually sent, and the EmailSend uniqueness guard makes a
+// second attempt at an already-sent slot a no-op rather than a duplicate.
 //
 // Hit by the host's cron scheduler, not a browser, so it authenticates with a
 // shared Bearer secret (CRON_SECRET) rather than a user JWT. There is no
@@ -10,13 +20,11 @@
 // run that disagreed with the nightly one would be worse than no manual run.
 import { timingSafeEqual } from "node:crypto";
 import { db } from "../../../../lib/db";
-import { writeSnapshotForPlan, startOfUTCDay, addUTCDays } from "../../../../lib/snapshot";
-import { missedStudyDays, missedDaysWindow } from "../../../../core/pace";
-// Namespace import, not destructured: tests spy on pushModule.sendPushToUser
-// directly, which only intercepts calls made through this same object.
-import * as pushModule from "../../../../lib/FUNC-push";
-
-const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+import { writeSnapshotForPlan, startOfUTCDay } from "../../../../lib/snapshot";
+// Namespace import, not destructured, matching the convention documented in
+// FUNC-push.ts: a destructured value import binds at import time, before any
+// spy is installed, so a test could not intercept the call made here.
+import * as coachModule from "../../../../lib/FUNC-coach";
 
 // Constant-time Bearer-secret check, mirroring verifyJwt's signature
 // comparison: never compare a secret with ===, and guard the length before
@@ -54,47 +62,45 @@ export async function GET(req: Request): Promise<Response> {
   // snapshot. Failures are counted and logged with the planId, not swallowed.
   let plansFailed = 0;
   let plansSkipped = 0;
+  let emailsSent = 0;
+  const now = new Date();
+
   for (const plan of activePlans) {
     try {
-      const { outcome, weeklyAvailability, holidays, logDates } = await writeSnapshotForPlan(
-        plan,
-        today,
-      );
+      const { outcome } = await writeSnapshotForPlan(plan, today);
       if (outcome === "skipped") {
         plansSkipped += 1;
-        continue;
-      }
-
-      // Missed-day push: yesterday only, not today (still in progress) and not
-      // the trailing week the progress route reports. Clipped to the plan's
-      // valid window by the same helper the progress route uses, so a
-      // brand-new plan has no "yesterday" to have missed.
-      const yesterday = addUTCDays(today, -1);
-      const window = missedDaysWindow(plan, { from: yesterday, to: yesterday }, today);
-      const missedYesterday = window
-        ? missedStudyDays(
-            weeklyAvailability,
-            logDates,
-            { from: window.start, to: window.end },
-            holidays,
-          )
-        : [];
-
-      if (missedYesterday.length > 0) {
-        const subscriptionCount = await db.pushSubscription.count({ where: { userId: plan.userId } });
-        if (subscriptionCount > 0) {
-          const weekdayName = WEEKDAY_NAMES[yesterday.getUTCDay()];
-          await pushModule.sendPushToUser(plan.userId, {
-            title: "You missed a study day",
-            body: `You didn't log any study time on ${weekdayName}. Let's get back on track today.`,
-          });
-        }
       }
     } catch (err) {
       plansFailed += 1;
       console.error(`cron/tick: failed to snapshot plan ${plan.id}`, err);
     }
+
+    // Deliberately outside the snapshot's try, and deliberately still reached
+    // when the snapshot reports "skipped". That outcome means the exam date has
+    // passed, and a `continue` there would mean a finished plan never received
+    // the coach's sign-off, which is the one email a finished plan should get.
+    // The coach decides for itself what a past exam warrants, and sends that
+    // sign-off exactly once.
+    //
+    // Its own try/catch for the same reason as the snapshot's: this is an
+    // unattended batch and one plan's bad data must not cost every other
+    // candidate their email. runCoachForPlan already isolates individual send
+    // failures internally and reports them, so reaching this catch means
+    // something structural, not a bounced message.
+    try {
+      const result = await coachModule.runCoachForPlan(plan.id, now);
+      emailsSent += result.sent.length;
+    } catch (err) {
+      console.error(`cron/tick: coach failed for plan ${plan.id}`, err);
+    }
   }
+
+  // The ad-hoc "You missed a study day" push that used to live here is gone.
+  // The coach supersedes it completely: it covers the same event with the
+  // streak bands, the revised plan and copy that escalates, and on the same
+  // push channel. Keeping both meant a candidate who missed a day received two
+  // notifications saying the same thing in two different voices.
 
   const plansProcessed = activePlans.length - plansFailed - plansSkipped;
   await db.cronRun.update({
@@ -102,5 +108,8 @@ export async function GET(req: Request): Promise<Response> {
     data: { finishedAt: new Date(), ok: true, plansProcessed, plansFailed, plansSkipped },
   });
 
-  return Response.json({ ok: true, plansProcessed, plansFailed, plansSkipped }, { status: 200 });
+  return Response.json(
+    { ok: true, plansProcessed, plansFailed, plansSkipped, emailsSent },
+    { status: 200 },
+  );
 }

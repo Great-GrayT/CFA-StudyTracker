@@ -22,9 +22,14 @@ import { classify, type CoachInput } from "../core/coach-state";
 import { dialogueFor, type DialogueVars, type LineContext } from "../core/coach-dialogue";
 import { missedStudyDays, type WeeklyAvailability } from "../core/pace";
 import { holidayFacts } from "../core/holiday";
+import { splitLoggedWork } from "../core/logged-work";
 import { weatherTags } from "../core/weather";
 import { observationFor } from "./FUNC-weather";
-import { sendPushToUser } from "./FUNC-push";
+// Namespace import, not destructured, matching the convention this codebase
+// documents in FUNC-push.ts and cron/tick/route.ts: a destructured value import
+// binds the function at import time, before any spy is installed, so a test
+// spying on pushModule.sendPushToUser would never intercept the call made here.
+import * as pushModule from "./FUNC-push";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 // Date.UTC's getDay() ordering (0 = Sunday); same convention core/pace.ts and
@@ -141,9 +146,12 @@ async function claimEmailSend(
   planId: string,
   localDate: string,
   slot: Slot,
+  dialogueKey: string,
 ): Promise<{ id: string } | null> {
   try {
-    return await db.$transaction((tx) => tx.emailSend.create({ data: { planId, localDate, slot } }));
+    return await db.$transaction((tx) =>
+      tx.emailSend.create({ data: { planId, localDate, slot, dialogueKey } }),
+    );
   } catch (err) {
     if (isUniqueConstraintViolation(err)) return null;
     throw err;
@@ -226,10 +234,40 @@ export async function runCoachForPlan(
   const taskCount = todayTasks.length;
   const tasksDone = todayTasks.filter((t) => t.status === "done").length;
 
-  const loggedTodayCount = await db.studyLogEntry.count({
+  // What was actually studied today, resolved to readings so it can be compared
+  // against what was asked for. Counting tasks ticked is not enough: a candidate
+  // who studied the prescribed reading without ticking the box, and one who
+  // studied two hours of something else entirely, both tick zero boxes and used
+  // to come out as having done nothing.
+  const todayLogs = await db.studyLogEntry.findMany({
     where: { planId, date: { gte: todayDate, lt: addUTCDays(todayDate, 1) } },
+    select: { losId: true },
   });
+  const loggedTodayCount = todayLogs.length;
   const extraLogged = Math.max(0, loggedTodayCount - taskCount);
+
+  const loggedLos = loggedTodayCount
+    ? await db.lOS.findMany({
+        where: { id: { in: [...new Set(todayLogs.map((l) => l.losId))] } },
+        select: { id: true, readingId: true, reading: { select: { name: true } } },
+      })
+    : [];
+  const losToReading = new Map(loggedLos.map((l) => [l.id, l]));
+
+  // Per log entry, not per distinct reading: three sessions on one hard topic is
+  // three pieces of work and must not be credited as one.
+  const studiedReadingIds = todayLogs
+    .map((l) => losToReading.get(l.losId)?.readingId)
+    .filter((id): id is string => id !== undefined);
+  const split = splitLoggedWork(studiedReadingIds, readingIds);
+
+  // Named so the copy can say what they studied instead. Falls back to a
+  // neutral phrase rather than an empty string, since the renderer throws on an
+  // unsupplied variable and a blank topic name would read as a bug.
+  const firstOffPlan = todayLogs
+    .map((l) => losToReading.get(l.losId))
+    .find((l) => l !== undefined && !readingIds.includes(l.readingId));
+  const offPlanTopic = firstOffPlan?.reading.name ?? "something off the list";
 
   // NOT clamped at zero. A negative value is how the state model recognises
   // that the exam has passed, and clamping it would pin a finished plan to
@@ -255,6 +293,8 @@ export async function runCoachForPlan(
     taskCount,
     tasksDone,
     extraLogged,
+    onPlanLogged: split.onPlan,
+    offPlanLogged: split.offPlan,
     daysToExam,
     planTotalDays,
     planElapsedDays,
@@ -281,7 +321,13 @@ export async function runCoachForPlan(
     // until that projection is built, and no test pins this value.
     finishDate: toISODate(plan.examDate),
     droppedCount,
+    // What actually rolls into tomorrow, as distinct from what regeneration
+    // deleted this morning. The debrief has no regeneration behind it, so
+    // droppedCount is zero there and copy about tomorrow needs this instead.
+    requeueCount: Math.max(0, taskCount - tasksDone),
     firstTask,
+    offPlanCount: split.offPlan,
+    offPlanTopic,
     restDays: holiday.restDays,
     dayOfBlock: holiday.dayOfBlock,
     n: tasksDone,
@@ -315,14 +361,28 @@ export async function runCoachForPlan(
   }
   const context: LineContext = { horizon: state.horizon, phase: state.phase, weather };
 
+  // Once the exam has passed the coach signs off, exactly once, and then stops.
+  // The uniqueness guard is per local DATE, so without this the sign-off, whose
+  // own copy says there will be no further emails, would be sent every single
+  // morning for the rest of the plan's life.
+  let signedOff = false;
+  if (state.horizon === "past") {
+    signedOff =
+      (await db.emailSend.count({ where: { planId, dialogueKey: "P_PAST" } })) > 0;
+  }
+
   for (const slot of candidateSlots) {
     const key = dialogueFor(slot, state);
     if (key === null) {
       skipped.push(slot);
       continue;
     }
+    if (key === "P_PAST" && signedOff) {
+      skipped.push(slot);
+      continue;
+    }
 
-    const claimed = await claimEmailSend(planId, localDate, slot);
+    const claimed = await claimEmailSend(planId, localDate, slot, key);
     if (!claimed) {
       // Lost the race to a concurrent or earlier run of this exact slot.
       skipped.push(slot);
@@ -354,7 +414,7 @@ export async function runCoachForPlan(
       // channel for a message already delivered, so a dead subscription must
       // never mark a sent email as failed. sendPushToUser handles its own
       // per-subscription failures and resolves either way.
-      await sendPushToUser(plan.userId, push).catch(() => {
+      await pushModule.sendPushToUser(plan.userId, push).catch(() => {
         // Already logged inside FUNC-push. Nothing here can improve on it.
       });
     } catch (err) {

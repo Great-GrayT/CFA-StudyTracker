@@ -12,6 +12,7 @@
  *   lines/endgame.ts       the last fortnight, the eve, the day, and after
  *   lines/nudge.ts         the evening prod when nothing is logged
  *   lines/debrief.ts       the night report on what actually happened
+ *   lines/offplan.ts       real study aimed at the wrong material
  *
  * Every existing import of `LINES`, `DialogueKey` and `DialogueLine` from this
  * path keeps working, which is why the barrel exists rather than a flag day.
@@ -25,6 +26,7 @@ import { POOLS as RHYTHM } from "./lines/rhythm.ts";
 import { POOLS as ENDGAME } from "./lines/endgame.ts";
 import { POOLS as NUDGE } from "./lines/nudge.ts";
 import { POOLS as DEBRIEF } from "./lines/debrief.ts";
+import { POOLS as OFFPLAN } from "./lines/offplan.ts";
 
 export type { DialogueKey, DialogueLine, WeatherTag } from "./lines/types.ts";
 export { ALL_KEYS } from "./lines/types.ts";
@@ -36,6 +38,7 @@ const ASSEMBLED: Record<string, DialogueLine[]> = {
   ...ENDGAME,
   ...NUDGE,
   ...DEBRIEF,
+  ...OFFPLAN,
 };
 
 /**

@@ -20,6 +20,8 @@ function input(overrides: Partial<CoachInput>): CoachInput {
     taskCount: 5,
     tasksDone: 3,
     extraLogged: 0,
+    onPlanLogged: 0,
+    offPlanLogged: 0,
     daysToExam: 120,
     planTotalDays: 200,
     planElapsedDays: 80,
@@ -215,4 +217,68 @@ test("crisis day: crisis, catch-up, over logging", () => {
   expect(state.shape).toBe("catch-up");
   expect(state.logging).toBe("over");
   expect(state.streakDays).toBe(10);
+});
+
+// OFF-PLAN WORK
+//
+// The worst bug the coach has had: the day's verdict was read off tasks TICKED,
+// so a candidate who studied two hours of the wrong topic and a candidate who
+// studied nothing produced the identical "nothing". The first was then shamed
+// for idleness and sent an evening nudge insisting nothing was logged while
+// they were mid-session. These tests exist to keep that from coming back.
+
+test("studying the wrong topic is off-plan, never nothing", () => {
+  const state = classify(input({ tasksDone: 0, taskCount: 4, offPlanLogged: 2 }));
+  expect(state.logging).toBe("off-plan");
+});
+
+test("studying a prescribed reading without ticking the box still counts as progress", () => {
+  // The tick is a UI detail and the log entry is the evidence. A candidate who
+  // did exactly what was asked must not be told they did nothing because they
+  // skipped a checkbox.
+  const state = classify(input({ tasksDone: 0, taskCount: 4, onPlanLogged: 2 }));
+  expect(state.logging).toBe("partial");
+});
+
+test("on-plan work outranks off-plan work when both happened", () => {
+  // A day with some prescribed work done and some wandering is a partial day,
+  // not an off-plan one: the coach should acknowledge the real progress rather
+  // than lead with the correction.
+  const state = classify(
+    input({ tasksDone: 0, taskCount: 4, onPlanLogged: 1, offPlanLogged: 3 }),
+  );
+  expect(state.logging).toBe("partial");
+});
+
+test("a genuinely empty day is still nothing", () => {
+  // The distinction has to hold in both directions. If an empty log came out as
+  // off-plan the coach would credit work that never happened.
+  const state = classify(
+    input({ tasksDone: 0, taskCount: 4, onPlanLogged: 0, offPlanLogged: 0 }),
+  );
+  expect(state.logging).toBe("nothing");
+});
+
+test("ticked tasks still decide the verdict when there are any", () => {
+  // Off-plan only takes over when nothing on the list was done. A candidate who
+  // ticked two of four and also wandered is partial, as before.
+  const state = classify(
+    input({ tasksDone: 2, taskCount: 4, offPlanLogged: 5 }),
+  );
+  expect(state.logging).toBe("partial");
+});
+
+test("a complete day is unaffected by off-plan entries", () => {
+  const state = classify(
+    input({ tasksDone: 4, taskCount: 4, extraLogged: 0, offPlanLogged: 0 }),
+  );
+  expect(state.logging).toBe("complete");
+});
+
+test("off-plan work does not make the day a rest day or change the streak band", () => {
+  // Guards against the new branch leaking into the other two dimensions.
+  const state = classify(input({ tasksDone: 0, offPlanLogged: 3, streakDays: 2 }));
+  expect(state.logging).toBe("off-plan");
+  expect(state.shape).not.toBe("rest");
+  expect(state.streak).toBe("drifting");
 });

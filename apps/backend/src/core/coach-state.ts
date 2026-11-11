@@ -4,7 +4,15 @@
 
 export type StreakBand = "on-track" | "slip" | "drifting" | "serious" | "crisis";
 export type DayShape = "rest" | "light" | "normal" | "heavy" | "catch-up";
-export type LoggingState = "nothing" | "partial" | "complete" | "over";
+/**
+ * What the candidate did today, measured against what was asked.
+ *
+ * `off-plan` is the state that stops the coach calling a working candidate
+ * idle. Before it existed, the verdict was read off tasks TICKED, so somebody
+ * who studied two hours of the wrong topic and somebody who studied nothing at
+ * all produced the identical "nothing", and both were shamed for idleness.
+ */
+export type LoggingState = "nothing" | "off-plan" | "partial" | "complete" | "over";
 
 /**
  * How close the exam is. The same streak means completely different things at
@@ -64,12 +72,16 @@ export type CoachInput = {
   taskCount: number;
   tasksDone: number;
   extraLogged: number;
+  /** Log entries today on a reading that IS on today's list. */
+  onPlanLogged: number;
+  /** Log entries today on a reading that is NOT. */
+  offPlanLogged: number;
 };
 
 export function classify(input: CoachInput): CoachState {
   const streak = classifyStreak(input.streakDays);
   const shape = classifyShape(input);
-  const logging = classifyLogging(input.tasksDone, input.taskCount, input.extraLogged);
+  const logging = classifyLogging(input);
 
   return {
     streak,
@@ -150,9 +162,30 @@ function classifyShape(input: CoachInput): DayShape {
   return "normal";
 }
 
-function classifyLogging(tasksDone: number, taskCount: number, extraLogged: number): LoggingState {
-  // nothing: no task done
+/**
+ * Takes the whole input rather than three numbers, because the question "did
+ * this person work today" cannot be answered from the tick boxes alone and the
+ * previous signature made that mistake structurally easy.
+ */
+function classifyLogging(input: CoachInput): LoggingState {
+  const { tasksDone, taskCount, extraLogged, onPlanLogged, offPlanLogged } = input;
+
   if (tasksDone === 0) {
+    // Work on a prescribed reading with the box left unticked is still the
+    // prescribed work. The log entry is the evidence; the tick is a UI detail,
+    // and a candidate who did exactly what was asked must not be told they did
+    // nothing because they skipped a checkbox.
+    if (onPlanLogged > 0) {
+      return "partial";
+    }
+
+    // Real study, wrong direction. Distinct from "nothing" because the coach
+    // owes this candidate credit before it objects, and because an evening
+    // nudge claiming nothing is logged would simply be false.
+    if (offPlanLogged > 0) {
+      return "off-plan";
+    }
+
     return "nothing";
   }
 

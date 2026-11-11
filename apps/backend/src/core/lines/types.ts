@@ -84,7 +84,11 @@ export type DialogueKey =
   | "D_LOST_FIRST" | "D_LOST_STREAK"
   | "D_PARTIAL" | "D_PARTIAL_BEHIND"
   | "D_DONE" | "D_DONE_COMEBACK" | "D_OVER"
-  | "D_REST_BONUS" | "D_EXAM_EVE";
+  | "D_REST_BONUS" | "D_EXAM_EVE"
+  // Real study pointed at the wrong material. Separate from every "nothing"
+  // state because these candidates worked, and copy that calls them idle is
+  // the bug these keys exist to fix.
+  | "N_OFF_PLAN" | "D_OFF_PLAN" | "D_OFF_PLAN_BEHIND";
 
 /**
  * Every key, listed explicitly rather than derived from the assembled table.
@@ -113,6 +117,7 @@ export const ALL_KEYS = [
   "D_PARTIAL", "D_PARTIAL_BEHIND",
   "D_DONE", "D_DONE_COMEBACK", "D_OVER",
   "D_REST_BONUS", "D_EXAM_EVE",
+  "N_OFF_PLAN", "D_OFF_PLAN", "D_OFF_PLAN_BEHIND",
 ] as const satisfies readonly DialogueKey[];
 
 // Fails to compile if the union gains a key that ALL_KEYS does not list.

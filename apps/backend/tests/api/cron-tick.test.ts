@@ -6,6 +6,7 @@ import { db } from "../../src/lib/db";
 import { GET } from "../../src/app/api/cron/tick/route";
 import { setupUserWithPlan, ensureLevel, fullWeek, daysAgo, isoDate } from "../helpers/fixtures";
 import * as pushModule from "../../src/lib/FUNC-push";
+import * as coachModule from "../../src/lib/FUNC-coach";
 
 beforeEach(async () => {
   await resetDb();
@@ -77,47 +78,40 @@ test("tick sends a push notification for each user with a missed day and an acti
   expect(sendSpy).toHaveBeenCalledWith(user.id, expect.objectContaining({ title: expect.any(String) }));
 });
 
-test("tick does not send a push notification when the user has no subscription", async () => {
-  // Backdated startDate for the same reason as above - there needs to be a
-  // genuine missed day for "no subscription" to be the actual reason no
-  // push fires, not just an incidentally-null window.
-  await setupUserWithPlan({ weeklyAvailability: fullWeek, startDate: isoDate(daysAgo(10)) });
-  const sendSpy = vi.spyOn(pushModule, "sendPushToUser").mockResolvedValue(undefined);
+// The two tests that used to sit here asserted that the tick's own ad-hoc
+// "You missed a study day" push did not fire in two cases. That push is gone:
+// the coach supersedes it on the same channel, with the streak bands and the
+// revised plan. The behaviours those tests protected are still covered where
+// they now live, in pace.test.ts (a zero-hour weekday is not a missed day) and
+// push.test.ts (no subscriptions means nothing is delivered). What the tick is
+// still responsible for is calling the coach at all, which is what these
+// replacements pin.
+
+test("the coach runs for every active plan", async () => {
+  await setupUserWithPlan();
+  await setupUserWithPlan();
+  const coachSpy = vi
+    .spyOn(coachModule, "runCoachForPlan")
+    .mockResolvedValue({ sent: [], skipped: [], failed: [] });
 
   await GET(jsonRequest("GET", "/api/cron/tick", undefined, { Authorization: `Bearer ${process.env.CRON_SECRET}` }));
 
-  expect(sendSpy).not.toHaveBeenCalled();
+  expect(coachSpy).toHaveBeenCalledTimes(2);
 });
 
-// weeklyAvailability's yesterday-weekday hours are 0, so yesterday was never
-// a planned study day - missedStudyDays must not report it, and no push
-// should fire, even though the user does have a subscription. Backdated
-// startDate so this genuinely exercises the 0-hours-that-weekday branch
-// rather than passing trivially because the window is null regardless.
-test("tick does not send a push notification when yesterday was not a planned study day", async () => {
-  const yesterdayWeekday = new Date(Date.now() - 24 * 60 * 60 * 1000).getUTCDay();
-  const weekdayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
-  const noStudyYesterday = { ...fullWeek, [weekdayKeys[yesterdayWeekday]]: 0 };
-  const { user } = await setupUserWithPlan({ weeklyAvailability: noStudyYesterday, startDate: isoDate(daysAgo(10)) });
-  await db.pushSubscription.create({ data: { userId: user.id, endpoint: "https://push.example/abc", p256dh: "k1", auth: "k2" } });
-  const sendSpy = vi.spyOn(pushModule, "sendPushToUser").mockResolvedValue(undefined);
-
-  await GET(jsonRequest("GET", "/api/cron/tick", undefined, { Authorization: `Bearer ${process.env.CRON_SECRET}` }));
-
-  expect(sendSpy).not.toHaveBeenCalled();
-});
-
-// Regresses the "forever post-exam" bug: once a plan's exam date has
-// passed, cron must skip it entirely - no snapshot, no push - even though
-// yesterday really was a missed day under the plan's own template.
-test("tick skips a plan entirely (no snapshot, no push) once its exam date has passed", async () => {
-  const { user, plan } = await setupUserWithPlan({
+test("the coach still runs for a plan whose snapshot was skipped", async () => {
+  // "skipped" means the exam date has passed. If the coach sat inside that skip
+  // branch, a finished plan would never receive the sign-off, which is the one
+  // email a finished plan should get. The coach itself decides what a past exam
+  // warrants and sends that sign-off once.
+  await setupUserWithPlan({
     weeklyAvailability: fullWeek,
     startDate: isoDate(daysAgo(10)),
     examDate: isoDate(daysAgo(1)),
   });
-  await db.pushSubscription.create({ data: { userId: user.id, endpoint: "https://push.example/abc", p256dh: "k1", auth: "k2" } });
-  const sendSpy = vi.spyOn(pushModule, "sendPushToUser").mockResolvedValue(undefined);
+  const coachSpy = vi
+    .spyOn(coachModule, "runCoachForPlan")
+    .mockResolvedValue({ sent: [], skipped: [], failed: [] });
 
   const res = await GET(
     jsonRequest("GET", "/api/cron/tick", undefined, { Authorization: `Bearer ${process.env.CRON_SECRET}` }),
@@ -125,6 +119,57 @@ test("tick skips a plan entirely (no snapshot, no push) once its exam date has p
   const body = await res.json();
 
   expect(body.plansSkipped).toBe(1);
-  expect(sendSpy).not.toHaveBeenCalled();
+  expect(coachSpy).toHaveBeenCalledTimes(1);
+});
+
+test("one plan's coach failure does not stop the next plan's", async () => {
+  // Unattended batch: one bad record must never cost every other candidate
+  // their email.
+  await setupUserWithPlan();
+  await setupUserWithPlan();
+  const coachSpy = vi
+    .spyOn(coachModule, "runCoachForPlan")
+    .mockRejectedValueOnce(new Error("boom"))
+    .mockResolvedValue({ sent: [], skipped: [], failed: [] });
+
+  const res = await GET(jsonRequest("GET", "/api/cron/tick", undefined, { Authorization: `Bearer ${process.env.CRON_SECRET}` }));
+
+  expect(res.status).toBe(200);
+  expect(coachSpy).toHaveBeenCalledTimes(2);
+});
+
+test("the tick reports how many emails the coach sent", async () => {
+  await setupUserWithPlan();
+  vi.spyOn(coachModule, "runCoachForPlan").mockResolvedValue({
+    sent: ["prescription", "nudge"],
+    skipped: [],
+    failed: [],
+  });
+
+  const res = await GET(jsonRequest("GET", "/api/cron/tick", undefined, { Authorization: `Bearer ${process.env.CRON_SECRET}` }));
+  const body = await res.json();
+
+  expect(body.emailsSent).toBe(2);
+});
+
+// Regresses the "forever post-exam" bug: once a plan's exam date has passed,
+// cron must write no further snapshots, even though yesterday really was a
+// missed day under the plan's own template.
+test("tick writes no snapshot once a plan's exam date has passed", async () => {
+  const { plan } = await setupUserWithPlan({
+    weeklyAvailability: fullWeek,
+    startDate: isoDate(daysAgo(10)),
+    examDate: isoDate(daysAgo(1)),
+  });
+  // Stubbed so this test is about the snapshot half only. The coach's own
+  // post-exam behaviour is pinned in tests/coach/.
+  vi.spyOn(coachModule, "runCoachForPlan").mockResolvedValue({ sent: [], skipped: [], failed: [] });
+
+  const res = await GET(
+    jsonRequest("GET", "/api/cron/tick", undefined, { Authorization: `Bearer ${process.env.CRON_SECRET}` }),
+  );
+  const body = await res.json();
+
+  expect(body.plansSkipped).toBe(1);
   expect(await db.progressSnapshot.findFirst({ where: { planId: plan.id } })).toBeNull();
 });

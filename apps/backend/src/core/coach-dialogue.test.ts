@@ -6,6 +6,7 @@ import {
   variantIndex,
   ALL_DIALOGUE_KEYS,
   type DialogueVars,
+  type DialogueKey,
 } from "./coach-dialogue";
 import { LINES } from "./coach-lines";
 import type { CoachState } from "./coach-state";
@@ -33,16 +34,19 @@ const FULL_VARS: DialogueVars = {
   coveragePercent: 37,
   finishDate: "2027-06-02",
   droppedCount: 2,
+  requeueCount: 3,
   firstTask: "Fixed Income LM2",
+  offPlanCount: 2,
+  offPlanTopic: "Derivatives",
   restDays: 4,
   dayOfBlock: 2,
   n: 2,
 };
 
 describe("the content itself", () => {
-  test("there are at least 200 distinct dialogues across 40 states", () => {
+  test("there are at least 200 distinct dialogues across 43 states", () => {
     const total = ALL_DIALOGUE_KEYS.reduce((sum, key) => sum + LINES[key].length, 0);
-    expect(ALL_DIALOGUE_KEYS).toHaveLength(40);
+    expect(ALL_DIALOGUE_KEYS).toHaveLength(43);
     expect(total).toBeGreaterThanOrEqual(200);
   });
 
@@ -156,6 +160,56 @@ describe("the debrief tree", () => {
 
   test("a debrief is suppressed on a rest day", () => {
     expect(dialogueFor("debrief", state({ shape: "rest", logging: "nothing" }))).toBeNull();
+  });
+});
+
+describe("off-plan work", () => {
+  // The coach's worst bug was routing a candidate who had studied the wrong
+  // topic into the "you did nothing" copy. These pin the correction.
+
+  test("the night debrief credits the work before correcting the direction", () => {
+    expect(dialogueFor("debrief", state({ logging: "off-plan" }))).toBe("D_OFF_PLAN");
+    expect(dialogueFor("debrief", state({ logging: "off-plan", streak: "serious" }))).toBe(
+      "D_OFF_PLAN_BEHIND"
+    );
+  });
+
+  test("off-plan work never routes to any of the nothing-was-done states", () => {
+    const lost: DialogueKey[] = ["D_LOST_FIRST", "D_LOST_STREAK"];
+    for (const streak of ["on-track", "slip", "drifting", "serious", "crisis"] as const) {
+      const key = dialogueFor("debrief", state({ logging: "off-plan", streak }));
+      expect(lost).not.toContain(key);
+    }
+  });
+
+  test("the evening nudge redirects rather than claiming nothing is logged", () => {
+    // The most useful message the coach sends: there are still hours left to
+    // point the effort at the right material. A nudge saying nothing is logged
+    // would also simply be false.
+    expect(dialogueFor("nudge", state({ logging: "off-plan" }))).toBe("N_OFF_PLAN");
+  });
+
+  test("the redirect outranks the final-week nudge", () => {
+    // "You are working on the wrong topic" is more actionable than "the week is
+    // short", and the week being short does not make the claim that nothing is
+    // logged any less wrong.
+    expect(
+      dialogueFor("nudge", state({ logging: "off-plan", horizon: "final-week" }))
+    ).toBe("N_OFF_PLAN");
+  });
+
+  test("off-plan work on a rest day is a bonus, not a correction", () => {
+    // The plan asked for nothing, so nothing can be off-plan in spirit even
+    // though every entry is off-plan by the arithmetic.
+    expect(dialogueFor("debrief", state({ shape: "rest", logging: "off-plan" }))).toBe(
+      "D_REST_BONUS"
+    );
+    expect(dialogueFor("nudge", state({ shape: "rest", logging: "off-plan" }))).toBeNull();
+  });
+
+  test("the coach stays silent about direction once the exam has passed", () => {
+    expect(dialogueFor("nudge", state({ logging: "off-plan", horizon: "past" }))).toBeNull();
+    expect(dialogueFor("debrief", state({ logging: "off-plan", horizon: "past" }))).toBeNull();
   });
 });
 

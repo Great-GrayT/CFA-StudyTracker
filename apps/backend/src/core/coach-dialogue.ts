@@ -15,8 +15,24 @@ export type DialogueVars = {
   taskCount: number;
   coveragePercent: number;
   finishDate: string;
+  /**
+   * Tasks DELETED when the plan was regenerated this morning. Only ever
+   * non-zero in the prescription slot, because that is the only slot that
+   * regenerates. Debrief copy that says "N items move to tomorrow" wants
+   * `requeueCount`, not this: using this one there reads "0 items move to
+   * tomorrow" on almost every night.
+   */
   droppedCount: number;
+  /**
+   * Tasks on today's list still not done, which is what actually rolls into
+   * tomorrow. Meaningful in every slot.
+   */
+  requeueCount: number;
   firstTask: string;
+  /** Log entries today on readings that were not on today's list. */
+  offPlanCount: number;
+  /** Name of the first off-plan topic studied, for copy that names it. */
+  offPlanTopic: string;
   /** Length in days of the holiday block in play. Zero when none is. */
   restDays: number;
   /** Which day of that block today is, 1-based. Zero when today is not one. */
@@ -141,15 +157,23 @@ function prescriptionKey(state: CoachState): DialogueKey {
 }
 
 function nudgeKey(state: CoachState): DialogueKey | null {
-  // Nothing to nudge about on a rest day, or once the candidate has logged.
+  // Nothing to nudge about on a rest day, or once the candidate has made real
+  // progress against today's list.
   if (state.shape === "rest") return null;
-  if (state.logging !== "nothing") return null;
+  if (state.logging !== "nothing" && state.logging !== "off-plan") return null;
 
   // No prodding on the eve, the day, or after. On the eve the only thing a
   // nudge can add is anxiety, and anxiety the night before costs marks.
   if (state.horizon === "exam-eve") return null;
   if (state.horizon === "exam-day") return null;
   if (state.horizon === "past") return null;
+
+  // Studying the wrong thing is the most useful moment the coach gets, because
+  // there are still hours left in the evening to redirect. It outranks the
+  // final-week line: "you are working on the wrong topic" is more actionable
+  // than "the week is short", and a nudge claiming nothing is logged would
+  // simply be false.
+  if (state.logging === "off-plan") return "N_OFF_PLAN";
 
   // Inside the final week an unused evening cannot be recovered later, because
   // there is no later. That is a different message, not a louder one.
@@ -187,6 +211,10 @@ function debriefKey(state: CoachState): DialogueKey | null {
   switch (state.logging) {
     case "nothing":
       return behind ? "D_LOST_STREAK" : "D_LOST_FIRST";
+    case "off-plan":
+      // Credited as work, then corrected on direction. Never routed to the
+      // "you did nothing" copy, which is the bug this state exists to fix.
+      return behind ? "D_OFF_PLAN_BEHIND" : "D_OFF_PLAN";
     case "partial":
       return behind ? "D_PARTIAL_BEHIND" : "D_PARTIAL";
     case "complete":

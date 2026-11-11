@@ -475,6 +475,13 @@ model EmailSend {
   localDate       String
   // Email slot sent: one of "prescription", "nudge", "debrief"
   slot            String
+  // Which dialogue state was chosen (a DialogueKey, e.g. "P_CRISIS"). Nullable
+  // because rows predate the column. Recorded for two reasons: without it there
+  // is no record anywhere of what a candidate was actually told, and the
+  // once-only sign-off after the exam needs to know whether it has already gone
+  // out. The unique key is per local DATE, so without this check the P_PAST
+  // copy, which promises no further emails, would be sent every morning forever.
+  dialogueKey     String?
   sentAt          DateTime?
   failedAttempts  Int      @default(0)
   lastError       String?
