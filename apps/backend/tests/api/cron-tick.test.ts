@@ -92,7 +92,7 @@ test("the coach runs for every active plan", async () => {
   await setupUserWithPlan();
   const coachSpy = vi
     .spyOn(coachModule, "runCoachForPlan")
-    .mockResolvedValue({ sent: [], skipped: [], failed: [] });
+    .mockResolvedValue({ sent: [], skipped: [], failed: [], pushSent: [], pushFailed: [] });
 
   await GET(jsonRequest("GET", "/api/cron/tick", undefined, { Authorization: `Bearer ${process.env.CRON_SECRET}` }));
 
@@ -111,7 +111,7 @@ test("the coach still runs for a plan whose snapshot was skipped", async () => {
   });
   const coachSpy = vi
     .spyOn(coachModule, "runCoachForPlan")
-    .mockResolvedValue({ sent: [], skipped: [], failed: [] });
+    .mockResolvedValue({ sent: [], skipped: [], failed: [], pushSent: [], pushFailed: [] });
 
   const res = await GET(
     jsonRequest("GET", "/api/cron/tick", undefined, { Authorization: `Bearer ${process.env.CRON_SECRET}` }),
@@ -130,7 +130,7 @@ test("one plan's coach failure does not stop the next plan's", async () => {
   const coachSpy = vi
     .spyOn(coachModule, "runCoachForPlan")
     .mockRejectedValueOnce(new Error("boom"))
-    .mockResolvedValue({ sent: [], skipped: [], failed: [] });
+    .mockResolvedValue({ sent: [], skipped: [], failed: [], pushSent: [], pushFailed: [] });
 
   const res = await GET(jsonRequest("GET", "/api/cron/tick", undefined, { Authorization: `Bearer ${process.env.CRON_SECRET}` }));
 
@@ -144,6 +144,8 @@ test("the tick reports how many emails the coach sent", async () => {
     sent: ["prescription", "nudge"],
     skipped: [],
     failed: [],
+    pushSent: [],
+    pushFailed: [],
   });
 
   const res = await GET(jsonRequest("GET", "/api/cron/tick", undefined, { Authorization: `Bearer ${process.env.CRON_SECRET}` }));
@@ -163,7 +165,7 @@ test("tick writes no snapshot once a plan's exam date has passed", async () => {
   });
   // Stubbed so this test is about the snapshot half only. The coach's own
   // post-exam behaviour is pinned in tests/coach/.
-  vi.spyOn(coachModule, "runCoachForPlan").mockResolvedValue({ sent: [], skipped: [], failed: [] });
+  vi.spyOn(coachModule, "runCoachForPlan").mockResolvedValue({ sent: [], skipped: [], failed: [], pushSent: [], pushFailed: [] });
 
   const res = await GET(
     jsonRequest("GET", "/api/cron/tick", undefined, { Authorization: `Bearer ${process.env.CRON_SECRET}` }),

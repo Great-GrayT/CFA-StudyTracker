@@ -39,6 +39,7 @@ export async function PATCH(req: Request): Promise<Response> {
   }
   if (parsed.data.timeZone !== undefined) data.timeZone = parsed.data.timeZone;
   if (parsed.data.emailCoach !== undefined) data.emailCoach = parsed.data.emailCoach;
+  if (parsed.data.pushCoach !== undefined) data.pushCoach = parsed.data.pushCoach;
 
   // The four location columns move as one unit: a half-set location (a city
   // with no coordinates, or coordinates with no city) is not a state the coach

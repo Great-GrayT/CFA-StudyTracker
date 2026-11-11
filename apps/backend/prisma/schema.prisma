@@ -189,8 +189,15 @@ model StudyPlan {
   // IANA timezone name (e.g., "Europe/London"). Defaults to UTC so an existing plan without an explicit
   // zone still behaves correctly without requiring a backfill migration.
   timeZone           String             @default("UTC")
-  // Email coaching preference: one of "all", "debrief-only", "off". Defaults to "all" (all three emails daily).
+  // Coaching preferences, one per delivery channel, because they are genuinely
+  // different decisions: plenty of people want the full written briefing in
+  // their inbox and only the evening prod on their phone, or the reverse. Both
+  // take one of "all", "debrief-only", "off". Both default to "all".
+  //
+  // The two channels carry identical copy (one render feeds both), so these
+  // control WHEN each channel speaks, never WHAT it says.
   emailCoach         String             @default("all")
+  pushCoach          String             @default("all")
   // Where the candidate says they are, used to colour the coach's copy with local
   // weather and daylight. All four are nullable and optional: the candidate may
   // decline to say, and every downstream path treats absence as normal rather
@@ -466,6 +473,13 @@ model PackageUnitReading {
 
 // One email send record for idempotent email scheduling. Tracks which email slots have been sent
 // to a plan on a given date in the candidate's own calendar.
+// One delivery of one coach message on one channel.
+//
+// Named EmailSend before push existed. Kept rather than renamed because the
+// table is already in applied migration history and a rename buys nothing but
+// risk; read it as "coach send". The `channel` column is what distinguishes a
+// row now, and the unique key includes it so each channel claims its own slot
+// atomically.
 model EmailSend {
   id              String   @id @default(cuid())
   planId          String
@@ -475,6 +489,11 @@ model EmailSend {
   localDate       String
   // Email slot sent: one of "prescription", "nudge", "debrief"
   slot            String
+  // Delivery channel: one of "email", "push". Part of the unique key, so a
+  // candidate with email off and push on still gets exactly one notification
+  // per slot per day, guarded by the database rather than by application logic
+  // that could itself race.
+  channel         String   @default("email")
   // Which dialogue state was chosen (a DialogueKey, e.g. "P_CRISIS"). Nullable
   // because rows predate the column. Recorded for two reasons: without it there
   // is no record anywhere of what a candidate was actually told, and the
@@ -487,9 +506,12 @@ model EmailSend {
   lastError       String?
   createdAt       DateTime @default(now())
   plan            StudyPlan @relation(fields: [planId], references: [id])
-  // Central guard against duplicate emails: prevents the same slot from being sent twice for one day,
-  // even when the cron re-runs, retries overlap, or the scheduler crashes mid-flight.
-  @@unique([planId, localDate, slot])
+  // Central guard against duplicate sends: prevents the same slot reaching the
+  // same candidate twice on the same channel on one day, even when the cron
+  // re-runs, retries overlap, or the scheduler crashes mid-flight. Channel is
+  // in the key because email and push are independent deliveries: silencing one
+  // must not silence the other, and sending one must not suppress the other.
+  @@unique([planId, localDate, slot, channel])
   @@index([planId, localDate])
 }
 

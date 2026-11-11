@@ -96,9 +96,12 @@ export const patchPlanSchema = z.object({
   examDate: examDateSchema.optional(),
   weeklyAvailability: weeklyAvailabilitySchema.optional(),
   timeZone: timeZoneSchema.optional(),
-  // Closed set, matching the StudyPlan.emailCoach column comment. Nothing could
-  // set this before, so the preference existed but was unreachable.
+  // Closed sets, matching the StudyPlan column comments. One per channel,
+  // because wanting the full written briefing in your inbox and only the
+  // evening prod on your phone is a normal preference that a single setting
+  // could not express.
   emailCoach: z.enum(["all", "debrief-only", "off"]).optional(),
+  pushCoach: z.enum(["all", "debrief-only", "off"]).optional(),
   // null clears it; omitted leaves it untouched.
   location: locationSchema.nullable().optional(),
 });

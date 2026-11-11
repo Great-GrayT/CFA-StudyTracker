@@ -138,19 +138,31 @@ function isUniqueConstraintViolation(err: unknown): boolean {
   return typeof err === "object" && err !== null && "code" in err && (err as { code?: unknown }).code === "P2002";
 }
 
-/** Claims the (planId, localDate, slot) row before anything is sent. The
+/** Records why a delivery failed, against the row that was claimed for it. */
+async function recordFailure(id: string, err: unknown): Promise<void> {
+  await db.emailSend.update({
+    where: { id },
+    data: {
+      failedAttempts: { increment: 1 },
+      lastError: err instanceof Error ? err.message : String(err),
+    },
+  });
+}
+
+/** Claims the (planId, localDate, slot, channel) row before anything is sent. The
  * unique index is the actual guard: a concurrent or retried run loses the
  * race here, inside the DB, rather than by any application-level check that
  * could itself race. */
-async function claimEmailSend(
+async function claimSend(
   planId: string,
   localDate: string,
   slot: Slot,
+  channel: "email" | "push",
   dialogueKey: string,
 ): Promise<{ id: string } | null> {
   try {
     return await db.$transaction((tx) =>
-      tx.emailSend.create({ data: { planId, localDate, slot, dialogueKey } }),
+      tx.emailSend.create({ data: { planId, localDate, slot, channel, dialogueKey } }),
     );
   } catch (err) {
     if (isUniqueConstraintViolation(err)) return null;
@@ -158,37 +170,77 @@ async function claimEmailSend(
   }
 }
 
+/**
+ * What one run did, per channel.
+ *
+ * `sent`/`failed` stay email-only and keep their original names so existing
+ * callers are unaffected; push gets its own pair. `skipped` is shared and means
+ * "no delivery on any channel", the only sense in which a slot is truly
+ * skipped.
+ */
+export type CoachRunResult = {
+  sent: Slot[];
+  skipped: Slot[];
+  failed: Slot[];
+  pushSent: Slot[];
+  pushFailed: Slot[];
+};
+
+/**
+ * Which slots a preference allows. The closed set is documented on the
+ * StudyPlan columns; an unrecognised value falls through to "all" rather than
+ * to silence, because silence is the failure mode a candidate cannot see and
+ * therefore cannot report.
+ */
+function slotsAllowedBy(preference: string, due: Slot[]): Slot[] {
+  if (preference === "off") return [];
+  if (preference === "debrief-only") return due.filter((s) => s === "debrief");
+  return due;
+}
+
 export async function runCoachForPlan(
   planId: string,
   now: Date,
   sender: Sender = sendMail,
-): Promise<{ sent: Slot[]; skipped: Slot[]; failed: Slot[] }> {
+): Promise<CoachRunResult> {
   const plan = await db.studyPlan.findUniqueOrThrow({ where: { id: planId } });
   const localDate = localDateFor(now, plan.timeZone);
   const todayDate = new Date(localDate + "T00:00:00Z");
   const yesterday = addUTCDays(todayDate, -1);
 
   const existingSends = await db.emailSend.findMany({ where: { planId, localDate } });
-  const alreadySent = existingSends.filter((s) => s.sentAt !== null).map((s) => s.slot as Slot);
+  const sentOn = (channel: string): Set<Slot> =>
+    new Set(
+      existingSends
+        .filter((row) => row.channel === channel && row.sentAt !== null)
+        .map((row) => row.slot as Slot),
+    );
 
-  const due = dueSlots(now, plan.timeZone, alreadySent);
+  // Deliberately not pre-filtered by what has already gone out, because what
+  // counts as sent now differs per channel. Each channel filters its own list
+  // below, and the atomic claim stays the real guard either way.
+  const due = dueSlots(now, plan.timeZone, []);
 
   const sent: Slot[] = [];
   const skipped: Slot[] = [];
   const failed: Slot[] = [];
+  const pushSent: Slot[] = [];
+  const pushFailed: Slot[] = [];
 
-  let candidateSlots: Slot[];
-  if (plan.emailCoach === "off") {
-    return { sent: [], skipped: due, failed: [] };
-  } else if (plan.emailCoach === "debrief-only") {
-    candidateSlots = due.filter((s) => s === "debrief");
-    skipped.push(...due.filter((s) => s !== "debrief"));
-  } else {
-    candidateSlots = due;
-  }
+  const emailAlready = sentOn("email");
+  const pushAlready = sentOn("push");
+  const emailSlots = slotsAllowedBy(plan.emailCoach, due).filter((s) => !emailAlready.has(s));
+  const pushSlots = slotsAllowedBy(plan.pushCoach, due).filter((s) => !pushAlready.has(s));
+
+  // Any slot either channel still wants. Everything expensive below
+  // (regenerating the horizon, classifying state, building the mail) runs once
+  // and feeds both channels, so it is gated on the union rather than per
+  // channel.
+  const candidateSlots = due.filter((s) => emailSlots.includes(s) || pushSlots.includes(s));
+  skipped.push(...due.filter((s) => !candidateSlots.includes(s)));
 
   if (candidateSlots.length === 0) {
-    return { sent, skipped, failed };
+    return { sent, skipped, failed, pushSent, pushFailed };
   }
 
   const weeklyAvailability = plan.weeklyAvailability as Record<string, number>;
@@ -203,7 +255,7 @@ export async function runCoachForPlan(
       // The whole point of the email is that the list is current. A coach
       // emailing yesterday's list is worse than silence: abort entirely,
       // not just the prescription slot.
-      return { sent: [], skipped: candidateSlots, failed: [] };
+      return { sent: [], skipped: candidateSlots, failed: [], pushSent: [], pushFailed: [] };
     }
   }
 
@@ -382,16 +434,13 @@ export async function runCoachForPlan(
       continue;
     }
 
-    const claimed = await claimEmailSend(planId, localDate, slot, key);
-    if (!claimed) {
-      // Lost the race to a concurrent or earlier run of this exact slot.
-      skipped.push(slot);
-      continue;
-    }
-
+    // Rendered ONCE for both channels. Two render calls could legitimately pick
+    // different variants, since the picker rotates by date, and the candidate
+    // would then get a notification contradicting their inbox.
+    //
     // localDate is what rotates the variant, and the context is what lets the
     // horizon, phase and weather tags narrow the pool. Omitting either would
-    // collapse every pool to a single fixed line for the life of the plan.
+    // collapse every pool to one fixed line for the life of the plan.
     const { subject, html, text, push } = renderCoachMail(
       key,
       vars,
@@ -404,27 +453,48 @@ export async function runCoachForPlan(
       `coach-${slot}`,
     );
 
-    try {
-      await sender({ to: user.email, subject, html, text });
-      await db.emailSend.update({ where: { id: claimed.id }, data: { sentAt: now } });
-      sent.push(slot);
+    let claimedEither = false;
 
-      // The same dialogue, on the phone. Sent after the email is recorded, and
-      // deliberately not awaited into the success path: push is a second
-      // channel for a message already delivered, so a dead subscription must
-      // never mark a sent email as failed. sendPushToUser handles its own
-      // per-subscription failures and resolves either way.
-      await pushModule.sendPushToUser(plan.userId, push).catch(() => {
-        // Already logged inside FUNC-push. Nothing here can improve on it.
-      });
-    } catch (err) {
-      await db.emailSend.update({
-        where: { id: claimed.id },
-        data: { failedAttempts: { increment: 1 }, lastError: err instanceof Error ? err.message : String(err) },
-      });
-      failed.push(slot);
+    if (emailSlots.includes(slot)) {
+      const claimed = await claimSend(planId, localDate, slot, "email", key);
+      if (claimed) {
+        claimedEither = true;
+        try {
+          await sender({ to: user.email, subject, html, text });
+          await db.emailSend.update({ where: { id: claimed.id }, data: { sentAt: now } });
+          sent.push(slot);
+        } catch (err) {
+          await recordFailure(claimed.id, err);
+          failed.push(slot);
+        }
+      }
+    }
+
+    // An independent delivery with its own claim. A candidate with email off
+    // and push on must still receive exactly one notification per slot per day,
+    // and a bounced email must not suppress the phone: same message, different
+    // send.
+    if (pushSlots.includes(slot)) {
+      const claimed = await claimSend(planId, localDate, slot, "push", key);
+      if (claimed) {
+        claimedEither = true;
+        try {
+          await pushModule.sendPushToUser(plan.userId, push);
+          await db.emailSend.update({ where: { id: claimed.id }, data: { sentAt: now } });
+          pushSent.push(slot);
+        } catch (err) {
+          await recordFailure(claimed.id, err);
+          pushFailed.push(slot);
+        }
+      }
+    }
+
+    // Neither channel claimed: both lost the race to a concurrent or earlier
+    // run of this exact slot.
+    if (!claimedEither) {
+      skipped.push(slot);
     }
   }
 
-  return { sent, skipped, failed };
+  return { sent, skipped, failed, pushSent, pushFailed };
 }

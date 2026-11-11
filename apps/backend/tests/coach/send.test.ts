@@ -17,7 +17,11 @@ describe("runCoachForPlan", () => {
     const second = await runCoachForPlan(planId, new Date("2027-01-04T07:05:00Z"));
     expect(first.sent).toEqual(["prescription"]);
     expect(second.sent).toEqual([]);
-    expect(await db.emailSend.count({ where: { planId, slot: "prescription" } })).toBe(1);
+    // Scoped to the email channel: push claims its own row for the same slot,
+    // so an unscoped count is 2 by design now.
+    expect(
+      await db.emailSend.count({ where: { planId, slot: "prescription", channel: "email" } }),
+    ).toBe(1);
   });
 
   // Not one of the pinned eleven, but added to make the "remove the
@@ -33,7 +37,11 @@ describe("runCoachForPlan", () => {
     const [a, b] = await Promise.all([runCoachForPlan(planId, now), runCoachForPlan(planId, now)]);
     const totalSent = a.sent.length + b.sent.length;
     expect(totalSent).toBe(1);
-    expect(await db.emailSend.count({ where: { planId, slot: "prescription", sentAt: { not: null } } })).toBe(1);
+    expect(
+      await db.emailSend.count({
+        where: { planId, slot: "prescription", channel: "email", sentAt: { not: null } },
+      }),
+    ).toBe(1);
   });
 
   // Deterministic version of the race the two-concurrent-runs test above
@@ -46,11 +54,22 @@ describe("runCoachForPlan", () => {
   test("a slot with an existing unsent EmailSend row is never claimed again", async () => {
     const { planId } = await setupPlanWithTasks({ timeZone: "UTC" });
     await db.emailSend.create({
-      data: { planId, localDate: "2027-01-04", slot: "prescription", failedAttempts: 1, lastError: "prior attempt" },
+      data: {
+        planId,
+        localDate: "2027-01-04",
+        slot: "prescription",
+        channel: "email",
+        failedAttempts: 1,
+        lastError: "prior attempt",
+      },
     });
     const out = await runCoachForPlan(planId, new Date("2027-01-04T07:00:00Z"));
     expect(out.sent).not.toContain("prescription");
-    expect(await db.emailSend.count({ where: { planId, slot: "prescription" } })).toBe(1);
+    // Scoped to the email channel: push claims its own row for the same slot,
+    // so an unscoped count is 2 by design now.
+    expect(
+      await db.emailSend.count({ where: { planId, slot: "prescription", channel: "email" } }),
+    ).toBe(1);
   });
 
   // Review Focus 2
@@ -123,7 +142,9 @@ describe("after the exam", () => {
     const dayOne = await runCoachForPlan(planId, new Date("2027-01-04T07:00:00Z"));
     expect(dayOne.sent).toEqual(["prescription"]);
 
-    const row = await db.emailSend.findFirstOrThrow({ where: { planId, slot: "prescription" } });
+    const row = await db.emailSend.findFirstOrThrow({
+      where: { planId, slot: "prescription", channel: "email" },
+    });
     expect(row.dialogueKey).toBe("P_PAST");
 
     // A different day, so the uniqueness guard does not help at all here.
@@ -134,7 +155,13 @@ describe("after the exam", () => {
     const dayThree = await runCoachForPlan(planId, new Date("2027-01-06T07:00:00Z"));
     expect(dayThree.sent).toEqual([]);
 
-    expect(await db.emailSend.count({ where: { planId, dialogueKey: "P_PAST" } })).toBe(1);
+    // Exactly one per channel across all three days, never one per day.
+    expect(
+      await db.emailSend.count({ where: { planId, dialogueKey: "P_PAST", channel: "email" } }),
+    ).toBe(1);
+    expect(
+      await db.emailSend.count({ where: { planId, dialogueKey: "P_PAST", channel: "push" } }),
+    ).toBe(1);
   });
 
   test("the evening nudge and the night debrief are silent after the exam", async () => {
@@ -275,5 +302,161 @@ describe("studying something other than the plan", () => {
     const debriefMail = captured.find((m) => m.text.includes(otherReadingName));
     expect(debriefMail).toBeDefined();
     expect(debriefMail!.text).not.toMatch(/[{}]/);
+  });
+});
+
+describe("the two channels are independent", () => {
+  beforeEach(async () => {
+    await resetDb();
+  });
+
+  async function subscribe(planId: string): Promise<void> {
+    const plan = await db.studyPlan.findUniqueOrThrow({ where: { id: planId } });
+    await db.pushSubscription.create({
+      data: {
+        userId: plan.userId,
+        endpoint: `https://push.example/${planId}`,
+        p256dh: "k1",
+        auth: "k2",
+      },
+    });
+  }
+
+  const MORNING = new Date("2027-01-04T07:00:00Z");
+
+  test("email off and push on still reaches the phone", async () => {
+    // The whole reason the preference was split. Before, "off" silenced both
+    // channels, so a candidate who wanted notifications but no inbox clutter
+    // had no setting that produced it.
+    const { planId } = await setupPlanWithTasks({ timeZone: "UTC", emailCoach: "off" });
+    await subscribe(planId);
+
+    const sentMail: Mail[] = [];
+    const out = await runCoachForPlan(planId, MORNING, async (m) => {
+      sentMail.push(m);
+    });
+
+    expect(out.sent).toEqual([]);
+    expect(sentMail).toHaveLength(0);
+    expect(out.pushSent).toEqual(["prescription"]);
+    expect(
+      await db.emailSend.count({ where: { planId, channel: "push", sentAt: { not: null } } }),
+    ).toBe(1);
+    expect(await db.emailSend.count({ where: { planId, channel: "email" } })).toBe(0);
+  });
+
+  test("push off and email on still reaches the inbox", async () => {
+    const { planId } = await setupPlanWithTasks({ timeZone: "UTC" });
+    await db.studyPlan.update({ where: { id: planId }, data: { pushCoach: "off" } });
+    await subscribe(planId);
+
+    const out = await runCoachForPlan(planId, MORNING);
+
+    expect(out.sent).toEqual(["prescription"]);
+    expect(out.pushSent).toEqual([]);
+    expect(await db.emailSend.count({ where: { planId, channel: "push" } })).toBe(0);
+  });
+
+  test("both off sends nothing and claims nothing", async () => {
+    const { planId } = await setupPlanWithTasks({ timeZone: "UTC", emailCoach: "off" });
+    await db.studyPlan.update({ where: { id: planId }, data: { pushCoach: "off" } });
+    await subscribe(planId);
+
+    const out = await runCoachForPlan(planId, MORNING);
+
+    expect(out.sent).toEqual([]);
+    expect(out.pushSent).toEqual([]);
+    expect(out.skipped).toContain("prescription");
+    // Nothing claimed either: a row with no delivery behind it would make the
+    // slot look spent on a later run.
+    expect(await db.emailSend.count({ where: { planId } })).toBe(0);
+  });
+
+  test("the channels can run on different schedules", async () => {
+    // Full briefing in the inbox, evening report only on the phone. Nothing in
+    // the old single-preference model could express this.
+    const { planId } = await setupPlanWithTasks({ timeZone: "UTC" });
+    await db.studyPlan.update({ where: { id: planId }, data: { pushCoach: "debrief-only" } });
+    await subscribe(planId);
+
+    const morning = await runCoachForPlan(planId, MORNING);
+    expect(morning.sent).toEqual(["prescription"]);
+    expect(morning.pushSent).toEqual([]);
+
+    const night = await runCoachForPlan(planId, new Date("2027-01-04T23:00:00Z"));
+    expect(night.pushSent).toContain("debrief");
+    expect(night.sent).toContain("debrief");
+    // The morning slot is not re-sent on either channel just because the second
+    // run happened later in the same day.
+    expect(night.pushSent).not.toContain("prescription");
+    expect(night.sent).not.toContain("prescription");
+  });
+
+  test("a failed email does not suppress the push for the same slot", async () => {
+    // They are the same message but not the same send. Before the split a
+    // bounced email took the notification down with it.
+    const { planId } = await setupPlanWithTasks({ timeZone: "UTC" });
+    await subscribe(planId);
+
+    const out = await runCoachForPlan(planId, MORNING, async () => {
+      throw new Error("smtp refused");
+    });
+
+    expect(out.failed).toEqual(["prescription"]);
+    expect(out.pushSent).toEqual(["prescription"]);
+
+    const emailRow = await db.emailSend.findFirstOrThrow({
+      where: { planId, slot: "prescription", channel: "email" },
+    });
+    expect(emailRow.sentAt).toBeNull();
+    expect(emailRow.failedAttempts).toBe(1);
+    expect(emailRow.lastError).toContain("smtp refused");
+
+    const pushRow = await db.emailSend.findFirstOrThrow({
+      where: { planId, slot: "prescription", channel: "push" },
+    });
+    expect(pushRow.sentAt).not.toBeNull();
+  });
+
+  test("a sent push is not re-sent on a later run that day", async () => {
+    const { planId } = await setupPlanWithTasks({ timeZone: "UTC" });
+    await subscribe(planId);
+
+    const first = await runCoachForPlan(planId, MORNING);
+    const second = await runCoachForPlan(planId, new Date("2027-01-04T07:05:00Z"));
+
+    expect(first.pushSent).toEqual(["prescription"]);
+    expect(second.pushSent).toEqual([]);
+    expect(
+      await db.emailSend.count({ where: { planId, slot: "prescription", channel: "push" } }),
+    ).toBe(1);
+  });
+
+  test("both channels carry the identical dialogue for a slot", async () => {
+    // Guaranteed structurally by the single render, and pinned here because the
+    // requirement is that the notification and the email say the same thing.
+    const { planId } = await setupPlanWithTasks({ timeZone: "UTC" });
+    await subscribe(planId);
+
+    await runCoachForPlan(planId, MORNING);
+
+    const rows = await db.emailSend.findMany({ where: { planId, slot: "prescription" } });
+    expect(rows).toHaveLength(2);
+    expect(new Set(rows.map((r) => r.dialogueKey)).size).toBe(1);
+  });
+
+  test("an unrecognised preference falls through to sending rather than to silence", async () => {
+    // Silence is the failure mode a candidate cannot see and therefore cannot
+    // report. A typo in the column must not quietly stop their coaching.
+    const { planId } = await setupPlanWithTasks({ timeZone: "UTC" });
+    await db.studyPlan.update({
+      where: { id: planId },
+      data: { emailCoach: "debrief_only", pushCoach: "nonsense" },
+    });
+    await subscribe(planId);
+
+    const out = await runCoachForPlan(planId, MORNING);
+    expect(out.sent).toEqual(["prescription"]);
+    expect(out.pushSent).toEqual(["prescription"]);
   });
 });
