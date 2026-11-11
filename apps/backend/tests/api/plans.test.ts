@@ -324,3 +324,4 @@ test("another user cannot set the location on a plan that is not theirs", async 
   const unchanged = await db.studyPlan.findUniqueOrThrow({ where: { id: plan.id } });
   expect(unchanged.city).toBeNull();
 });
+

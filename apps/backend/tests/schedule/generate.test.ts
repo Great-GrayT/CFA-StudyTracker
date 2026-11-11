@@ -146,6 +146,60 @@ describe("generateHorizon", () => {
     expect(totalAfter).toBeGreaterThan(totalBefore);
   });
 
+  test("changing the weekly hours replans the days ahead and leaves the worked ones alone", async () => {
+    // A plan edited mid-week must keep the days already studied exactly as
+    // they were and spread the new budget over what is left. Backdating the
+    // change would rewrite history the candidate can see in their own log.
+    const { planId } = await setupPlanWithCatalogue();
+
+    await generateHorizon(planId, "2027-01-04");
+    // A day passes, so 2027-01-04 is now behind the candidate.
+    await generateHorizon(planId, "2027-01-05");
+
+    const pastBefore = await db.planTask.findMany({
+      where: { planId, date: new Date("2027-01-04T00:00:00Z") },
+      orderBy: { order: "asc" },
+    });
+    expect(pastBefore.length).toBeGreaterThan(0);
+    expect(pastBefore.every((t) => t.frozen)).toBe(true);
+
+    // The busiest day still ahead. Totalling the remaining days instead would
+    // measure the wrong thing: a bigger budget packs the same finite material
+    // into FEWER days, so the tail of the horizon empties and the sum falls
+    // even though every day that still has work got bigger.
+    const busiestDayAhead = async () => {
+      const rows = await db.planTask.findMany({
+        where: { planId, date: { gt: new Date("2027-01-05T00:00:00Z") } },
+      });
+      const byDate = new Map<string, number>();
+      for (const t of rows) {
+        const key = t.date.toISOString().slice(0, 10);
+        byDate.set(key, (byDate.get(key) ?? 0) + t.estimatedMinutes);
+      }
+      return Math.max(0, ...byDate.values());
+    };
+    const busiestBefore = await busiestDayAhead();
+
+    // Three times the hours, from today forward.
+    await db.studyPlan.update({
+      where: { id: planId },
+      data: {
+        weeklyAvailability: { mon: 6, tue: 6, wed: 6, thu: 6, fri: 6, sat: 3, sun: 3 },
+      },
+    });
+    await generateHorizon(planId, "2027-01-05");
+
+    const pastAfter = await db.planTask.findMany({
+      where: { planId, date: new Date("2027-01-04T00:00:00Z") },
+      orderBy: { order: "asc" },
+    });
+    expect(pastAfter.map((t) => `${t.kind}:${t.estimatedMinutes}`)).toEqual(
+      pastBefore.map((t) => `${t.kind}:${t.estimatedMinutes}`),
+    );
+
+    expect(await busiestDayAhead()).toBeGreaterThan(busiestBefore);
+  });
+
   test("a task with a non-pending status survives regeneration even without a logEntryId", async () => {
     const { planId } = await setupPlanWithCatalogue();
     await generateHorizon(planId, "2027-01-04");

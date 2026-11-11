@@ -6,6 +6,7 @@ import { AppShell } from "@/components/app-shell";
 
 import { DeviationSparkline, buildSeries } from "@/components/pace-field";
 import { DayPlan } from "@/components/day-plan";
+import { WeekStrip, weekOf, buildWeek } from "@/components/week-strip";
 import { Countdown } from "@/components/countdown";
 import {
   usePlan,
@@ -43,18 +44,29 @@ export default function TodayPage() {
   // The candidate's own calendar day, formatted the way the API wants it.
   // en-CA is the shortest route to YYYY-MM-DD without pulling in a formatter.
   const todayISO = useMemo(() => new Intl.DateTimeFormat("en-CA").format(new Date()), []);
-  const prescription = usePrescription(planId, todayISO, todayISO);
-  const today = prescription.data?.days.find((d) => d.date === todayISO);
+
+  // The whole week is fetched at once, not just today: the strip needs every
+  // day's total, and seven days of tasks is a smaller payload than the
+  // curriculum tree this screen already holds.
+  const week = useMemo(() => weekOf(todayISO), [todayISO]);
+  const prescription = usePrescription(planId, week[0], week[6]);
+  const [selectedDate, setSelectedDate] = useState(todayISO);
+  const selectedDay = prescription.data?.days.find((d) => d.date === selectedDate);
+
+  const weekDays = useMemo(
+    () =>
+      buildWeek(
+        week,
+        prescription.data?.days,
+        plan.data?.weeklyAvailability as Record<string, number> | undefined,
+        todayISO,
+      ),
+    [week, prescription.data?.days, plan.data?.weeklyAvailability, todayISO],
+  );
 
   // What this weekday is nominally worth, so the day can say when it is
   // running long rather than leaving the candidate to wonder.
-  const todayBudgetMinutes = useMemo(() => {
-    const availability = plan.data?.weeklyAvailability;
-    if (!availability) return undefined;
-    const key = (["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const)[new Date().getDay()];
-    const hoursToday = (availability as Record<string, number>)[key];
-    return typeof hoursToday === "number" ? Math.round(hoursToday * 60) : undefined;
-  }, [plan.data?.weeklyAvailability]);
+  const selectedBudgetMinutes = weekDays.find((d) => d.date === selectedDate)?.budgetMinutes;
 
   const totalOutcomes = useMemo(
     () => flattenCurriculum(curriculum.data).length,
@@ -210,7 +222,20 @@ export default function TodayPage() {
             </section>
           )}
 
-          <DayPlan day={today} heading="Today" budgetMinutes={todayBudgetMinutes} />
+          <WeekStrip week={weekDays} selected={selectedDate} onSelect={setSelectedDate} />
+
+          <DayPlan
+            day={selectedDay}
+            heading={
+              selectedDate === todayISO
+                ? "Today"
+                : new Date(`${selectedDate}T00:00:00Z`).toLocaleDateString(undefined, {
+                    weekday: "long",
+                    timeZone: "UTC",
+                  })
+            }
+            budgetMinutes={selectedBudgetMinutes}
+          />
         </>
       )}
 
