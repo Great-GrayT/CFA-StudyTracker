@@ -1,9 +1,10 @@
-import { describe, test, expect, beforeEach } from "vitest";
+import { describe, test, expect, beforeEach, afterEach } from "vitest";
 import { db } from "../../src/lib/db";
 import { resetDb } from "../helpers/test-db";
 import { setupPlanWithTasks } from "../helpers/fixtures";
 import { runCoachForPlan } from "../../src/lib/FUNC-coach";
 import type { Mail } from "../../src/lib/FUNC-mail";
+import { verifyUnsubscribeToken } from "../../src/lib/FUNC-unsubscribe";
 
 describe("runCoachForPlan", () => {
   beforeEach(async () => {
@@ -458,5 +459,103 @@ describe("the two channels are independent", () => {
     const out = await runCoachForPlan(planId, MORNING);
     expect(out.sent).toEqual(["prescription"]);
     expect(out.pushSent).toEqual(["prescription"]);
+  });
+});
+
+describe("unsubscribe reaches the recipient", () => {
+  beforeEach(async () => {
+    await resetDb();
+  });
+
+  test("every coach email carries a one-click unsubscribe header", async () => {
+    // Without List-Unsubscribe-Post, Gmail and Outlook render no native
+    // unsubscribe control, and the only exit a frustrated recipient finds is
+    // the spam button. A few of those cost the sending domain every other
+    // email the app sends, password resets included.
+    const { planId } = await setupPlanWithTasks({ timeZone: "UTC" });
+    const captured: Mail[] = [];
+    await runCoachForPlan(planId, new Date("2027-01-04T07:00:00Z"), async (m) => {
+      captured.push(m);
+    });
+
+    expect(captured).toHaveLength(1);
+    const headers = captured[0]!.headers ?? {};
+    expect(headers["List-Unsubscribe"]).toMatch(/^<https?:\/\/.+\/api\/coach\/unsubscribe\?token=.+>$/);
+    expect(headers["List-Unsubscribe-Post"]).toBe("List-Unsubscribe=One-Click");
+  });
+
+  test("the link is visible in both the html and the plain text", async () => {
+    // Plenty of clients show no native control, and spam filters read the
+    // plain-text part rather than the HTML.
+    const { planId } = await setupPlanWithTasks({ timeZone: "UTC" });
+    const captured: Mail[] = [];
+    await runCoachForPlan(planId, new Date("2027-01-04T07:00:00Z"), async (m) => {
+      captured.push(m);
+    });
+
+    const mail = captured[0]!;
+    expect(mail.text).toContain("/api/coach/unsubscribe?token=");
+    expect(mail.html).toContain("/api/coach/unsubscribe?token=");
+    expect(mail.html).toContain("Stop these emails");
+  });
+
+  test("the emailed token silences email only, never the phone", async () => {
+    // The channel is inside the signature, so the footer link cannot be edited
+    // into one that turns off push.
+    const { planId } = await setupPlanWithTasks({ timeZone: "UTC" });
+    const captured: Mail[] = [];
+    await runCoachForPlan(planId, new Date("2027-01-04T07:00:00Z"), async (m) => {
+      captured.push(m);
+    });
+
+    const token = /token=([^>&"\s]+)/.exec(captured[0]!.headers!["List-Unsubscribe"]!)![1]!;
+    const verified = verifyUnsubscribeToken(decodeURIComponent(token));
+    expect(verified).toEqual({ planId, channel: "email" });
+  });
+});
+
+describe("misconfiguration", () => {
+  const SAVED = { ...process.env };
+
+  beforeEach(async () => {
+    await resetDb();
+  });
+
+  afterEach(() => {
+    process.env = { ...SAVED };
+  });
+
+  test("with no FRONTEND_BASE_URL the coach refuses to send rather than mailing dead links", async () => {
+    // It used to fall back to an example domain, so a deployment that forgot
+    // this variable sent perfectly deliverable emails in which every link was
+    // dead, the unsubscribe link included. A recipient who cannot unsubscribe
+    // reports the message as spam, and a few of those cost the sending domain
+    // every other email the app sends.
+    const { planId } = await setupPlanWithTasks({ timeZone: "UTC" });
+    delete process.env.FRONTEND_BASE_URL;
+
+    const captured: Mail[] = [];
+    const out = await runCoachForPlan(planId, new Date("2027-01-04T07:00:00Z"), async (m) => {
+      captured.push(m);
+    });
+
+    expect(captured).toHaveLength(0);
+    expect(out.sent).toEqual([]);
+    expect(out.pushSent).toEqual([]);
+    expect(out.skipped).toContain("prescription");
+    // Nothing claimed, so a later run with the variable set still delivers.
+    expect(await db.emailSend.count({ where: { planId } })).toBe(0);
+  });
+
+  test("once the variable is set the same slot still goes out", async () => {
+    // Proves the refusal above is a deferral and not a silent loss of the day.
+    const { planId } = await setupPlanWithTasks({ timeZone: "UTC" });
+    delete process.env.FRONTEND_BASE_URL;
+    await runCoachForPlan(planId, new Date("2027-01-04T07:00:00Z"));
+
+    process.env.FRONTEND_BASE_URL = "https://study.test";
+    const out = await runCoachForPlan(planId, new Date("2027-01-04T07:10:00Z"));
+
+    expect(out.sent).toEqual(["prescription"]);
   });
 });

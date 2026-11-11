@@ -22,6 +22,7 @@ import { classify, type CoachInput } from "../core/coach-state";
 import { dialogueFor, type DialogueVars, type LineContext } from "../core/coach-dialogue";
 import { missedStudyDays, type WeeklyAvailability } from "../core/pace";
 import { holidayFacts } from "../core/holiday";
+import { unsubscribeUrl } from "./FUNC-unsubscribe";
 import { splitLoggedWork } from "../core/logged-work";
 import { weatherTags } from "../core/weather";
 import { observationFor } from "./FUNC-weather";
@@ -359,7 +360,21 @@ export async function runCoachForPlan(
   const user = await db.user.findUniqueOrThrow({ where: { id: plan.userId } });
   const coveragePercent = await coveragePercentFor(planId, plan.levelId);
   const firstTask = todayTasks[0] ? titleForTask(todayTasks[0], readingNames) : "today's plan";
-  const appUrl = process.env.FRONTEND_BASE_URL ?? "https://app.example.com";
+  // No placeholder fallback. It used to default to an example domain, which
+  // meant a deployment that forgot this variable sent perfectly deliverable
+  // emails in which every link was dead, the unsubscribe link included. A
+  // candidate who cannot unsubscribe reports the message as spam, and that
+  // costs the sending domain every other email the app sends. Refusing to send
+  // is strictly better than sending something broken, and loud enough that an
+  // operator can find it.
+  const appUrl = process.env.FRONTEND_BASE_URL;
+  if (!appUrl) {
+    console.error(
+      `FUNC-coach: FRONTEND_BASE_URL is not set, refusing to send for plan ${planId}. ` +
+        `Every link in the email, unsubscribe included, would be dead.`,
+    );
+    return { sent: [], skipped: candidateSlots, failed: [], pushSent: [], pushFailed: [] };
+  }
 
   const vars: DialogueVars = {
     name: user.email,
@@ -390,11 +405,16 @@ export async function runCoachForPlan(
     minutes: t.estimatedMinutes,
     done: t.status === "done",
   }));
+  // Per channel, because the signature covers the channel: an email footer link
+  // must not be editable into one that silences the phone.
+  const emailUnsubscribe = unsubscribeUrl(planId, "email", appUrl);
+
   const mailData: MailData = {
     tasks: mailTasks,
     coveragePercent,
     daysToExam,
     planUrl: `${appUrl}/plan/today`,
+    unsubscribeUrl: emailUnsubscribe,
   };
 
   // Weather, when the candidate has told us where they are. Everything about
@@ -460,7 +480,20 @@ export async function runCoachForPlan(
       if (claimed) {
         claimedEither = true;
         try {
-          await sender({ to: user.email, subject, html, text });
+          await sender({
+            to: user.email,
+            subject,
+            html,
+            text,
+            headers: {
+              // RFC 8058 one-click. The Post header is what turns the
+              // List-Unsubscribe URL into Gmail's and Outlook's own native
+              // control, and it POSTs, which is why the route separates a GET
+              // that confirms from a POST that acts.
+              "List-Unsubscribe": `<${emailUnsubscribe}>`,
+              "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+            },
+          });
           await db.emailSend.update({ where: { id: claimed.id }, data: { sentAt: now } });
           sent.push(slot);
         } catch (err) {

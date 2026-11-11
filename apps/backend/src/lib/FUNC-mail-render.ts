@@ -23,6 +23,15 @@ export type MailData = {
   coveragePercent: number;
   daysToExam: number;
   planUrl: string;
+  /**
+   * One-click unsubscribe link for THIS channel, shown in the footer and also
+   * sent as a List-Unsubscribe header. Optional only so the renderer stays
+   * usable in tests and previews that do not have a plan id; every real send
+   * supplies it, because an email a recipient cannot leave gets reported as
+   * spam, and a handful of those cost the sending domain every other email the
+   * app sends.
+   */
+  unsubscribeUrl?: string;
 };
 
 const COLORS = {
@@ -145,7 +154,34 @@ function buildHtml(
       ${buttonHtml(dialogue.close, data.planUrl)}
     </td>
   </tr>
+  ${footerHtml(data.unsubscribeUrl)}
 </table>`;
+}
+
+/**
+ * Visible unsubscribe, in the body as well as in the header.
+ *
+ * The List-Unsubscribe header gives Gmail and Outlook their native control, but
+ * plenty of clients show nothing, and a recipient who cannot find a way out
+ * uses the spam button instead. That costs the sending domain every other email
+ * the app sends, password resets included, so this link is a deliverability
+ * measure and not a courtesy.
+ */
+function footerHtml(unsubscribeUrl?: string): string {
+  if (!unsubscribeUrl) return "";
+  return `  <tr>
+    <td style="${tdStyle(
+      "padding:16px;border-top:1px solid " +
+        COLORS.border +
+        ";font-size:12px;line-height:1.5;color:" +
+        COLORS.muted +
+        ";",
+    )}">
+      You are receiving this because you switched the study coach on.
+      <a href="${escapeHtml(unsubscribeUrl)}" style="color:${COLORS.muted};text-decoration:underline;">Stop these emails</a>.
+      Your plan and your progress stay exactly as they are.
+    </td>
+  </tr>`;
 }
 
 function buildText(
@@ -171,6 +207,13 @@ function buildText(
   lines.push("");
   lines.push(dialogue.close);
   lines.push(data.planUrl);
+  if (data.unsubscribeUrl) {
+    // In the plain text as well as the HTML. Spam filters read this part rather
+    // than the markup, and a recipient whose client blocks HTML still needs a
+    // way out that they can see.
+    lines.push("");
+    lines.push(`Stop these emails: ${data.unsubscribeUrl}`);
+  }
   return lines.join("\n");
 }
 

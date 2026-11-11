@@ -10,7 +10,23 @@ import { createTransport, type Transporter } from "nodemailer";
 // already has (a mailbox, a relay, a transactional service with SMTP) without
 // this code knowing or caring.
 
-export type Mail = { to: string; subject: string; text: string; html?: string };
+export type Mail = {
+  to: string;
+  subject: string;
+  text: string;
+  html?: string;
+  /**
+   * Extra SMTP headers. The coach uses this for List-Unsubscribe and
+   * List-Unsubscribe-Post, which is what makes Gmail and Outlook render their
+   * own native unsubscribe control next to the sender name.
+   *
+   * That control matters more than it looks. Without it the only exit a
+   * frustrated recipient can find is the "report spam" button, and a few of
+   * those take the whole sending domain's reputation down, which silently
+   * costs every other email the app sends, password resets included.
+   */
+  headers?: Record<string, string>;
+};
 
 let cached: Transporter | null = null;
 
@@ -55,5 +71,6 @@ export async function sendMail(mail: Mail): Promise<void> {
     subject: mail.subject,
     text: mail.text,
     html: mail.html,
+    headers: mail.headers,
   });
 }
