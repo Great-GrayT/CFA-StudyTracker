@@ -35,13 +35,15 @@ function group(opts: {
 }
 
 // Real prerequisite: regression before time series.
+// Sort keys deliberately inverted: lm5 would sort first (lower moduleOrder),
+// but prerequisite requires lm1 first. Tests that prerequisite check is enforced.
 const GROUPS_WITH_PREREQS: SchedulableGroup[] = [
   group({
     ref: "qm/lm1",
     readingRefs: ["qm/lm1"],
     phaseBand: 1,
-    moduleOrder: 1,
-    priorityRank: 50,
+    moduleOrder: 2,
+    priorityRank: 30,
     weight: 10,
     estimatedMinutes: 240,
     weightImpliedMinutes: 240,
@@ -51,8 +53,8 @@ const GROUPS_WITH_PREREQS: SchedulableGroup[] = [
     readingRefs: ["qm/lm5"],
     prereqRefs: ["qm/lm1"],
     phaseBand: 1,
-    moduleOrder: 5,
-    priorityRank: 40,
+    moduleOrder: 1,
+    priorityRank: 50,
     weight: 8,
     estimatedMinutes: 200,
     weightImpliedMinutes: 200,
@@ -219,7 +221,7 @@ test("strategy changes which term leads, not the prerequisite graph", () => {
     group({
       ref: "qm/lm1",
       phaseBand: 1,
-      moduleOrder: 1,
+      moduleOrder: 2,
       priorityRank: 10,
       weight: 5,
     }),
@@ -227,8 +229,8 @@ test("strategy changes which term leads, not the prerequisite graph", () => {
       ref: "qm/lm5",
       prereqRefs: ["qm/lm1"],
       phaseBand: 1,
-      moduleOrder: 5,
-      priorityRank: 10,
+      moduleOrder: 1,
+      priorityRank: 20,
       weight: 5,
     }),
   ];
@@ -258,29 +260,31 @@ test("a module cannot rank high merely because it has no material", () => {
 
 test("fan-out: one prerequisite precedes multiple dependants", () => {
   // Regression (qm/lm1) must come before both time series (qm/lm2) and machine learning (qm/lm3).
+  // Sort keys deliberately inverted: lm2 and lm3 would sort before lm1 (lower moduleOrder),
+  // but prerequisite requires lm1 first. Tests that prerequisite check is enforced.
   const fanOut: SchedulableGroup[] = [
     group({
       ref: "qm/lm1",
       readingRefs: ["qm/lm1"],
       phaseBand: 1,
-      moduleOrder: 1,
-      priorityRank: 50,
+      moduleOrder: 3,
+      priorityRank: 30,
     }),
     group({
       ref: "qm/lm2",
       readingRefs: ["qm/lm2"],
       prereqRefs: ["qm/lm1"],
       phaseBand: 1,
-      moduleOrder: 2,
-      priorityRank: 40,
+      moduleOrder: 1,
+      priorityRank: 50,
     }),
     group({
       ref: "qm/lm3",
       readingRefs: ["qm/lm3"],
       prereqRefs: ["qm/lm1"],
       phaseBand: 1,
-      moduleOrder: 3,
-      priorityRank: 35,
+      moduleOrder: 2,
+      priorityRank: 40,
     }),
   ];
   const out = orderModules(fanOut, "curriculum");
@@ -290,13 +294,16 @@ test("fan-out: one prerequisite precedes multiple dependants", () => {
 
 test("chain: three-deep prerequisite sequence is preserved", () => {
   // Term structure (fp/lm1) -> arbitrage-free valuation (fp/lm2) -> bonds with embedded options (fp/lm3).
+  // Sort keys deliberately inverted: lm3 would sort first (moduleOrder 1), then lm2 (moduleOrder 2),
+  // then lm1 (moduleOrder 3), the exact reverse of the required prerequisite order.
+  // Tests that prerequisites are actually enforced, not just working by coincidence.
   const chain: SchedulableGroup[] = [
     group({
       ref: "fp/lm1",
       readingRefs: ["fp/lm1"],
       phaseBand: 2,
-      moduleOrder: 1,
-      priorityRank: 45,
+      moduleOrder: 3,
+      priorityRank: 30,
     }),
     group({
       ref: "fp/lm2",
@@ -304,15 +311,15 @@ test("chain: three-deep prerequisite sequence is preserved", () => {
       prereqRefs: ["fp/lm1"],
       phaseBand: 2,
       moduleOrder: 2,
-      priorityRank: 42,
+      priorityRank: 40,
     }),
     group({
       ref: "fp/lm3",
       readingRefs: ["fp/lm3"],
       prereqRefs: ["fp/lm2"],
       phaseBand: 2,
-      moduleOrder: 3,
-      priorityRank: 40,
+      moduleOrder: 1,
+      priorityRank: 50,
     }),
   ];
   const out = orderModules(chain, "curriculum");
@@ -322,48 +329,51 @@ test("chain: three-deep prerequisite sequence is preserved", () => {
 
 test("many-to-one: five prerequisites precede one dependant", () => {
   // Five FSA modules (fsa/lm1-5) must all come before FSA Integration (fsa/integration).
+  // Sort keys deliberately inverted: integration has moduleOrder 0 (lowest, would sort first)
+  // and highest priorityRank, but prerequisites require all five modules first.
+  // Tests that prerequisites block scheduling of high-ranked dependant.
   const manyToOne: SchedulableGroup[] = [
     group({
       ref: "fsa/lm1",
       readingRefs: ["fsa/lm1"],
       phaseBand: 1,
-      moduleOrder: 1,
-      priorityRank: 30,
+      moduleOrder: 5,
+      priorityRank: 20,
     }),
     group({
       ref: "fsa/lm2",
       readingRefs: ["fsa/lm2"],
       phaseBand: 1,
-      moduleOrder: 2,
-      priorityRank: 30,
+      moduleOrder: 4,
+      priorityRank: 20,
     }),
     group({
       ref: "fsa/lm3",
       readingRefs: ["fsa/lm3"],
       phaseBand: 1,
       moduleOrder: 3,
-      priorityRank: 30,
+      priorityRank: 20,
     }),
     group({
       ref: "fsa/lm4",
       readingRefs: ["fsa/lm4"],
       phaseBand: 1,
-      moduleOrder: 4,
-      priorityRank: 30,
+      moduleOrder: 2,
+      priorityRank: 20,
     }),
     group({
       ref: "fsa/lm5",
       readingRefs: ["fsa/lm5"],
       phaseBand: 1,
-      moduleOrder: 5,
-      priorityRank: 30,
+      moduleOrder: 1,
+      priorityRank: 20,
     }),
     group({
       ref: "fsa/integration",
       readingRefs: ["fsa/integration"],
       prereqRefs: ["fsa/lm1", "fsa/lm2", "fsa/lm3", "fsa/lm4", "fsa/lm5"],
-      phaseBand: 2,
-      moduleOrder: 1,
+      phaseBand: 1,
+      moduleOrder: 0,
       priorityRank: 50,
     }),
   ];
