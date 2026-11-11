@@ -24,6 +24,11 @@ export type PlannedDay = {
 };
 
 export type Calendar = {
+  /**
+   * Minutes available per weekday, keyed mon-sun. MINUTES, not hours:
+   * StudyPlan stores availability in hours and the one caller that forgot to
+   * convert produced an empty horizon for every plan.
+   */
   weeklyAvailability: Record<string, number>;
   startDate: string; // ISO date
   horizonDays: number;
@@ -414,22 +419,52 @@ export function packDays(
 
   let currentDate = startDate;
   let taskIndex = 0;
+  // Time the week has going spare, carried from the days already packed.
+  //
+  // A weekday figure is how the candidate described an ordinary day, not a
+  // ceiling the plan may never cross. Holding each day to it exactly meant an
+  // hour left unused on Monday was an hour lost, while a task an hour too big
+  // for Tuesday pushed every later day back. The budget that has to hold is
+  // the WEEK's, so an underfilled day lends what it did not use to the days
+  // after it and the total still lands where the candidate set it.
+  //
+  // Reset every seventh day from the start, because the promise is a weekly
+  // one: a quiet week must not fund a brutal one a fortnight later.
+  let carry = 0;
+  let dayIndex = 0;
+  // The biggest ordinary day this candidate has. Anything larger than this
+  // cannot be placed by waiting, however long it waits.
+  const largestDayMinutes = Math.max(
+    0,
+    ...Object.values(cal.weeklyAvailability),
+  );
 
   while (currentDate <= endDate && taskIndex < allTasks.length) {
     const dateStr = toISODate(currentDate);
     const availableMinutes = getAvailableMinutes(cal, dateStr);
 
+    if (dayIndex % 7 === 0) carry = 0;
+    dayIndex++;
+
     if (availableMinutes === 0) {
-      // Holiday: add empty day.
+      // A zero day is a day the candidate said they cannot study, not an
+      // underfilled one, so it lends nothing.
       days.push({ date: dateStr, taskIndices: [] });
     } else {
       // Fill the day with tasks.
       const dayTaskIndices: number[] = [];
       let usedMinutes = 0;
+      // Never more than double the day the candidate described. Lending is
+      // meant to smooth a lumpy module across a week, not to quietly turn a
+      // two hour Tuesday into a six hour one.
+      const dayCapacity = Math.max(
+        0,
+        Math.min(availableMinutes + carry, availableMinutes * 2),
+      );
 
-      while (taskIndex < allTasks.length && usedMinutes < availableMinutes) {
+      while (taskIndex < allTasks.length && usedMinutes < dayCapacity) {
         const task = allTasks[taskIndex];
-        const remainingCapacity = availableMinutes - usedMinutes;
+        const remainingCapacity = dayCapacity - usedMinutes;
 
         if (task.estimatedMinutes <= remainingCapacity) {
           // Task fits.
@@ -446,8 +481,27 @@ export function packDays(
             dayTaskIndices.push(allDayTasks.length - 1);
             usedMinutes += head.estimatedMinutes;
             allTasks[taskIndex] = tail;
+          } else if (
+            dayTaskIndices.length === 0 &&
+            task.estimatedMinutes > largestDayMinutes
+          ) {
+            // An indivisible task that no day in the week could hold, on a
+            // day with nothing else in it. Deferring it is not patience, it
+            // is a deadlock: tomorrow is no bigger, so the same task is
+            // refused again every day until the horizon runs out and the
+            // candidate is handed an empty fortnight. Take it here and let
+            // the overshoot come out of the rest of the week.
+            //
+            // A task that WOULD fit a later day is still deferred, because
+            // waiting a day is better than a day that runs long.
+            allDayTasks.push(task);
+            dayTaskIndices.push(allDayTasks.length - 1);
+            usedMinutes += task.estimatedMinutes;
+            taskIndex++;
+            break;
           } else {
-            // Cannot split (e.g., questions with large vignettes).
+            // Cannot split (e.g., questions with large vignettes), but the
+            // day already has work in it. Tomorrow starts it fresh.
             break;
           }
         } else {
@@ -455,6 +509,12 @@ export function packDays(
           break;
         }
       }
+
+      // What the week has spare after today: whatever it had spare before,
+      // plus today's own allowance, less what today actually took. A day that
+      // overshot makes this negative, and the days after it get less until
+      // the week is square again.
+      carry = carry + availableMinutes - usedMinutes;
 
       days.push({ date: dateStr, taskIndices: dayTaskIndices });
     }

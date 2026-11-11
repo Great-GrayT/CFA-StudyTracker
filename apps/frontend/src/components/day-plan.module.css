@@ -1,0 +1,151 @@
+/* The day's work. Matches the data surfaces elsewhere in the app: square
+   corners, a hairline rule between rows, and a coloured spine that marks a
+   row as a unit of work rather than a card that needs its own border. */
+
+.section {
+  display: grid;
+  gap: var(--space-3);
+  margin: var(--space-6) 0;
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.heading {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+.total {
+  margin: 0;
+  font-size: 15px;
+  color: var(--muted);
+}
+
+.note {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.empty {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--muted);
+  max-width: 60ch;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  border-top: 1px solid var(--rule);
+}
+
+.row,
+.rowDone {
+  display: grid;
+  /* The spine is 3px and never shrinks; the body takes what is left, with a 0
+     floor so a long module title cannot widen the page. */
+  grid-template-columns: 3px minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: start;
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.rowDone {
+  opacity: 0.55;
+}
+
+.spine {
+  align-self: stretch;
+  background: var(--claimed);
+}
+
+.rowDone .spine {
+  background: var(--strong);
+}
+
+.body {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.module {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-2);
+}
+
+/* The module name is the thing the candidate recognises, so it carries the
+   weight while the topic beside it stays quiet. */
+.moduleName {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.materials {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.material {
+  font-size: 15px;
+  line-height: 1.45;
+  min-width: 0;
+}
+
+/* The verb, not a label: "Watch", "Read", "Questions". It is the first thing
+   read and the only thing that needs to be read in a hurry. */
+.action {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.link {
+  color: var(--claimed-ink);
+  text-underline-offset: 2px;
+  /* Provider file names have no break opportunities and would otherwise set
+     the width of the whole page. */
+  overflow-wrap: anywhere;
+}
+
+.link:hover {
+  text-decoration-thickness: 2px;
+}
+
+.plain {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.meta {
+  display: block;
+  font-size: 13px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.minutes {
+  font-size: 14px;
+  color: var(--muted);
+  white-space: nowrap;
+}

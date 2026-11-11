@@ -113,7 +113,8 @@ describeRealCatalogue("real catalogue: generate horizon and report first seven d
   for (let d = new Date(horizonStart); d <= horizonEnd; d.setUTCDate(d.getUTCDate() + 1)) {
     const dateStr = d.toISOString().slice(0, 10);
     const weekdayKey = weekdayKeys[d.getUTCDay()];
-    const availableMinutes = weeklyAvailability[weekdayKey] ?? 0;
+    // weeklyAvailability is in HOURS; every task estimate is in minutes.
+    const availableMinutes = (weeklyAvailability[weekdayKey] ?? 0) * 60;
     if (availableMinutes <= 0) continue;
 
     // Only a day the scheduler could still have reached (i.e. before the
@@ -125,12 +126,41 @@ describeRealCatalogue("real catalogue: generate horizon and report first seven d
     expect(dayTasks.length, `expected tasks on ${dateStr} (${weekdayKey}, ${availableMinutes} min available)`).toBeGreaterThan(0);
   }
 
-  // No day's total ever exceeds its own availability.
+  // A day may run over the figure the candidate gave for that weekday,
+  // because the budget the planner holds to is the WEEK's: an hour left
+  // unused on Monday is lent to the days after it. What it may never do is
+  // run away with the day, so the ceiling is twice the nominal.
   for (const [dateStr, dateTasks] of tasksByDate) {
     const weekdayKey = weekdayKeys[new Date(dateStr + "T00:00:00Z").getUTCDay()];
-    const availableMinutes = weeklyAvailability[weekdayKey] ?? 0;
+    const availableMinutes = (weeklyAvailability[weekdayKey] ?? 0) * 60;
     const totalMinutes = dateTasks.reduce((sum, t) => sum + t.estimatedMinutes, 0);
-    expect(totalMinutes, `day ${dateStr} total minutes vs its ${availableMinutes}-minute availability`).toBeLessThanOrEqual(availableMinutes);
+    expect(
+      totalMinutes,
+      `day ${dateStr} total minutes vs its ${availableMinutes}-minute availability`,
+    ).toBeLessThanOrEqual(availableMinutes * 2);
+  }
+
+  // And the week as a whole stays inside the week's own budget, which is the
+  // promise that actually matters to the candidate.
+  const weekMinutes =
+    Object.values(weeklyAvailability).reduce((sum, h) => sum + h, 0) * 60;
+  const byWeek = new Map<number, number>();
+  for (const [dateStr, dateTasks] of tasksByDate) {
+    const dayOffset = Math.floor(
+      (new Date(dateStr + "T00:00:00Z").getTime() - horizonStart.getTime()) / 86_400_000,
+    );
+    const week = Math.floor(dayOffset / 7);
+    const minutes = dateTasks.reduce((sum, t) => sum + t.estimatedMinutes, 0);
+    byWeek.set(week, (byWeek.get(week) ?? 0) + minutes);
+  }
+  for (const [week, minutes] of byWeek) {
+    // One indivisible task bigger than any single day can push a week over,
+    // and the packer takes it rather than deadlock, so allow that one task's
+    // worth of slack.
+    const largestDay = Math.max(...Object.values(weeklyAvailability)) * 60;
+    expect(minutes, `week ${week} total minutes vs the ${weekMinutes}-minute week`).toBeLessThanOrEqual(
+      weekMinutes + largestDay,
+    );
   }
 
   // The task-kind distribution must include real question practice, not

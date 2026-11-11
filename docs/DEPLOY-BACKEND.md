@@ -61,23 +61,38 @@ npx web-push generate-vapid-keys
 web-push throw at module load, which takes down every route importing it rather
 than merely disabling notifications.
 
-### Schedule the batch **(you)**
+### Schedule the batch
 
 ```
 GET /api/cron/tick
 Authorization: Bearer $CRON_SECRET
 ```
 
-**Every 15 to 30 minutes, not nightly.** The progress-snapshot half of the tick
-is a once-a-day job, which makes nightly look sufficient, but the study coach
-has three delivery slots in each candidate's own local time (06:30, 20:00,
-22:30) and candidates are in different zones. A nightly tick would miss almost
-all of them.
+**Not a manual step.** The deploy workflow installs
+`apps/backend/deploy/cfa-cron-tick.sh` onto the server and rewrites the deploy
+user's crontab from `apps/backend/deploy/cron-schedule` on every push to main,
+so the schedule is changed by editing that file and pushing, never by SSHing
+in. It needs the `SSH_HOST`, `SSH_USER`, `SSH_KEY` and `APP_DIR` repository
+secrets, which is the only part that is yours.
+
+**Every 15 minutes, not nightly.** The progress-snapshot half of the tick is a
+once-a-day job, which makes nightly look sufficient, but the study coach has
+three delivery slots in each candidate's own local time (06:30, 20:00, 22:30)
+and candidates are in different zones. A nightly tick misses almost all of
+them, which is what `0 3 * * *` did until it was corrected.
 
 Running it often is cheap and safe. A slot stays due until it is actually sent,
 and the per-channel unique key on `EmailSend` makes a repeat attempt a no-op
 rather than a duplicate, so being late costs nothing and firing twice sends
 once.
+
+**Leave `CRON_SECRET` unquoted in the server's `.env`.** Two different readers
+parse that file: the app, which strips surrounding quotes, and the cron
+wrapper, which is shell. A quoted value is sent to the API with its quotes,
+fails a length-guarded comparison, and every tick is answered 401. That is a
+correct response to a caller without the secret, so nothing logs a fault and
+nothing is ever sent. The wrapper now strips quotes defensively and exits
+non-zero on a non-2xx, so cron mails the operator instead of going quiet.
 
 ### Load the curriculum **(you)**
 
@@ -178,7 +193,9 @@ check above exists.
 A missing `CRON_SECRET` produces no error anywhere. `401` is the correct
 response to a caller without the secret, so the route behaves exactly as
 designed while no snapshot is ever written and no email is ever sent. Only
-`/api/health` reports it.
+`/api/health` reports it, and it cannot catch the related case where the
+secret is present but the caller mangles it, which is why the wrapper now
+exits non-zero on a non-2xx.
 
 A missing `FRONTEND_BASE_URL` used to be worse than silent: the coach defaulted
 to an example domain and sent perfectly deliverable emails in which every link
@@ -201,7 +218,7 @@ health endpoint reports it rather than relying on anybody remembering.
 Operator -> scp seed-data -> one-off container -> db:seed then db:seed:packages
 -> curriculum, outcomes, provider units and resources.
 
-Scheduler -> GET /api/cron/tick -> per active plan: write snapshot -> run coach
+Scheduler (every 15 min) -> GET /api/cron/tick -> per active plan: write snapshot -> run coach
 -> claim EmailSend row per channel -> SMTP and Web Push -> mark sent.
 
 Candidate -> unsubscribe link or mail client control -> POST

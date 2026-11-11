@@ -449,14 +449,18 @@ export async function setupPlanWithCatalogue(): Promise<{ planId: string }> {
       levelId: "II",
       examDate: new Date("2027-06-01"),
       startDate: new Date("2027-01-04"),
+      // HOURS, like every other plan in the app: it is what onboarding asks
+      // for and what pace.ts reads back. This fixture used to say 120 and 60,
+      // which only looked right while the packer was treating the figure as
+      // minutes; read correctly that was a 120 hour Monday.
       weeklyAvailability: {
-        mon: 120,
-        tue: 120,
-        wed: 120,
-        thu: 120,
-        fri: 120,
-        sat: 60,
-        sun: 60,
+        mon: 2,
+        tue: 2,
+        wed: 2,
+        thu: 2,
+        fri: 2,
+        sat: 1,
+        sun: 1,
       },
       orderingStrategy: "curriculum",
     },
@@ -560,14 +564,18 @@ export async function setupPlanWithRealCatalogue(): Promise<{ planId: string }> 
       levelId: "II",
       examDate: new Date("2027-06-01"),
       startDate: new Date("2027-01-04"),
+      // HOURS, like every other plan in the app: it is what onboarding asks
+      // for and what pace.ts reads back. This fixture used to say 120 and 60,
+      // which only looked right while the packer was treating the figure as
+      // minutes; read correctly that was a 120 hour Monday.
       weeklyAvailability: {
-        mon: 120,
-        tue: 120,
-        wed: 120,
-        thu: 120,
-        fri: 120,
-        sat: 60,
-        sun: 60,
+        mon: 2,
+        tue: 2,
+        wed: 2,
+        thu: 2,
+        fri: 2,
+        sat: 1,
+        sun: 1,
       },
       orderingStrategy: "curriculum",
     },

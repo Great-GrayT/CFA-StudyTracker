@@ -33,6 +33,10 @@
   margin: 0;
   font-size: 15px;
   color: var(--text);
+  /* An address has no break opportunity, so a long one set the min-content
+     width of the whole page. `anywhere`, not `break-word`: it also lets the
+     address shrink the box it sits in, which is what the layout needs. */
+  overflow-wrap: anywhere;
 }
 
 .warning {

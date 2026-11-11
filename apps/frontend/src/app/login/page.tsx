@@ -13,7 +13,7 @@ import {
   isPasskeySupported,
 } from "@/lib/auth-client";
 import { Mark } from "@/components/mark";
-import { Mark3DLazy } from "@/components/mark-3d-lazy";
+import { MarkMotionLazy } from "@/components/mark-motion-lazy";
 import { GoogleMark, GitHubMark } from "@/components/provider-marks";
 import styles from "./login.module.css";
 
@@ -92,7 +92,7 @@ function LoginForm() {
     <main className={styles.page}>
       <div className={styles.card}>
         <h1 className={styles.brand}>
-          <Mark3DLazy size={56} interactive />
+          <MarkMotionLazy size={56} />
           Study Tracker
         </h1>
 

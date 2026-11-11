@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { db } from "../../../../lib/db";
 import { requireUser } from "../../../../lib/FUNC-auth";
 import { patchPlanSchema } from "../../../../lib/validation";
+import { generateHorizon } from "../../../../lib/FUNC-schedule";
 
 // Route handlers here are called directly in tests (no Next.js router in the
 // loop), so the dynamic segment is pulled from the URL itself rather than a
@@ -63,6 +64,33 @@ export async function PATCH(req: Request): Promise<Response> {
   }
 
   const updated = await db.studyPlan.update({ where: { id: planId }, data });
+
+  // Changing the hours or the exam date changes what the remaining days
+  // should hold, and the candidate expects to see that immediately rather
+  // than whenever the scheduler next runs. Cutting Saturday from four hours
+  // to one and finding Saturday still full reads as the setting not having
+  // taken.
+  //
+  // Only the days from today forward move. generateHorizon freezes everything
+  // before today and keeps any task already started or finished, so a week
+  // edited on Wednesday keeps Monday and Tuesday exactly as they were
+  // worked: the new budget is spread over what is left, not backdated over
+  // what is done.
+  const replans =
+    parsed.data.weeklyAvailability !== undefined || parsed.data.examDate !== undefined;
+  if (replans) {
+    const today = new Intl.DateTimeFormat("en-CA", {
+      timeZone: updated.timeZone ?? "UTC",
+    }).format(new Date());
+    try {
+      await generateHorizon(planId, today);
+    } catch (err) {
+      // The setting is saved either way. A failed replan leaves the previous
+      // horizon in place, which is stale but not wrong, and the next
+      // scheduled tick rebuilds it.
+      console.error(`plans PATCH: could not replan plan ${planId}`, err);
+    }
+  }
 
   return Response.json(updated, { status: 200 });
 }

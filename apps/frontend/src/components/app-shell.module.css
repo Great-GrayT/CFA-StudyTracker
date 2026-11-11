@@ -1,7 +1,13 @@
 .shell {
   min-height: 100dvh;
   display: grid;
-  grid-template-columns: 1fr;
+  /* minmax(0, 1fr), never a bare 1fr. A grid item's default min-width is
+     auto, which is its MIN-CONTENT width, so one unbreakable string anywhere
+     in the page (an email address, a package name, a long outcome id) widens
+     this column past the viewport and the whole document scrolls sideways.
+     The 0 floor lets the column shrink and pushes the decision down to the
+     element that is actually too wide. */
+  grid-template-columns: minmax(0, 1fr);
   /* Space for the fixed bottom bar, plus the home indicator on iOS. */
   padding-bottom: calc(64px + env(safe-area-inset-bottom));
 }
@@ -11,6 +17,9 @@
   padding-top: max(var(--space-4), env(safe-area-inset-top));
   max-width: 44rem;
   width: 100%;
+  /* Same reason as the column floor above: as a grid item this would
+     otherwise refuse to go below its min-content width. */
+  min-width: 0;
   margin: 0 auto;
 }
 
@@ -96,7 +105,7 @@
 
 @media (min-width: 52rem) {
   .shell {
-    grid-template-columns: 14rem 1fr;
+    grid-template-columns: 14rem minmax(0, 1fr);
     padding-bottom: 0;
   }
 

@@ -7,6 +7,7 @@ import { GET as CRON_RUNS } from "../../src/app/api/cron/runs/route";
 import { POST as CRON_RUN } from "../../src/app/api/cron/run/route";
 import { GET as PUSH_SUBS } from "../../src/app/api/push/subscriptions/route";
 import { GET as TICK } from "../../src/app/api/cron/tick/route";
+import { CRON_SCHEDULE } from "../../src/core/cron-schedule";
 
 function authed(token: string, url: string, method = "GET", body?: unknown): Request {
   return jsonRequest(method, url, body, { Authorization: `Bearer ${token}` });
@@ -27,7 +28,7 @@ describe("GET /api/cron/runs", () => {
     const user = await registerUser();
     const body = await readJson(await CRON_RUNS(authed(user.token, "/api/cron/runs")));
     expect(body.runs).toEqual([]);
-    expect(body.schedule).toBe("0 3 * * *");
+    expect(body.schedule).toBe(CRON_SCHEDULE);
     // A crontab is not introspectable over HTTP, so the server computes the
     // next occurrence rather than the client guessing from the expression.
     expect(typeof body.nextRunAt).toBe("string");

@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
+import { InstallCard } from "@/components/install-card";
 import { useCronStatus, usePushDevices } from "@/lib/hooks";
 import { api, ApiError } from "@/lib/api";
 import { isPushSupported, getExistingSubscription, subscribeToPush, unsubscribeFromPush, getPermission } from "@/lib/push";
@@ -154,11 +155,11 @@ export default function WatchdogsPage() {
         ) : (
           <>
             <section className={styles.section}>
-              <h2 className={styles.sectionTitle}>Nightly snapshot</h2>
+              <h2 className={styles.sectionTitle}>Last run</h2>
               {lastRun ? (
                 <div className={styles.summary}>
                   <p className={styles.summaryText}>
-                    Ran at {new Date(lastRun.startedAt).toLocaleTimeString([], { timeStyle: "short" })} UTC today.
+                    Ran at {new Date(lastRun.startedAt).toLocaleTimeString([], { timeStyle: "short" })} UTC.
                   </p>
                   <p className={styles.summaryText}>
                     {numbers.format(lastRun.plansProcessed)} {planWord} recorded
@@ -166,7 +167,10 @@ export default function WatchdogsPage() {
                   </p>
                 </div>
               ) : (
-                <p className={styles.summaryText}>No nightly runs recorded yet. The first one lands at 3:00 UTC.</p>
+                <p className={styles.summaryText}>
+                  No runs recorded yet. The scheduler ticks every 15 minutes, so the first
+                  one lands within the quarter hour.
+                </p>
               )}
             </section>
 
@@ -184,7 +188,7 @@ export default function WatchdogsPage() {
 
               <div className={styles.schedule}>
                 <p className={styles.scheduleLabel}>Schedule (set on the server, not here)</p>
-                <code className={styles.cron}>{schedule || "0 3 * * *"}</code>
+                <code className={styles.cron}>{schedule || "*/15 * * * *"}</code>
               </div>
 
               <button
@@ -196,6 +200,11 @@ export default function WatchdogsPage() {
                 Run now
               </button>
             </section>
+
+            {/* Above the notification controls on purpose: on iOS an
+                uninstalled app cannot receive a push at all, so the button
+                below this one does nothing until this is done. */}
+            <InstallCard />
 
             {isPushSupported() && (
               <section className={styles.section}>
@@ -281,7 +290,7 @@ export default function WatchdogsPage() {
 function NightGrid({ nights }: { nights: Array<{ date: Date; run: CronRun | null }> }) {
   return (
     <section className={styles.section}>
-      <h2 className={styles.sectionTitle}>30 night grid</h2>
+      <h2 className={styles.sectionTitle}>Last 30 days</h2>
       <div className={styles.grid} role="img" aria-label={gridAriaLabel(nights)}>
         {nights.map((night, idx) => (
           <NightCell key={idx} night={night} />
@@ -423,5 +432,5 @@ function gridAriaLabel(nights: Array<{ date: Date; run: CronRun | null }>): stri
   const recorded = nights.filter((n) => n.run?.ok).length;
   const failed = nights.filter((n) => n.run && !n.run.ok).length;
   const missing = nights.filter((n) => !n.run).length;
-  return `30 night grid: ${recorded} recorded, ${missing} missing, ${failed} failed`;
+  return `Last 30 days: ${recorded} recorded, ${missing} missing, ${failed} failed`;
 }

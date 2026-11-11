@@ -5,7 +5,8 @@ import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 
 import { DeviationSparkline, buildSeries } from "@/components/pace-field";
-import { StudyNextList } from "@/components/study-next-list";
+import { DayPlan } from "@/components/day-plan";
+import { WeekStrip, weekOf, buildWeek } from "@/components/week-strip";
 import { Countdown } from "@/components/countdown";
 import {
   usePlan,
@@ -14,6 +15,7 @@ import {
   useLogs,
   useHolidays,
   usePackages,
+  usePrescription,
   flattenCurriculum,
 } from "@/lib/hooks";
 import { readPace, missedDays, remainingWeekSplit, startOfUTCDay, addUTCDays } from "@/lib/pace";
@@ -38,6 +40,33 @@ export default function TodayPage() {
   const logs = useLogs(planId);
   const holidays = useHolidays(planId);
   const packages = usePackages();
+
+  // The candidate's own calendar day, formatted the way the API wants it.
+  // en-CA is the shortest route to YYYY-MM-DD without pulling in a formatter.
+  const todayISO = useMemo(() => new Intl.DateTimeFormat("en-CA").format(new Date()), []);
+
+  // The whole week is fetched at once, not just today: the strip needs every
+  // day's total, and seven days of tasks is a smaller payload than the
+  // curriculum tree this screen already holds.
+  const week = useMemo(() => weekOf(todayISO), [todayISO]);
+  const prescription = usePrescription(planId, week[0], week[6]);
+  const [selectedDate, setSelectedDate] = useState(todayISO);
+  const selectedDay = prescription.data?.days.find((d) => d.date === selectedDate);
+
+  const weekDays = useMemo(
+    () =>
+      buildWeek(
+        week,
+        prescription.data?.days,
+        plan.data?.weeklyAvailability as Record<string, number> | undefined,
+        todayISO,
+      ),
+    [week, prescription.data?.days, plan.data?.weeklyAvailability, todayISO],
+  );
+
+  // What this weekday is nominally worth, so the day can say when it is
+  // running long rather than leaving the candidate to wonder.
+  const selectedBudgetMinutes = weekDays.find((d) => d.date === selectedDate)?.budgetMinutes;
 
   const totalOutcomes = useMemo(
     () => flattenCurriculum(curriculum.data).length,
@@ -193,10 +222,19 @@ export default function TodayPage() {
             </section>
           )}
 
-          <StudyNextList
-            items={progress.data?.studyNext ?? []}
-            curriculum={curriculum.data}
-            onLog={() => setComposing(true)}
+          <WeekStrip week={weekDays} selected={selectedDate} onSelect={setSelectedDate} />
+
+          <DayPlan
+            day={selectedDay}
+            heading={
+              selectedDate === todayISO
+                ? "Today"
+                : new Date(`${selectedDate}T00:00:00Z`).toLocaleDateString(undefined, {
+                    weekday: "long",
+                    timeZone: "UTC",
+                  })
+            }
+            budgetMinutes={selectedBudgetMinutes}
           />
         </>
       )}

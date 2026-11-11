@@ -1,0 +1,144 @@
+/* Seven bars, one measure, one reference marker each.
+   Square corners and a recessive baseline, matching the data surfaces
+   elsewhere in the app: --radius-data is 0 here by design. */
+
+.section {
+  display: grid;
+  gap: var(--space-3);
+  margin: var(--space-6) 0;
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.heading {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+.total {
+  margin: 0;
+  font-size: 15px;
+  color: var(--muted);
+}
+
+.strip {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  /* Seven equal columns with a 0 floor: a narrow phone shrinks the bars
+     rather than pushing the page sideways. */
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: var(--space-2);
+  border-bottom: 1px solid var(--rule-strong);
+}
+
+.col {
+  min-width: 0;
+}
+
+.day,
+.daySelected {
+  display: grid;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 0 0 var(--space-2);
+  background: transparent;
+  border: 0;
+  /* The whole column is the hit target, not the bar: a day with ten minutes
+     on it would otherwise be a two pixel tap. */
+  min-height: 44px;
+}
+
+.plot {
+  position: relative;
+  display: block;
+  height: 72px;
+  /* A seat for the bar to stand on, so an empty day still reads as a day. */
+  background: linear-gradient(var(--raised), var(--raised));
+  background-size: 100% 1px;
+  background-position: bottom;
+  background-repeat: no-repeat;
+}
+
+.bar,
+.barPast,
+.barOver {
+  position: absolute;
+  inset: auto 0 0 0;
+  display: block;
+  background: var(--claimed);
+  /* Never vanishes entirely: a day with a few minutes on it is not the same
+     as a day with none, and a zero-height bar says it is. */
+  min-height: 2px;
+}
+
+/* Done with, so it recedes. Still the same measure, so it stays the same
+   hue rather than becoming a second colour with a second meaning. */
+.barPast {
+  background: var(--rule-strong);
+}
+
+/* Over the day's usual hours. Paired with the word "over" in the button's
+   accessible name and the note under the day plan, never colour alone. */
+.barOver {
+  background: var(--alarm);
+}
+
+.marker {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--rule-strong);
+}
+
+.label,
+.labelToday {
+  display: block;
+  font-size: 12px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.labelToday {
+  color: var(--claimed-ink);
+  font-weight: 600;
+}
+
+.daySelected .label,
+.daySelected .labelToday {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 2px;
+}
+
+.day:focus-visible,
+.daySelected:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.key {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.keyMark {
+  display: inline-block;
+  width: 16px;
+  height: 2px;
+  background: var(--rule-strong);
+}

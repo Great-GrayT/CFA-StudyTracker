@@ -136,6 +136,17 @@ body {
   -webkit-font-smoothing: antialiased;
   /* Stops the whole page rubber-banding behind fixed chrome on iOS. */
   overscroll-behavior-y: none;
+  /* The app renders strings it does not control: email addresses, package
+     names, outcome text, provider unit codes. None of them have break
+     opportunities, and one of them wider than the phone turns every screen
+     into a sideways scroll. Breaking mid-word is the lesser evil. */
+  overflow-wrap: break-word;
+  /* A net under the layout, not the layout itself: the real causes are fixed
+     at the element that is too wide. `clip` rather than `hidden` on purpose,
+     since `hidden` makes the viewport a scroll container and breaks
+     `position: sticky` in the pages that use it. Vertical scrolling is
+     untouched. */
+  overflow-x: clip;
 }
 
 /* Every interactive element gets a visible ring. The token has no other job,

@@ -1,0 +1,64 @@
+/* Matches the surrounding watchdogs sections exactly. This is a state
+   readout in a stack of state readouts, not a promotion, so it gets no
+   accent, no border treatment of its own and no card shadow. */
+
+.section {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--raised);
+  border: 1px solid var(--rule-strong);
+}
+
+.title {
+  font-size: 20px;
+  letter-spacing: -0.005em;
+  font-weight: 600;
+  margin: 0;
+}
+
+.line {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--text);
+  /* Below the 80 character default, which these two sentences sit under on a
+     phone anyway; the cap is what keeps them readable on the desktop rail. */
+  max-width: 60ch;
+}
+
+.steps {
+  margin: 0;
+  padding-left: var(--space-5);
+  display: grid;
+  gap: var(--space-2);
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.action {
+  padding: var(--space-3) var(--space-5);
+  background: var(--claimed);
+  color: var(--ground);
+  border: none;
+  border-radius: var(--radius-pill);
+  font-weight: 600;
+  font-size: 16px;
+  /* 44px is the floor for a touch target. */
+  min-height: 44px;
+  justify-self: start;
+}
+
+.action:hover:not(:disabled) {
+  background: var(--claimed-ink);
+}
+
+.action:active:not(:disabled) {
+  opacity: 0.9;
+}
+
+.action:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

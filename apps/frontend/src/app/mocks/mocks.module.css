@@ -174,9 +174,13 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--space-2);
   padding: var(--space-3);
   border-bottom: 1px solid var(--rule);
   background: var(--raised);
+  /* Date, score, package name and Delete do not fit one line on a phone.
+     Wrapping puts Delete on its own line rather than pushing the page wide. */
+  flex-wrap: wrap;
 }
 
 .row:last-child {
@@ -185,8 +189,10 @@
 
 .rowContent {
   display: flex;
-  gap: var(--space-4);
+  gap: var(--space-3) var(--space-4);
   align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .rowDate {
@@ -208,7 +214,10 @@
 .rowPackage {
   font-size: 14px;
   color: var(--muted);
-  min-width: 100px;
+  /* A floor, not a reservation: a 100px minimum on a 320px row left nothing
+     for the date and score beside it. */
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .deleteBtn {
