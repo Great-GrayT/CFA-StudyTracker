@@ -75,6 +75,29 @@ test("a learned pace factor scales an estimate", () => {
   expect(estimateResource({ kind: "seminar" }, CTX, 1.5)).toBe(53);
 });
 
+test("ET LM3: a video-only lecture with no notes pages gets the flat floor, not zero", () => {
+  expect(estimateResource({ kind: "lecture" }, CTX)).toBe(CTX.ET_LM3_MIN);
+  expect(estimateResource({ kind: "lecture", lectureMinutes: 90 }, CTX)).toBe(
+    CTX.ET_LM3_MIN
+  );
+});
+
+test("estimateModule's kFor supplies a per-resource pace factor", () => {
+  // Two seminar resources, one calibrated faster and one slower than the
+  // pure-k=1 default; kFor must be consulted per resource, not once per module.
+  const est = estimateModule(
+    {
+      ref: "test/kfor",
+      resources: [{ kind: "seminar" }, { kind: "seminar" }],
+      weightImpliedMinutes: 0,
+    },
+    CTX,
+    (_r, i) => (i === 0 ? 2 : 0.5)
+  );
+  // 35*2=70, 35*0.5=17.5 rounds to 18.
+  expect(est.byKind["seminar"]).toBe(70 + 18);
+});
+
 test("eocq with low lectureMinutes hits the floor of 10", () => {
   expect(estimateResource({ kind: "eocq", lectureMinutes: 10 }, CTX)).toBe(10);
 });

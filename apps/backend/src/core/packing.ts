@@ -34,11 +34,15 @@ export type PackOptions = Record<string, unknown>;
 
 // Input requires per-kind minutes from effort model, not invented.
 // Extends SchedulableGroup with outputs from the effort model (effort.ts -> byKind).
+// seminarMinutes and reviewMinutes are optional (default 0) so existing
+// callers that only ever produced the original four kinds are unaffected.
 export type PackableGroup = SchedulableGroup & {
   noteMinutes: number;
   videoMinutes: number;
   eocqMinutes: number;
   questionMinutes: number;
+  seminarMinutes?: number;
+  reviewMinutes?: number;
   vignetteCount: number;
   calculationShare: number;
 };
@@ -104,6 +108,8 @@ function generateModuleTasks(
   const videoMinutes = group.videoMinutes;
   const eocqMinutes = group.eocqMinutes;
   const questionMinutes = group.questionMinutes;
+  const seminarMinutes = group.seminarMinutes ?? 0;
+  const reviewMinutes = group.reviewMinutes ?? 0;
   const vignetteCount = group.vignetteCount;
   const calculationShare = group.calculationShare;
 
@@ -140,6 +146,32 @@ function generateModuleTasks(
       resourceId: undefined,
       readingIds: group.readingRefs,
       estimatedMinutes: eocqMinutes,
+      requiresConfidence: false,
+      moduleRef: group.ref,
+      isLastInModule: false,
+    });
+  }
+
+  // Seminar task: its own kind, never folded into eocq.
+  if (seminarMinutes > 0) {
+    tasks.push({
+      kind: "seminar",
+      resourceId: undefined,
+      readingIds: group.readingRefs,
+      estimatedMinutes: seminarMinutes,
+      requiresConfidence: false,
+      moduleRef: group.ref,
+      isLastInModule: false,
+    });
+  }
+
+  // Review task: its own kind, never folded into content-video.
+  if (reviewMinutes > 0) {
+    tasks.push({
+      kind: "review",
+      resourceId: undefined,
+      readingIds: group.readingRefs,
+      estimatedMinutes: reviewMinutes,
       requiresConfidence: false,
       moduleRef: group.ref,
       isLastInModule: false,
@@ -184,14 +216,29 @@ function generateModuleTasks(
   return tasks;
 }
 
-// Merge tasks under 15 minutes into the preceding task of the same module
+// Merge tasks under 15 minutes into the preceding task of the same module.
+// A too-small FIRST task has no preceding task to merge into, so it is
+// merged forward into the next task instead - otherwise a sub-15-minute
+// content-notes task stands alone purely because it leads the module.
 function mergeSmallTasks(tasks: UnscheduledTask[]): UnscheduledTask[] {
   if (tasks.length === 0) return tasks;
 
+  let working = tasks;
+  if (working.length > 1 && working[0].estimatedMinutes < MIN_TASK_MINUTES) {
+    const [first, second, ...rest] = working;
+    const merged: UnscheduledTask = {
+      ...second,
+      estimatedMinutes: first.estimatedMinutes + second.estimatedMinutes,
+      requiresConfidence: first.requiresConfidence || second.requiresConfidence,
+      isLastInModule: first.isLastInModule || second.isLastInModule,
+    };
+    working = [merged, ...rest];
+  }
+
   const result: UnscheduledTask[] = [];
 
-  for (let i = 0; i < tasks.length; i++) {
-    const task = tasks[i];
+  for (let i = 0; i < working.length; i++) {
+    const task = working[i];
 
     if (task.estimatedMinutes < MIN_TASK_MINUTES && result.length > 0) {
       // Merge into preceding task
@@ -225,13 +272,38 @@ function splitTask(task: UnscheduledTask, maxMinutes: number): { head: Unschedul
     const totalVignettes = vigTo - vigFrom + 1;
     const minutesPerVignette = task.estimatedMinutes / totalVignettes;
 
-    // Determine how many complete vignettes fit in the head capacity.
-    const vignettesForHead = Math.max(1, Math.floor(headMinutes / minutesPerVignette));
+    // How many WHOLE vignettes fit in the head capacity. Zero means not
+    // even one vignette's worth fits - forcing at least one in anyway (the
+    // previous bug here) produced a head bigger than the day's remaining
+    // capacity and a degenerate, inverted-range, zero-minute tail. When
+    // nothing fits, this task cannot be split to make progress today;
+    // the caller defers the whole thing to the next day instead.
+    let vignettesForHead = Math.min(totalVignettes, Math.floor(headMinutes / minutesPerVignette));
+    if (vignettesForHead < 1) {
+      return null;
+    }
 
-    // Check if the head would be < 15 minutes (less than one vignette group).
+    let tailVignettes = totalVignettes - vignettesForHead;
+
+    // Give vignettes back from head to tail until the tail also clears the
+    // floor (mirrors the non-question branch below): cutting purely at head
+    // capacity can leave a tail of just one short vignette group.
+    while (
+      tailVignettes > 0 &&
+      tailVignettes * minutesPerVignette < MIN_TASK_MINUTES &&
+      vignettesForHead > 1
+    ) {
+      vignettesForHead -= 1;
+      tailVignettes += 1;
+    }
+
     const actualHeadMinutes = vignettesForHead * minutesPerVignette;
-    if (actualHeadMinutes < MIN_TASK_MINUTES && vignettesForHead < totalVignettes) {
-      // Cannot split without violating the 15-minute minimum.
+    if (
+      actualHeadMinutes < MIN_TASK_MINUTES ||
+      actualHeadMinutes > headMinutes ||
+      (tailVignettes > 0 && tailVignettes * minutesPerVignette < MIN_TASK_MINUTES)
+    ) {
+      // No split satisfies both the 15-minute floor and the day's capacity.
       return null;
     }
 
@@ -260,17 +332,35 @@ function splitTask(task: UnscheduledTask, maxMinutes: number): { head: Unschedul
 
     return { head: headTask, tail: tailTask };
   } else {
-    // For other tasks, split at any boundary.
+    // For other tasks, split at any boundary, but never leave a tail
+    // under the 15-minute floor. A straight split (head = capacity, tail =
+    // remainder) can do exactly that on an uneven divide (e.g. 100 minutes
+    // against 90 of capacity leaves a 10-minute orphan tail); when it
+    // would, shrink the head just enough to give the tail exactly the floor.
+    let headEstimate = headMinutes;
+    let tailEstimate = task.estimatedMinutes - headEstimate;
+
+    if (tailEstimate > 0 && tailEstimate < MIN_TASK_MINUTES) {
+      headEstimate = task.estimatedMinutes - MIN_TASK_MINUTES;
+      tailEstimate = MIN_TASK_MINUTES;
+    }
+
+    // Cannot produce two parts that both respect the floor (mirrors the
+    // question branch's null above, for the same reason).
+    if (headEstimate < MIN_TASK_MINUTES || tailEstimate <= 0) {
+      return null;
+    }
+
     const headTask: UnscheduledTask = {
       ...task,
-      estimatedMinutes: headMinutes,
+      estimatedMinutes: headEstimate,
       splitOf: task.splitOf ?? task.moduleRef,
       requiresConfidence: false,
     };
 
     const tailTask: UnscheduledTask = {
       ...task,
-      estimatedMinutes: task.estimatedMinutes - headMinutes,
+      estimatedMinutes: tailEstimate,
       splitOf: task.splitOf ?? task.moduleRef,
       requiresConfidence: task.requiresConfidence,
       isLastInModule: task.isLastInModule,

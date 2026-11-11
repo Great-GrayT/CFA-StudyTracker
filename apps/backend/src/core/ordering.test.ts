@@ -191,10 +191,19 @@ test("a prerequisite always precedes its dependant", () => {
   expect(indexOf(out, "qm/lm1")).toBeLessThan(indexOf(out, "qm/lm5"));
 });
 
-test("the same input always gives the same order", () => {
-  expect(orderModules(GROUPS, "curriculum")).toEqual(
-    orderModules(GROUPS, "curriculum")
-  );
+test("curriculum strategy orders by phase band, then topic cohesion, respecting the qm/lm1 prerequisite", () => {
+  // Hand-traced from compareGroups: qm/lm1 (priorityRank 40) outranks
+  // fsa/lm1 (30) within phaseBand 1, so it goes first; qm/lm5 depends on
+  // qm/lm1 and then wins topic cohesion over fsa/lm1 and fsa/lm2 (both
+  // phaseBand/moduleOrder tied otherwise); fsa/lm1 (band 1) precedes
+  // fsa/lm2 (band 2) under curriculum.
+  const out = orderModules(GROUPS, "curriculum");
+  expect(out.map((g) => g.ref)).toEqual([
+    "qm/lm1",
+    "qm/lm5",
+    "fsa/lm1",
+    "fsa/lm2",
+  ]);
 });
 
 test("strategy changes which term leads, not the prerequisite graph", () => {

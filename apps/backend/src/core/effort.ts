@@ -69,7 +69,13 @@ export function estimateResource(
 
   switch (r.kind) {
     case "lecture": {
-      if (r.notesPages === undefined) return 0;
+      // ET LM3 case: a video-only module has no notes pages to rate from
+      // (the provider inventory records file size only, never duration),
+      // so it gets the flat floor instead of silently estimating zero.
+      if (r.notesPages === undefined) {
+        minutes = c.ET_LM3_MIN;
+        break;
+      }
       minutes = Math.max(15, c.PAGE_RATE * r.notesPages);
       break;
     }
@@ -134,16 +140,23 @@ export function estimateResource(
  * A module with no resources returns weightImpliedMinutes with hasMaterial false.
  * Round each resource's estimate before summing, so the module total matches
  * the sum of its parts exactly.
+ *
+ * kFor, when given, supplies the learned pace multiplier for each resource
+ * (by value and index, since two resources can share a kind but not a
+ * calibration factor). Defaults to 1 so existing callers are unaffected.
  */
 export function estimateModule(
   m: ModuleInput,
-  c: EffortConstants
+  c: EffortConstants,
+  kFor?: (r: ResourceInput, index: number) => number
 ): ModuleEstimate {
   const byKind: Record<string, number> = {};
   let total = 0;
 
-  for (const resource of m.resources) {
-    const minutes = estimateResource(resource, c);
+  for (let i = 0; i < m.resources.length; i++) {
+    const resource = m.resources[i];
+    const k = kFor ? kFor(resource, i) : 1;
+    const minutes = estimateResource(resource, c, k);
     if (minutes > 0) {
       byKind[resource.kind] = (byKind[resource.kind] ?? 0) + minutes;
       total += minutes;

@@ -14,12 +14,29 @@ import { orderModules } from "../core/ordering";
 import type {
   PackableGroup,
   Calendar,
+  PlannedTask,
 } from "../core/packing";
 import { packDays } from "../core/packing";
-import type { FactorTree } from "../core/calibration";
-import { updateFactor } from "../core/calibration";
+import type { FactorKey, FactorTree } from "../core/calibration";
+import { factorFor, updateFactor } from "../core/calibration";
 
 const HORIZON_DAYS = 14;
+
+// The resource kinds effort.ts's estimator actually knows how to price.
+// The catalogue also carries administrative kinds (e.g. "update" changelog
+// notes, "orientation" welcome videos) that are not study content at all;
+// estimateResource throws on anything outside this set by design (it is a
+// pure function with no business silently guessing at an unknown kind), so
+// this composition layer must filter them out before they ever reach it.
+const KNOWN_EFFORT_KINDS = new Set([
+  "lecture",
+  "eocq",
+  "review",
+  "seminar",
+  "notes",
+  "question_set",
+  "answer_set",
+]);
 
 /**
  * Derive the calibration factor tree from completed PlanTask rows in date order.
@@ -46,16 +63,41 @@ function deriveFactorTree(completedTasks: Array<{
   return tree;
 }
 
+/** Per-reading question-practice shape, read straight from its question_set
+ * resources (not the answer_set mirror, which duplicates the same counts). */
+type ReadingQuestionProfile = {
+  vignetteCount: number;
+  calculationShare: number;
+};
+
+/** Raw (pre-trim) eocq/seminar minutes for a topic, carried separately from
+ * the single "otherMinutes" bucket allocate() trims, so the two can be
+ * split back out honestly once trimming is done. */
+type TopicOtherRaw = {
+  eocqRaw: number;
+  seminarRaw: number;
+};
+
 /**
  * Build TopicEstimate by estimating effort from catalogue resources linked to readings.
+ * Also returns, per reading, its question-practice shape (vignetteCount,
+ * calculationShare) and, per topic, the raw eocq/seminar split that
+ * "otherMinutes" otherwise flattens.
  */
 async function buildTopicEstimates(
   levelId: string,
   totalPlanMinutes: number,
+  tree: FactorTree,
   constants: EffortConstants = DEFAULT_EFFORT_CONSTANTS,
-): Promise<TopicEstimate[]> {
+): Promise<{
+  estimates: TopicEstimate[];
+  readingProfiles: Map<string, ReadingQuestionProfile>;
+  topicOtherRaw: Map<string, TopicOtherRaw>;
+}> {
   const topics = await db.topic.findMany({ where: { levelId } });
   const estimates: TopicEstimate[] = [];
+  const readingProfiles = new Map<string, ReadingQuestionProfile>();
+  const topicOtherRaw = new Map<string, TopicOtherRaw>();
 
   for (const topic of topics) {
     const readings = await db.reading.findMany({
@@ -70,23 +112,51 @@ async function buildTopicEstimates(
     let reviewMinutes = 0;
     let questionMinutes = 0;
     let otherMinutes = 0;
+    let eocqRaw = 0;
+    let seminarRaw = 0;
 
     // For each reading, estimate effort from its linked resources
     for (const reading of readings) {
       const unitReadings = await db.packageUnitReading.findMany({
         where: { readingId: reading.id },
-        include: { unit: { include: { resources: true } } },
+        include: {
+          unit: {
+            include: {
+              resources: true,
+              edition: { include: { package: true } },
+            },
+          },
+        },
       });
 
       const resourceInputs: ResourceInput[] = [];
+      const resourceKeys: FactorKey[] = [];
+
+      let readingQuestionCount = 0;
+      let readingCalcCount = 0;
+      let readingVignetteCount = 0;
+
       for (const ur of unitReadings) {
+        const provider = ur.unit.edition.package.slug ?? ur.unit.edition.package.id;
+
         for (const res of ur.unit.resources) {
+          if (!KNOWN_EFFORT_KINDS.has(res.kind)) continue;
+
           const input: ResourceInput = { kind: res.kind };
 
-          if (res.kind === "lecture") {
-            if (res.pageCount) input.notesPages = res.pageCount;
-            if (res.durationSeconds)
-              input.lectureMinutes = Math.round(res.durationSeconds / 60);
+          if (res.kind === "lecture" && res.pageCount) {
+            input.notesPages = res.pageCount;
+          }
+
+          // lectureMinutes drives eocq and review too (their formulas both
+          // read it), not only "lecture" - the provider inventory records
+          // one video length per resource regardless of which of the three
+          // kinds that video is.
+          if (
+            (res.kind === "lecture" || res.kind === "eocq" || res.kind === "review") &&
+            res.durationSeconds
+          ) {
+            input.lectureMinutes = Math.round(res.durationSeconds / 60);
           }
 
           if (res.questionCount) {
@@ -101,8 +171,23 @@ async function buildTopicEstimates(
           }
 
           resourceInputs.push(input);
+          resourceKeys.push({ provider, kind: res.kind, topic: topic.id });
+
+          // question_set only: answer_set mirrors the same vignette/calc
+          // counts for its explanations, so counting both would double them.
+          if (res.kind === "question_set") {
+            readingQuestionCount += res.questionCount ?? 0;
+            readingCalcCount += res.calcCount ?? 0;
+            readingVignetteCount += res.vignetteCount ?? 0;
+          }
         }
       }
+
+      readingProfiles.set(reading.id, {
+        vignetteCount: readingVignetteCount,
+        calculationShare:
+          readingQuestionCount > 0 ? readingCalcCount / readingQuestionCount : 0.5,
+      });
 
       // Weight-implied cap for this reading is its share of the topic cap
       const readingCap = topicCap / Math.max(1, readings.length);
@@ -114,6 +199,7 @@ async function buildTopicEstimates(
           weightImpliedMinutes: readingCap,
         },
         constants,
+        (_r, i) => factorFor(tree, resourceKeys[i]),
       );
 
       totalTopicMinutes += est.total;
@@ -122,8 +208,9 @@ async function buildTopicEstimates(
       reviewMinutes += est.byKind["review"] ?? 0;
       questionMinutes += est.byKind["question_set"] ?? 0;
       questionMinutes += est.byKind["answer_set"] ?? 0;
-      otherMinutes += est.byKind["eocq"] ?? 0;
-      otherMinutes += est.byKind["seminar"] ?? 0;
+      eocqRaw += est.byKind["eocq"] ?? 0;
+      seminarRaw += est.byKind["seminar"] ?? 0;
+      otherMinutes += (est.byKind["eocq"] ?? 0) + (est.byKind["seminar"] ?? 0);
     }
 
     estimates.push({
@@ -136,34 +223,98 @@ async function buildTopicEstimates(
       otherMinutes,
       moduleCount: readings.length,
     });
+    topicOtherRaw.set(topic.id, { eocqRaw, seminarRaw });
   }
 
-  return estimates;
+  return { estimates, readingProfiles, topicOtherRaw };
+}
+
+/** A task represents real work the candidate already did, so regeneration
+ * must never delete or silently overwrite it: a logged study entry, a
+ * status that moved off "pending", recorded actual minutes, or a timer
+ * that's currently running. logEntryId alone used to be the only guard. */
+function isProtectedWork(task: {
+  logEntryId: string | null;
+  status: string;
+  actualMinutes: number | null;
+  timerStartedAt: Date | null;
+}): boolean {
+  return (
+    task.logEntryId !== null ||
+    task.status !== "pending" ||
+    task.actualMinutes !== null ||
+    task.timerStartedAt !== null
+  );
+}
+
+function readingIdsEqual(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((v, i) => v === b[i]);
+}
+
+/** Whether an existing row already reflects the freshly planned task for
+ * its slot, so an occupied (date, order) slot is "stable" only when its
+ * CONTENT matches - not merely because a row of any kind sits there. */
+function taskMatchesPlan(
+  existing: {
+    kind: string;
+    resourceId: string | null;
+    readingIds: string[];
+    estimatedMinutes: number;
+    requiresConfidence: boolean;
+    questionTarget: number | null;
+    vignetteFrom: number | null;
+    vignetteTo: number | null;
+    mode: string | null;
+    splitOf: string | null;
+    splitIndex: number | null;
+    splitCount: number | null;
+  },
+  planned: PlannedTask,
+): boolean {
+  return (
+    existing.kind === planned.kind &&
+    (existing.resourceId ?? null) === (planned.resourceId ?? null) &&
+    readingIdsEqual(existing.readingIds, planned.readingIds ?? []) &&
+    existing.estimatedMinutes === planned.estimatedMinutes &&
+    existing.requiresConfidence === planned.requiresConfidence &&
+    (existing.questionTarget ?? null) === (planned.questionTarget ?? null) &&
+    (existing.vignetteFrom ?? null) === (planned.vignetteFrom ?? null) &&
+    (existing.vignetteTo ?? null) === (planned.vignetteTo ?? null) &&
+    (existing.mode ?? null) === (planned.mode ?? null) &&
+    (existing.splitOf ?? null) === (planned.splitOf ?? null) &&
+    (existing.splitIndex ?? null) === (planned.splitIndex ?? null) &&
+    (existing.splitCount ?? null) === (planned.splitCount ?? null)
+  );
 }
 
 /**
  * Main function: generate a 14-day horizon of tasks for a plan.
- * Freezes yesterday's tasks, regenerates the unfrozen window (preserving logEntryId rows),
- * and writes new PlanTask rows.
+ * Freezes yesterday's tasks, regenerates the unfrozen window (preserving
+ * protected rows), and writes new PlanTask rows. The freeze/delete/write
+ * sequence runs inside one transaction so a crash mid-regeneration can
+ * never leave a plan half-deleted.
  */
 export async function generateHorizon(
   planId: string,
   today: string,
-): Promise<{ created: number; frozen: number; kept: number }> {
+): Promise<{ created: number; frozen: number; kept: number; deleted: number }> {
   const plan = await db.studyPlan.findUniqueOrThrow({ where: { id: planId } });
 
   const todayDate = new Date(today + "T00:00:00Z");
   const horizonEnd = new Date(todayDate);
   horizonEnd.setUTCDate(horizonEnd.getUTCDate() + HORIZON_DAYS - 1);
 
-  // Derive calibration factor from completed tasks
+  // Derive calibration factor from completed tasks, and actually use it:
+  // every estimate below is scaled by the candidate's own observed pace
+  // instead of staying frozen at seed values forever.
   const completedTasks = await db.planTask.findMany({
     where: { planId, status: "done" },
     orderBy: { date: "asc" },
     select: { estimatedMinutes: true, actualMinutes: true },
   });
 
-  deriveFactorTree(completedTasks);
+  const factorTree = deriveFactorTree(completedTasks);
 
   // Calculate total plan minutes from weekly availability and exam date
   const weeklyAvailability = plan.weeklyAvailability as Record<string, number>;
@@ -177,10 +328,8 @@ export async function generateHorizon(
   const totalPlanMinutes = Math.max(1, weekTotal * weeksUntilExam);
 
   // Build effort estimates and allocate by topic
-  const topicEstimates = await buildTopicEstimates(
-    plan.levelId,
-    totalPlanMinutes,
-  );
+  const { estimates: topicEstimates, readingProfiles, topicOtherRaw } =
+    await buildTopicEstimates(plan.levelId, totalPlanMinutes, factorTree);
   const allocationResult = allocate(topicEstimates, totalPlanMinutes);
 
   // Get all readings and build SchedulableGroup objects
@@ -233,14 +382,33 @@ export async function generateHorizon(
       (r) => r.topicId === reading.topicId,
     ).length;
 
+    // otherMinutes is eocq+seminar folded together for allocation's
+    // trimming purposes; split it back out here, scaled by whatever
+    // fraction of the raw total survived trimming, so eocqMinutes +
+    // seminarMinutes always sums to budget.otherMinutes exactly.
+    const otherRaw = topicOtherRaw.get(reading.topicId) ?? { eocqRaw: 0, seminarRaw: 0 };
+    const otherRawTotal = otherRaw.eocqRaw + otherRaw.seminarRaw;
+    const otherScale = otherRawTotal > 0 ? budget.otherMinutes / otherRawTotal : 0;
+    const eocqShare = otherRaw.eocqRaw * otherScale;
+    const seminarShare = otherRaw.seminarRaw * otherScale;
+
+    const profile = readingProfiles.get(reading.id) ?? {
+      vignetteCount: 0,
+      calculationShare: 0.5,
+    };
+
     packable.push({
       ...group,
       noteMinutes: Math.max(0, budget.noteMinutes / readingCountForTopic),
-      videoMinutes: Math.max(0, budget.reviewMinutes / readingCountForTopic),
-      eocqMinutes: Math.max(0, budget.otherMinutes / readingCountForTopic),
+      // Nothing in the catalogue maps to "content-video" honestly yet
+      // (review has its own kind below); left at 0 rather than fabricated.
+      videoMinutes: 0,
+      eocqMinutes: Math.max(0, eocqShare / readingCountForTopic),
+      seminarMinutes: Math.max(0, seminarShare / readingCountForTopic),
+      reviewMinutes: Math.max(0, budget.reviewMinutes / readingCountForTopic),
       questionMinutes: Math.max(0, budget.questionMinutes / readingCountForTopic),
-      vignetteCount: 0,
-      calculationShare: 0.5,
+      vignetteCount: profile.vignetteCount,
+      calculationShare: profile.calculationShare,
     });
   }
 
@@ -254,35 +422,7 @@ export async function generateHorizon(
 
   const plannedDays = packable.length > 0 ? packDays(packable, calendar, {}) : [];
 
-  // Freeze tasks before today
-  let frozenCount = 0;
-  const tasksBeforeToday = await db.planTask.findMany({
-    where: {
-      planId,
-      date: { lt: todayDate },
-    },
-  });
-
-  for (const task of tasksBeforeToday) {
-    if (!task.frozen) {
-      await db.planTask.update({
-        where: { id: task.id },
-        data: { frozen: true },
-      });
-      frozenCount++;
-    }
-  }
-
-  // Get existing tasks in window for comparison
-  const tasksInWindow = await db.planTask.findMany({
-    where: {
-      planId,
-      date: { gte: todayDate, lte: horizonEnd },
-      frozen: false,
-    },
-  });
-
-  // Build set of (date, order) tuples that are in the new plan
+  // Build set of (date, order) tuples that are in the new plan.
   const newPlanSlots = new Set<string>();
   for (const day of plannedDays) {
     const dayDate = new Date(day.date + "T00:00:00Z");
@@ -292,72 +432,131 @@ export async function generateHorizon(
     }
   }
 
-  // Delete tasks that are NOT in the new plan and have no logEntryId
-  // (tasks with logEntryId are preserved)
-  let deletedCount = 0;
-  for (const task of tasksInWindow) {
-    const key = `${task.date.getTime()}|${task.order}`;
-    if (!newPlanSlots.has(key) && !task.logEntryId) {
-      await db.planTask.delete({ where: { id: task.id } });
-      deletedCount++;
-    }
-  }
+  // Freeze, delete and write all happen in one transaction: a crash
+  // between any of these steps must never leave the plan half-regenerated
+  // (rows deleted with their replacements never written, or vice versa).
+  const result = await db.$transaction(async (tx) => {
+    // Freeze tasks before today.
+    let frozenCount = 0;
+    const tasksBeforeToday = await tx.planTask.findMany({
+      where: {
+        planId,
+        date: { lt: todayDate },
+      },
+    });
 
-  // Write new tasks
-  let createdCount = 0;
-  for (const day of plannedDays) {
-    const dayDate = new Date(day.date + "T00:00:00Z");
-
-    for (let order = 0; order < day.tasks.length; order++) {
-      const plannedTask = day.tasks[order];
-
-      const key = `${dayDate.getTime()}|${order}`;
-      const existingInWindow = tasksInWindow.find(
-        (t) => `${t.date.getTime()}|${t.order}` === key,
-      );
-
-      // If task already exists at this slot, skip (it's stable)
-      if (existingInWindow) {
-        continue;
+    for (const task of tasksBeforeToday) {
+      if (!task.frozen) {
+        await tx.planTask.update({
+          where: { id: task.id },
+          data: { frozen: true },
+        });
+        frozenCount++;
       }
-
-      await db.planTask.create({
-        data: {
-          planId,
-          date: dayDate,
-          order,
-          kind: plannedTask.kind,
-          resourceId: plannedTask.resourceId,
-          readingIds: plannedTask.readingIds ?? [],
-          estimatedMinutes: plannedTask.estimatedMinutes,
-          requiresConfidence: plannedTask.requiresConfidence,
-          questionTarget: plannedTask.questionTarget,
-          vignetteFrom: plannedTask.vignetteFrom,
-          vignetteTo: plannedTask.vignetteTo,
-          mode: plannedTask.mode,
-          splitOf: plannedTask.splitOf,
-          splitIndex: plannedTask.splitIndex,
-          splitCount: plannedTask.splitCount,
-          status: "pending",
-          frozen: false,
-        },
-      });
-      createdCount++;
     }
-  }
 
-  // Count kept tasks: ones that exist in the window and match the new plan
-  let keptCount = 0;
-  for (const task of tasksInWindow) {
-    const key = `${task.date.getTime()}|${task.order}`;
-    if (newPlanSlots.has(key)) {
-      keptCount++;
+    // Get existing tasks in window for comparison.
+    const tasksInWindow = await tx.planTask.findMany({
+      where: {
+        planId,
+        date: { gte: todayDate, lte: horizonEnd },
+        frozen: false,
+      },
+    });
+
+    // Delete tasks that are NOT in the new plan, unless they represent
+    // real work (logEntryId, a non-pending status, recorded actual
+    // minutes, or a running timer) - any of those survives regeneration.
+    let deletedCount = 0;
+    for (const task of tasksInWindow) {
+      const key = `${task.date.getTime()}|${task.order}`;
+      if (!newPlanSlots.has(key) && !isProtectedWork(task)) {
+        await tx.planTask.delete({ where: { id: task.id } });
+        deletedCount++;
+      }
     }
-  }
 
-  return {
-    created: createdCount,
-    frozen: frozenCount,
-    kept: keptCount,
-  };
+    // Write new tasks, and bring any occupied-but-stale slot's content
+    // in line with the fresh plan (an ordering-strategy change, for
+    // instance, reassigns which module lands at a given date/order - an
+    // occupied slot is only "stable" when its content still matches).
+    let createdCount = 0;
+    for (const day of plannedDays) {
+      const dayDate = new Date(day.date + "T00:00:00Z");
+
+      for (let order = 0; order < day.tasks.length; order++) {
+        const plannedTask = day.tasks[order];
+        const key = `${dayDate.getTime()}|${order}`;
+        const existingInWindow = tasksInWindow.find(
+          (t) => `${t.date.getTime()}|${t.order}` === key,
+        );
+
+        if (existingInWindow) {
+          // Never overwrite real work, even if the plan reassigned this slot.
+          if (isProtectedWork(existingInWindow)) continue;
+          if (taskMatchesPlan(existingInWindow, plannedTask)) continue;
+
+          await tx.planTask.update({
+            where: { id: existingInWindow.id },
+            data: {
+              kind: plannedTask.kind,
+              resourceId: plannedTask.resourceId,
+              readingIds: plannedTask.readingIds ?? [],
+              estimatedMinutes: plannedTask.estimatedMinutes,
+              requiresConfidence: plannedTask.requiresConfidence,
+              questionTarget: plannedTask.questionTarget,
+              vignetteFrom: plannedTask.vignetteFrom,
+              vignetteTo: plannedTask.vignetteTo,
+              mode: plannedTask.mode,
+              splitOf: plannedTask.splitOf,
+              splitIndex: plannedTask.splitIndex,
+              splitCount: plannedTask.splitCount,
+            },
+          });
+          continue;
+        }
+
+        await tx.planTask.create({
+          data: {
+            planId,
+            date: dayDate,
+            order,
+            kind: plannedTask.kind,
+            resourceId: plannedTask.resourceId,
+            readingIds: plannedTask.readingIds ?? [],
+            estimatedMinutes: plannedTask.estimatedMinutes,
+            requiresConfidence: plannedTask.requiresConfidence,
+            questionTarget: plannedTask.questionTarget,
+            vignetteFrom: plannedTask.vignetteFrom,
+            vignetteTo: plannedTask.vignetteTo,
+            mode: plannedTask.mode,
+            splitOf: plannedTask.splitOf,
+            splitIndex: plannedTask.splitIndex,
+            splitCount: plannedTask.splitCount,
+            status: "pending",
+            frozen: false,
+          },
+        });
+        createdCount++;
+      }
+    }
+
+    // Count kept tasks: ones that exist in the window and match the new plan's slots.
+    let keptCount = 0;
+    for (const task of tasksInWindow) {
+      const key = `${task.date.getTime()}|${task.order}`;
+      if (newPlanSlots.has(key)) {
+        keptCount++;
+      }
+    }
+
+    return {
+      created: createdCount,
+      frozen: frozenCount,
+      kept: keptCount,
+      deleted: deletedCount,
+    };
+  }, { timeout: 30000 });
+
+  return result;
 }

@@ -108,6 +108,20 @@ test("a topic never loses all of its practice, however over-served", () => {
   expect(floorRecord!.reason).toMatch(/floor/i);
 });
 
+test("other-layer minutes are trimmed too: a topic cannot exceed its cap even when other alone exceeds it", () => {
+  // notes/review/questions are all 0 here; only trimming "other" itself
+  // can bring the topic back under cap. Without that fourth trim layer
+  // this topic's total would land at 500, well above its 100-minute cap.
+  const r = allocate(
+    [topic("eq", { weightMid: 10, estimateMinutes: 500, other: 500 })],
+    1000
+  );
+  const eq = r.byTopic.get("eq")!;
+  expect(eq.minutes).toBeLessThanOrEqual(100);
+  expect(eq.otherMinutes).toBe(100);
+  expect(r.trimmed.some((t) => t.layer === "other")).toBe(true);
+});
+
 test("an under-served topic is not padded", () => {
   const r = allocate(
     [topic("eth", { weightMid: 10, estimateMinutes: 60 })],
@@ -153,6 +167,16 @@ test("real exam misallocations are corrected: Equities 1.37x, Ethics 0.72x", () 
       estimateMinutes: econ_estimate,
       questions: econ_estimate,
       moduleCount: 10,
+    }),
+    // Alt: all of its material sits in "other" (e.g. seminars), and that
+    // alone ships 10x its weight share. Every other topic above routes
+    // its surplus through notes/review/questions, so without this fixture
+    // the loop below would never exercise the other-layer trim at all.
+    topic("alt", {
+      weightMid: 5,
+      estimateMinutes: 5000,
+      other: 5000,
+      moduleCount: 1,
     }),
   ];
 

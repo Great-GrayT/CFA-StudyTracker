@@ -90,80 +90,54 @@ export function allocate(
     // Over-served: trim to cap or floor, whichever is higher.
     const target = Math.max(cap, floor);
     let trimmedSoFar = 0;
+    const reason = `trimmed to weight cap (${cap.toFixed(0)} min) and floor (${floor} min)`;
 
     // Trim notes pre-reads first (cheapest value).
     const noteTrim = Math.min(noteMinutes, totalBefore - target);
     if (noteTrim > 0) {
       noteMinutes -= noteTrim;
       trimmedSoFar += noteTrim;
-      trimmed.push({
-        topic: topic.key,
-        layer: "notes",
-        minutes: noteTrim,
-        reason: `trimmed to weight cap (${cap.toFixed(0)} min) and floor (${floor} min)`,
-      });
+      trimmed.push({ topic: topic.key, layer: "notes", minutes: noteTrim, reason });
     }
 
-    // If we've trimmed enough, stop.
-    if (trimmedSoFar >= totalBefore - target) {
-      const totalAfter = noteMinutes + reviewMinutes + questionMinutes + otherMinutes;
-      byTopic.set(topic.key, {
-        minutes: totalAfter,
-        noteMinutes,
-        reviewMinutes,
-        questionMinutes,
-        otherMinutes,
-      });
-      surplusMinutes += totalBefore - totalAfter;
-      continue;
-    }
-
-    // Trim review video (second tier).
-    const reviewTrim = Math.min(
-      reviewMinutes,
-      totalBefore - target - trimmedSoFar
-    );
-    if (reviewTrim > 0) {
-      reviewMinutes -= reviewTrim;
-      trimmedSoFar += reviewTrim;
-      trimmed.push({
-        topic: topic.key,
-        layer: "review",
-        minutes: reviewTrim,
-        reason: `trimmed to weight cap (${cap.toFixed(0)} min) and floor (${floor} min)`,
-      });
-    }
-
-    // If we've trimmed enough, stop.
-    if (trimmedSoFar >= totalBefore - target) {
-      const totalAfter = noteMinutes + reviewMinutes + questionMinutes + otherMinutes;
-      byTopic.set(topic.key, {
-        minutes: totalAfter,
-        noteMinutes,
-        reviewMinutes,
-        questionMinutes,
-        otherMinutes,
-      });
-      surplusMinutes += totalBefore - totalAfter;
-      continue;
+    // Trim review video (second tier), only if notes weren't enough.
+    let reviewTrim = 0;
+    if (trimmedSoFar < totalBefore - target) {
+      reviewTrim = Math.min(reviewMinutes, totalBefore - target - trimmedSoFar);
+      if (reviewTrim > 0) {
+        reviewMinutes -= reviewTrim;
+        trimmedSoFar += reviewTrim;
+        trimmed.push({ topic: topic.key, layer: "review", minutes: reviewTrim, reason });
+      }
     }
 
     // Trim questions: drop the LOWEST calculation-share questions first
     // (so the most calculation-dense practice survives).
     // Within questions, assume uniform cost per question by default.
-    const questionTrim = Math.min(
-      questionMinutes,
-      totalBefore - target - trimmedSoFar
-    );
-    if (questionTrim > 0) {
-      questionMinutes -= questionTrim;
-      trimmedSoFar += questionTrim;
-      trimmed.push({
-        topic: topic.key,
-        layer: "questions",
-        minutes: questionTrim,
-        reason: `trimmed to weight cap (${cap.toFixed(0)} min) and floor (${floor} min)`,
-      });
+    let questionsEntry: TrimRecord | undefined;
+    if (trimmedSoFar < totalBefore - target) {
+      const questionTrim = Math.min(questionMinutes, totalBefore - target - trimmedSoFar);
+      if (questionTrim > 0) {
+        questionMinutes -= questionTrim;
+        trimmedSoFar += questionTrim;
+        questionsEntry = { topic: topic.key, layer: "questions", minutes: questionTrim, reason };
+        trimmed.push(questionsEntry);
+      }
+    }
+
+    // Trim "other" last. Nothing exempts it from the cap: a topic whose
+    // other-layer minutes alone exceed its share must still be brought
+    // down to target, or the invariant this function exists to enforce
+    // (no topic budget exceeds its cap) would be silently violable.
+    let otherEntry: TrimRecord | undefined;
+    if (trimmedSoFar < totalBefore - target) {
+      const otherTrim = Math.min(otherMinutes, totalBefore - target - trimmedSoFar);
+      if (otherTrim > 0) {
+        otherMinutes -= otherTrim;
+        trimmedSoFar += otherTrim;
+        otherEntry = { topic: topic.key, layer: "other", minutes: otherTrim, reason };
+        trimmed.push(otherEntry);
+      }
     }
 
     const totalAfter = noteMinutes + reviewMinutes + questionMinutes + otherMinutes;
@@ -176,11 +150,10 @@ export function allocate(
     });
     surplusMinutes += totalBefore - totalAfter;
 
-    // If floor exceeded the cap, record the overflow.
+    // If floor exceeded the cap, record the overflow on whichever layer
+    // absorbed the last of the trim (other if it fired, else questions).
     if (target === floor && floor > cap) {
-      const overflowEntry = trimmed.find(
-        (t) => t.topic === topic.key && t.layer === "questions"
-      );
+      const overflowEntry = otherEntry ?? questionsEntry;
       if (overflowEntry) {
         overflowEntry.reason = `floor (${floor} min) exceeds weight cap (${cap.toFixed(0)} min)`;
       }

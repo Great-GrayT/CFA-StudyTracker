@@ -1,9 +1,15 @@
 import { randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { db } from "../../src/lib/db";
 import { POST as REGISTER } from "../../src/app/api/auth/register/route";
 import { POST as CREATE_PLAN } from "../../src/app/api/plans/route";
 import { GET as LIST_LOGS, POST as CREATE_LOG } from "../../src/app/api/logs/route";
 import { jsonRequest, readJson } from "./request";
+import { seedPackages } from "../../prisma/seed-packages.ts";
 
 /**
  * Shared test fixtures for Task 9's route tests (and anything downstream
@@ -437,6 +443,93 @@ export async function setupPlanWithCatalogue(): Promise<{ planId: string }> {
   // Register a user and create a plan
   const user = await registerUser();
 
+  const plan = await db.studyPlan.create({
+    data: {
+      userId: user.id,
+      levelId: "II",
+      examDate: new Date("2027-06-01"),
+      startDate: new Date("2027-01-04"),
+      weeklyAvailability: {
+        mon: 120,
+        tue: 120,
+        wed: 120,
+        thu: 120,
+        fri: 120,
+        sat: 60,
+        sun: 60,
+      },
+      orderingStrategy: "curriculum",
+    },
+  });
+
+  return { planId: plan.id };
+}
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const BACKEND_ROOT = join(HERE, "..", "..");
+
+/** Reads DATABASE_URL straight out of .env.test, never out of process.env,
+ * so the guard below cannot be fooled by something upstream having
+ * mutated process.env.DATABASE_URL after setup ran. */
+function testDatabaseUrl(): string {
+  const envText = readFileSync(join(BACKEND_ROOT, ".env.test"), "utf8");
+  const match = envText.match(/^DATABASE_URL="(.+)"$/m);
+  if (!match) {
+    throw new Error("DATABASE_URL not found in .env.test");
+  }
+  return match[1];
+}
+
+/**
+ * Seeds the REAL curriculum and provider catalogue - the same private
+ * `prisma/seed-data/*.json` files loaded into the dev database - into
+ * whichever database DATABASE_URL currently points at.
+ *
+ * Refuses to run unless process.env.DATABASE_URL already matches
+ * .env.test's value: resetDb() deletes every row in whatever database it's
+ * pointed at, so a test that seeds real data must never run against
+ * anything but the disposable test database (see prisma/cli-smoke.test.ts's
+ * own caution about exactly this mistake with seed-packages.ts).
+ *
+ * seedPackages is called in-process (its main() is import-guarded, so this
+ * is safe - tests/catalogue/seed-packages.test.ts does the same). The
+ * curriculum seed script is spawned instead: its main() runs unconditionally
+ * on import with no guard, so requiring it in-process would run it as an
+ * unawaited side effect of the import itself.
+ */
+export async function seedRealCurriculumAndCatalogue(): Promise<void> {
+  const databaseUrl = testDatabaseUrl();
+  if (process.env.DATABASE_URL !== databaseUrl) {
+    throw new Error(
+      "Refusing to seed real curriculum/catalogue data: DATABASE_URL does not match .env.test's test database.",
+    );
+  }
+
+  // Resolve tsx's own CLI entry and run it through plain `node`, rather than
+  // the node_modules/.bin wrapper - that wrapper is a .CMD batch file on
+  // Windows, which execFileSync cannot exec directly, and shelling out to
+  // run it breaks on a path containing spaces (this repo's does).
+  const require = createRequire(import.meta.url);
+  const tsxCli = require.resolve("tsx/cli");
+  execFileSync(process.execPath, [tsxCli, join(BACKEND_ROOT, "prisma", "seed.ts")], {
+    cwd: BACKEND_ROOT,
+    env: { ...process.env, DATABASE_URL: databaseUrl },
+    stdio: "pipe",
+  });
+
+  await seedPackages();
+}
+
+/**
+ * Sets up a plan against the REAL Level II curriculum and provider
+ * catalogue (51 readings, 2 editions, ~230 resources) - not a synthetic
+ * stand-in - for tests that need to prove the scheduler behaves correctly
+ * against what the catalogue actually contains today, gaps included.
+ */
+export async function setupPlanWithRealCatalogue(): Promise<{ planId: string }> {
+  await seedRealCurriculumAndCatalogue();
+
+  const user = await registerUser();
   const plan = await db.studyPlan.create({
     data: {
       userId: user.id,

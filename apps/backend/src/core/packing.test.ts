@@ -53,9 +53,13 @@ function fixtureGroup(opts: {
   videoMinutes: number;
   eocqMinutes: number;
   questionMinutes: number;
+  seminarMinutes?: number;
+  reviewMinutes?: number;
   vignetteCount: number;
   calculationShare: number;
 }): PackableGroup {
+  const seminarMinutes = opts.seminarMinutes ?? 0;
+  const reviewMinutes = opts.reviewMinutes ?? 0;
   return {
     ref: opts.ref,
     readingRefs: opts.readingRefs ?? [opts.ref],
@@ -64,12 +68,14 @@ function fixtureGroup(opts: {
     moduleOrder: 0,
     priorityRank: 0,
     weight: 5,
-    estimatedMinutes: opts.noteMinutes + opts.videoMinutes + opts.eocqMinutes + opts.questionMinutes,
-    weightImpliedMinutes: opts.noteMinutes + opts.videoMinutes + opts.eocqMinutes + opts.questionMinutes,
+    estimatedMinutes: opts.noteMinutes + opts.videoMinutes + opts.eocqMinutes + opts.questionMinutes + seminarMinutes + reviewMinutes,
+    weightImpliedMinutes: opts.noteMinutes + opts.videoMinutes + opts.eocqMinutes + opts.questionMinutes + seminarMinutes + reviewMinutes,
     noteMinutes: opts.noteMinutes,
     videoMinutes: opts.videoMinutes,
     eocqMinutes: opts.eocqMinutes,
     questionMinutes: opts.questionMinutes,
+    seminarMinutes,
+    reviewMinutes,
     vignetteCount: opts.vignetteCount,
     calculationShare: opts.calculationShare,
   };
@@ -164,6 +170,67 @@ const JUDGEMENT: PackableGroup[] = [
     questionMinutes: 30,
     vignetteCount: 2,
     calculationShare: 0.1,
+  }),
+];
+
+// SEMINAR_AND_REVIEW: both new kinds present alongside the original four.
+const SEMINAR_AND_REVIEW: PackableGroup[] = [
+  fixtureGroup({
+    ref: "test/sr",
+    noteMinutes: 20,
+    videoMinutes: 0,
+    eocqMinutes: 0,
+    questionMinutes: 0,
+    seminarMinutes: 35,
+    reviewMinutes: 20,
+    vignetteCount: 0,
+    calculationShare: 0.5,
+  }),
+];
+
+// UNEVEN_LECTURE: 100-minute video against 90-minute capacity. A straight
+// split (90 head / 10 tail) would leave a 10-minute orphan tail under the
+// 15-minute floor; the fix shrinks the head so the tail hits exactly 15.
+const UNEVEN_LECTURE: PackableGroup[] = [
+  fixtureGroup({
+    ref: "test/uneven",
+    noteMinutes: 0,
+    videoMinutes: 100,
+    eocqMinutes: 0,
+    questionMinutes: 0,
+    vignetteCount: 0,
+    calculationShare: 0.5,
+  }),
+];
+
+// UNSPLITTABLE_VIGNETTE: a single-vignette question task too big for a
+// day's remaining capacity. forcing at least one vignette into the head
+// (the old bug) produced a head bigger than the day's capacity and an
+// inverted-range, zero-minute tail; this must defer to the next day instead.
+const UNSPLITTABLE_VIGNETTE: PackableGroup[] = [
+  fixtureGroup({
+    ref: "test/unsplittable",
+    noteMinutes: 0,
+    videoMinutes: 0,
+    eocqMinutes: 0,
+    questionMinutes: 68,
+    vignetteCount: 1,
+    calculationShare: 0.5,
+  }),
+];
+
+// FIRST_TASK_TOO_SMALL: the module's very first generated task
+// (content-notes, 5 min) is under the floor, with nothing preceding it to
+// merge into backward.
+const FIRST_TASK_TOO_SMALL: PackableGroup[] = [
+  fixtureGroup({
+    ref: "test/firstsmall",
+    noteMinutes: 5,
+    videoMinutes: 50,
+    eocqMinutes: 0,
+    questionMinutes: 0,
+    vignetteCount: 0,
+    calculationShare: 0.5,
   }),
 ];
 
@@ -272,6 +339,63 @@ test("question mode reflects calculation share: >= 0.35 is timed-drill, < 0.35 i
 
   const below = packDays(JUDGEMENT, calendar({ every: 600 }), OPTS);
   expect(modeOf(below)).toBe("untimed-review");
+});
+
+test("seminar and review minutes emit their own kinds, not folded into eocq or content-video", () => {
+  const days = packDays(SEMINAR_AND_REVIEW, calendar({ every: 600 }), OPTS);
+  const kinds = days.flatMap((d) => d.tasks.map((t) => t.kind));
+
+  const seminarTask = days.flatMap((d) => d.tasks).find((t) => t.kind === "seminar");
+  const reviewTask = days.flatMap((d) => d.tasks).find((t) => t.kind === "review");
+
+  expect(seminarTask).toBeDefined();
+  expect(seminarTask!.estimatedMinutes).toBe(35);
+  expect(reviewTask).toBeDefined();
+  expect(reviewTask!.estimatedMinutes).toBe(20);
+  expect(kinds).not.toContain("eocq");
+  expect(kinds).not.toContain("content-video");
+});
+
+test("an uneven split never leaves a tail under 15 minutes", () => {
+  const days = packDays(UNEVEN_LECTURE, calendar({ every: 90 }), OPTS);
+  const videoTasks = days.flatMap((d) => d.tasks).filter((t) => t.kind === "content-video");
+
+  expect(videoTasks.length).toBeGreaterThan(1);
+  for (const t of videoTasks) {
+    expect(t.estimatedMinutes).toBeGreaterThanOrEqual(15);
+  }
+  expect(videoTasks.reduce((sum, t) => sum + t.estimatedMinutes, 0)).toBe(100);
+});
+
+test("a single vignette too big for a day's remaining capacity defers whole, never forces an oversized or zero-minute split", () => {
+  // Monday has 45 min (not enough for the 68-min single-vignette task,
+  // and not even one vignette's worth); Tuesday has 90 (enough for it whole).
+  const days = packDays(
+    UNSPLITTABLE_VIGNETTE,
+    calendar({ mon: 45, tue: 90, startDate: "2027-01-04" }),
+    OPTS
+  );
+
+  const monday = days.find((d) => d.date === "2027-01-04")!;
+  const tuesday = days.find((d) => d.date === "2027-01-05")!;
+
+  expect(monday.tasks).toEqual([]);
+  expect(tuesday.tasks).toHaveLength(1);
+  expect(tuesday.tasks[0].estimatedMinutes).toBe(68);
+  expect(tuesday.tasks[0].vignetteFrom).toBe(0);
+  expect(tuesday.tasks[0].vignetteTo).toBe(0);
+
+  for (const d of days) {
+    expect(d.tasks.every((t) => t.estimatedMinutes > 0)).toBe(true);
+  }
+});
+
+test("a too-small first task of a module merges forward, not left standalone", () => {
+  const days = packDays(FIRST_TASK_TOO_SMALL, calendar({ every: 600 }), OPTS);
+  const tasks = days.flatMap((d) => d.tasks);
+
+  expect(tasks.some((t) => t.estimatedMinutes < 15)).toBe(false);
+  expect(tasks.reduce((sum, t) => sum + t.estimatedMinutes, 0)).toBe(55);
 });
 
 test("only the last task of each module has requiresConfidence true", () => {
