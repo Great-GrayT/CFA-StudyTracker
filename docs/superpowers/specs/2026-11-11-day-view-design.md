@@ -190,6 +190,34 @@ serif never appears on Today.
 | Deferred (candidate) | Row removed from today's list, undo offered via `sonner` ("Moved to tomorrow. Undo"). | Distinct from Requeued: a candidate choosing "Not today" on one row is reversible and carries no alarm tint, because nothing has actually been missed yet. |
 | Split, part *n* of *m* | Kind label becomes "Lecture, part 2 of 4"; body line reads "resume where you stopped." No minute figure on parts after the first. | The engine's own rule: phrasing a split as a minute range would promise precision the duration model does not have. Part 1 may show the whole module's estimate once, with its honesty treatment, since that total is real. |
 
+### State combinations
+
+The table above treats Current, Split, and Requeued as independent rows,
+but a bad week makes them compose, not just occur in sequence.
+
+**A split, Requeued, Current row.** A frozen day's part 2 of 4 re-enters the
+live window and happens to also be the first not-done row today, so it
+carries all three signals at once. There is no real layout conflict,
+because a split part after the first never shows a minute figure, which is
+exactly the space the Requeued tag would otherwise compete for. Reading top
+to bottom: the `--alarm` rail sits on the row's left edge (it marks
+provenance, not state, so it sits outside the row's own content rather than
+interrupting it), then the kind glyph and the split label ("Lecture, part 2
+of 4") with its "resume where you stopped" body line and the "Missed earlier
+this week" tag in place of an estimate, then the timer and the Start or
+Resume pill, because the row is also Current. Nothing here is hidden to make
+room for anything else; the row is simply busier than the ordinary case.
+
+**Two live confidence rows at once.** A catch-up day can complete two
+groups' chains in the same session: today's own current group finishes, and
+moments later a Requeued group's last re-entered task finishes too. The
+design does not serialize this: both confidence rows are live
+simultaneously, each its own `role="radiogroup"` scoped to its own group, in
+the same top-to-bottom reading order as the groups themselves. The composer's
+existing confidence control does not serialize multiple pending ratings
+either, and gating one of these behind the other would stall a rating the
+engine's review ladder is already waiting on for no reason tied to the UI.
+
 ### Confidence check row
 
 Appears only as the terminal row of a group whose chain just completed.
@@ -200,6 +228,12 @@ submit step, matching the low-friction standard the composer already set)
 and the row settles to a compact "Rated 4" state with a quiet edit affordance,
 never a toast: a toast is for a write that could fail elsewhere in the app,
 this one cannot.
+
+Editing the rating later through that affordance changes only what future
+reads of the log see: the engine spec reads confidence at the moment it is
+logged to decide whether to insert a seminar and where a review visit lands
+in the queue, so an edit after either decision has already fired does not
+retroactively undo it, it only affects the next recomputation.
 
 The five-step selector is visually distinct from the four-step brass
 confidence ramp used on the coverage and LOS screens: this is a single
@@ -251,11 +285,11 @@ new number.
 
 | # | Moment | Purpose | Treatment |
 | --- | --- | --- | --- |
-| 1 | A task is marked done | State indication | Checkbox fill and name color/line-through on `--dur-tap` (120ms) `ease`, color and opacity only. Not a move, so `ease` rather than `ease-out`, per the standing rule that hover and color changes use plain ease. |
-| 2 | The row behind the completed one becomes current | Preventing a jarring change | Reuses the exact pattern `study-next-list.tsx` already ships: `AnimatePresence mode="popLayout"`, `layout`, 200ms. One number for one kind of motion across the app, not a second value invented for a visually identical case. |
-| 3 | The confidence row reveals after a group's last task completes | State indication, and the one rare, slightly heavier beat on this screen | Height and opacity expand on `--dur-sheet` (300ms) `--ease-enter`. Rare enough (once per group, a handful of times across a plan) to earn the full sheet-weight token rather than the tap-weight one. |
+| 1 | A task is marked done | State indication | Checkbox fill and name color/line-through on `--dur-tap` (120ms) `--ease-enter`, color and opacity only, matching the parent spec's own rule for "taps and toggles" rather than a separate rule invented for color changes. (The line-through itself will likely snap rather than transition in most engines; only the color and opacity around it genuinely animate, so the builder should not chase a transition that is not there.) |
+| 2 | The row behind the completed one becomes current | Preventing a jarring change | Reuses the exact pattern `study-next-list.tsx` already ships: `AnimatePresence mode="popLayout"`, `layout`, `--dur-move` (200ms) `--ease-enter`. One number for one kind of motion across the app, not a second value invented for a visually identical case. |
+| 3 | The confidence row reveals after a group's last task completes | State indication, and the one rare, slightly heavier beat on this screen | Same mechanism as moment 2, not a new one: `layout` plus `AnimatePresence mode="popLayout"` so the row mounts and the list reflows around it on transform and opacity only, `--dur-sheet` (300ms) `--ease-enter`. No animated `height`: the parent spec's motion budget is transform and opacity only, no animated layout properties, and this moment does not get an exception. Rare enough (once per group, a handful of times across a plan) to earn the full sheet-weight token rather than the tap-weight one. |
 | 4 | The minutes-override popover opens | Spatial consistency | Scale and opacity from the trigger, `--dur-move` (200ms) `--ease-enter`, `transform-origin` anchored to the timer's edit control, not centered. |
-| 5 | Start, Done, and Skip are pressed | Feedback | `transform: scale(0.97)` on `--dur-tap` (120ms) `ease-out`, gated behind `@media (hover: hover) and (pointer: fine)` for any paired hover state. Universal button hygiene, not a bespoke moment, kept in the count because the brief asked for an honest tally. |
+| 5 | Start, Done, and Skip are pressed | Feedback | `transform: scale(0.97)` on `--dur-tap` (120ms) `--ease-enter`, fired on pointer down rather than on release, matching the parent spec's rule for taps and toggles exactly. Gated behind `@media (hover: hover) and (pointer: fine)` for any paired hover state. Universal button hygiene, not a bespoke moment, kept in the count because the brief asked for an honest tally. |
 
 Rejected, by name, because the audit's own finding (one file in the whole
 app imports `motion`) is a sign of a right-sized app, not an under-built one,
@@ -291,10 +325,11 @@ and this screen should not be the one that reverses that:
   for the massif is explicitly not available for a screen seen daily.
 
 Reduced motion: row reflow (moment 2) drops to an opacity-only cross-fade
-with no layout movement; the confidence reveal (moment 3) keeps its opacity
-change and drops the height animation, appearing at final height instantly;
-the popover (moment 4) drops scale and keeps a 150ms opacity fade; press
-feedback (moment 5) is dropped entirely, since a completed action is already
+with no layout movement; the confidence reveal (moment 3) drops its `layout`
+animation the same way and keeps only the opacity change, appearing in its
+final position instantly rather than animating into place; the popover
+(moment 4) drops scale and keeps a 150ms opacity fade; press feedback
+(moment 5) is dropped entirely, since a completed action is already
 confirmed by the state change itself.
 
 ## Empty and edge states
@@ -307,15 +342,27 @@ genuinely ahead of the plan with slack remaining ("You're ahead. Nothing
 scheduled today, and that's the plan working."). Exam day and the day after
 keep the existing dedicated states unchanged.
 
+**A day finished early.** None of the three sentences above cover a day that
+had tasks and the candidate finished them all, and a short list is this
+screen's explicit goal, so finishing early is the expected outcome, not an
+edge case. This is a fourth, distinct state: not "nothing scheduled" (there
+was something, it is just done), so it gets its own workload-line variant,
+"All done for today," in place of the estimate or calibrated figure, and the
+list below it shows today's completed rows rather than going blank, so
+finishing early reads as a result earned, not as the page having lost the
+candidate's plan.
+
 **Three days behind.** The frozen days' undone work re-enters at the head
 of the live window, as Requeued rows, each tagged "Missed earlier this
 week." They are not hidden and not dumped as forty rows: the engine's own
 in-flight cap still governs how much is live at once, so a bad week produces
 a longer list for a few days, never an unbounded one. If the backlog still
 runs past a comfortable scroll (see worst-case data below), group the
-Requeued rows under one collapsed header, "{n} tasks moved from earlier this
-week," expandable on tap, rather than letting them crowd out today's own
-plan.
+Requeued rows under one collapsed header, "{n} {task word} moved from
+earlier this week," expandable on tap, rather than letting them crowd out
+today's own plan. `{task word}` resolves through `Intl.PluralRules` the same
+way the pace strip's `{outcome word}` does in the copy deck below, so this
+header does not reintroduce the "1 outcomes" class of bug on its own field.
 
 **The 378-minute Ethics Guidance lecture, split across days.** Day one shows
 the full module estimate once, with its honesty treatment ("about 378 min
@@ -348,27 +395,50 @@ layout above.
 | Group name | "Evaluating Quality of Financial Reports" as a group header at 320px, zoomed to 200% | Header can collide with the spine column at extreme zoom | Group header spans full width above the spine column, not inline with it |
 | Minute figure | A 6-hour day: a mock (264 min) plus its debrief (180 min) scheduled on consecutive days, 444 minutes combined | "Today's total" reads as a very large figure that looks alarming next to a typical 90 to 150 minute day | No special-case the number; the honest total is the point, and the mock's own fixed-block framing ("unsplittable, your longest block") already explains why it is large |
 | Task count | Zero tasks (see empty states above) | A blank list reads as a broken page if no empty-state copy renders | Always render one of the three named empty sentences, never an unlabelled blank area |
-| Task count | A 40-task backlog from a long lapse | Rendering all forty defeats "a short, ordered list" and is a real scroll-performance cost on a mid-range Android, the same hardware bar the rest of the app holds itself to | Collapse Requeued rows behind the "{n} tasks moved" header above; never let backlog volume expand today's own live window past the engine's existing in-flight cap |
+| Task count | A 40-task backlog from a long lapse | Rendering all forty defeats "a short, ordered list" and is a real scroll-performance cost on a mid-range Android, the same hardware bar the rest of the app holds itself to | Collapse Requeued rows behind the "{n} {task word} moved" header above; never let backlog volume expand today's own live window past the engine's existing in-flight cap |
 | Confidence check module name | A non-Latin note added by the candidate on an earlier log entry, later surfaced in a group's context | The project has no non-Latin resource names (both providers publish in English), but a candidate's own free-text note could contain any script | Notes are not rendered inline on this screen; they stay in the log and `/logs` detail, so this row is never a vector for the problem |
 | Split part count | A split task that runs to "part 1 of 9" on an unusually long recording | "part 1 of 9, resume where you stopped" is already as long as "part 1 of 4"; nothing special breaks, this row is naturally robust to the count | None needed, noted as a case that held up |
+| Degradation banner | Three simultaneous drops in one week, the engine's own worked example at a tight budget: "notes pre-reads, third review visits, and half the question bank dropped to fit this week" | The joined list wraps to two or three lines on a 320px right rail that already shares that column with the pace sentence and the workload line, the most cramped surface on the screen, and on mobile it folds above an already-stacked header | `Intl.ListFormat` for the join, let the banner wrap to its own block below the workload line rather than compete for one line with it, never truncate the list since the brief's rule against truncating comparable values applies here too |
 
 ## Accessibility
 
 **Keyboard path.** Tab order runs top to bottom: the date and pace strip are
 not interactive and are skipped; then each group header (not focusable, a
-heading); then, within a row, the timer's Start or Resume button, the Done
-control, and last the Skip or "Not today" affordance, in that order, so the
-most common action is reached first. The confidence row's five buttons form
+heading); then, within the current row, the timer's Start or Resume button,
+its "Log minutes instead" override trigger immediately after it (the one
+new interactive element this screen adds to the row, placed next to the
+control it is an alternative to rather than left floating outside the
+sequence), the Done control, and last the Skip or "Not today" affordance, in
+that order, so the most common action is reached first. The confidence row's five buttons form
 one `role="radiogroup"` stop with roving tabindex: Tab enters and leaves the
 group once, arrow keys move the selection inside it, matching the composer's
 existing confidence control exactly rather than inventing a second keyboard
 pattern for the same idea.
 
 **Focus when a sheet or popover opens.** The minutes-override control is a
-popover anchored to the timer, not a full sheet: focus moves to its numeric
-input on open, Escape closes it and returns focus to the timer's edit
-control that opened it, the same contract the composer's existing dialog
-already honors for its own focus trap.
+non-modal popover anchored to the timer, not a full sheet and not a modal
+dialog: focus moves to its numeric input on open, but Tab is not trapped
+inside it, since a non-modal popover must let keyboard focus continue past
+it into the row's remaining controls, or away from the row entirely, the
+same as any other non-modal Base UI popover. Escape closes it and returns
+focus to the "Log minutes instead" trigger that opened it. That is the one
+behavior it shares with the composer's existing dialog, which is itself
+modal and does trap focus for its own full-screen flow; the popover does
+not inherit that trap, only the Escape-returns-focus contract.
+
+**The running timer.** It is the only signal on this screen with no
+non-visual path, and silence here is not acceptable: the parent spec's
+binding rule is that every visualization has one. The elapsed-time counter
+carries `aria-live="off"`, so its per-second tick is never announced; a
+screen reader in a live region reading "fifty-three... fifty-four...
+fifty-five" for the length of a lecture would be a firehose, not an
+accessibility feature. A visually hidden live region instead announces two
+events only, once each: "Timer started" when Start is pressed, and "Timer
+paused at {n} min" (or the equivalent on Done) when it stops. Between those
+two announcements the current elapsed figure stays available on demand: it
+is ordinary text in the DOM, not an image or canvas, so moving focus or a
+screen reader's review cursor to it reads the exact figure at any moment,
+with nothing lost for not having caught the one announcement that matters.
 
 **Reduced motion.** Covered per moment above; nothing on this screen loses
 information in reduced motion, which is the existing project's own test for
@@ -390,6 +460,42 @@ entry in the existing `@media (forced-colors: active)` block that already
 maps the app's five other data surfaces, since both are meaning-carrying
 borders rather than decoration.
 
+## Offline
+
+This is likely the single most-visited route in the app, named as such in
+the motion section above, and a commute is exactly where it gets opened
+with no connection. The parent spec's rule is explicit: Today is
+offline-readable, writes require network, and say so in place. Every
+control on this screen is a write, so none of the five gets a pass:
+
+- **Start and Pause.** Each is a timer-state write. With no connection the
+  pill grays out and the row shows "Needs a connection" in place of the
+  elapsed figure, rather than letting the timer start on a state the server
+  never recorded. The timer's own local clock (plain `Date.now()`
+  arithmetic) is unaffected and keeps running once Start has actually been
+  accepted, so a connection lost mid-session does not lose the elapsed time,
+  only the ability to begin or end a segment while offline.
+- **Done.** Attempting it with no connection surfaces a `sonner` failure
+  toast ("Couldn't save. Check your connection.") and leaves the row
+  unchanged. It must not flip to Done locally first, because the engine's
+  completion chain reads the write itself as its trigger for unlocking the
+  next row and, on the group's last task, the confidence prompt; an
+  optimistic Done the server never saw would show a task and a chain state
+  that do not exist anywhere else.
+- **Skip ("Not today").** Same failure path as Done, for the same reason:
+  the row it would defer is reversible only because the server recorded the
+  deferral, and an offline-only skip would desync from what re-enters
+  tomorrow's window.
+- **The confidence buttons.** Same failure path again. A radiogroup
+  selection with no write behind it would report a module as rated when it
+  is not, and the seminar-insertion and review-ladder decisions that read
+  confidence at the moment it is logged would never have seen the value at
+  all.
+
+None of the five queues silently for later the way a purely local UI toggle
+might: each is told in place, at the control, rather than failing quietly
+and resyncing behind the candidate's back.
+
 ## Copy deck
 
 | Context | Copy |
@@ -400,6 +506,7 @@ borders rather than decoration.
 | Workload line, estimate | "{h}m to {h2}m left today, estimate" (shown only when any pending task is still uncalibrated) |
 | Workload line, calibrated | "{h}m left today" |
 | Workload line, partial progress | "Logged {h}m so far, {h2}m left today" |
+| Workload line, all done | "All done for today." (shown when every scheduled task for today is Done) |
 | Group header | The module or group name exactly as the curriculum names it |
 | Kind labels | "Lecture", "Walkthrough", "Notes", "Questions", "Review video", "Seminar", "Mock exam", "Mock debrief", "Confidence check" |
 | Estimate, pending | "{min} min, estimate" or "{lo} to {hi} min, estimate" |
@@ -409,9 +516,9 @@ borders rather than decoration.
 | Seminar inserted | "Added because confidence was below 3" or "Added because accuracy was below 60 percent" |
 | Stale walkthrough tag | "Older recording" |
 | Requeued tag | "Missed earlier this week" |
-| Requeued backlog header | "{n} tasks moved from earlier this week" |
+| Requeued backlog header | "{n} {task word} moved from earlier this week" (`{task word}` via `Intl.PluralRules`) |
 | Deferred undo toast | "Moved to tomorrow. Undo." |
-| Degradation banner | "Plan adjusted: {dropped item} dropped to fit this week." |
+| Degradation banner | "Plan adjusted: {dropped items} dropped to fit this week." ({dropped items} is a locale-joined list via `Intl.ListFormat`, e.g. "notes pre-reads, third review visits, and half the question bank"; the engine's own worked example drops several ladder rungs in the same week, so the banner is written to carry more than one item from the start) |
 | Material gap tag | "No material linked" |
 | Material gap action | "Add a package in Plan" |
 | Empty, rest day | "Nothing scheduled today. Your next task is tomorrow." |
@@ -428,10 +535,17 @@ borders rather than decoration.
 | Done control | aria-label "Mark {resource} done" |
 | Skip control | "Not today" |
 
-Every action keeps its name through the flow: "Start" becomes "Pause" and
-"Resume," never a different verb; "Not today" stays "Not today" in the undo
-toast's action, never relabelled "Undo" alone without saying what is being
-undone.
+Every control's label names exactly what tapping it will do next. The timer
+follows the standard Start, Pause, Resume idiom: the label swaps to the next
+correct verb at each transition rather than freezing on one verb across
+every state, which is the opposite of what "never a different verb" would
+describe. The Skip control's own name is the one that stays fixed wherever
+it appears: it reads "Not today" as the row's control and nowhere gets
+renamed. Its `sonner` toast is a separate surface with its own convention:
+the message, "Moved to tomorrow.", already states what happened, so the
+toast's action can use the ordinary "Undo" label without ambiguity, matching
+every other write-confirmation toast in the app rather than inventing a
+longer label just for this one.
 
 ## Base UI recommendation
 
@@ -464,11 +578,26 @@ moment to pay that cost.
   scheduled today is a bigger decision than deferring one of three).
 - Wiring `PlanTask.actualMinutes` and the timer's running state, which the
   engine spec already names as the one hard schema prerequisite this feature
-  needs and does not yet have.
+  needs and does not yet have. Left open in both documents, and named here
+  rather than silently skipped: what the running timer does across a page
+  reload, a backgrounded tab, and the boundary into the next day's
+  prescription at midnight. A reasonable default is to persist the running
+  segment's start time and resume the elapsed count from it on reload or
+  foreground, and to force-stop and log whatever has accrued the moment the
+  day rolls over, but that is a builder decision, not one either spec makes.
 - Test coverage for the estimated-versus-calibrated boundary specifically:
   a day that mixes both kinds of task is the state most likely to be
   skipped in manual testing and most load-bearing for the brief's central
   claim.
+- Confirming the wireframe's group header, "Ethics Guidance," against the
+  real crosswalk and curriculum data: the seeded curriculum names the topic
+  "Ethical and Professional Standards" and the engine's own Guidance group
+  is seven separately named readings ("Guidance for Standard I" through
+  "VII"), none spelled "Ethics Guidance." The copy deck's rule that a group
+  header renders "exactly as the curriculum names it" has no single
+  curriculum string to point to for a merged group, so the builder needs a
+  real synthesized name for this case, not an invented one that happens to
+  look plausible in a wireframe.
 
 ## Related
 
