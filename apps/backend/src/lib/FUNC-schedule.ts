@@ -170,6 +170,33 @@ async function buildTopicEstimates(
             ? estimateResource({ kind: "lecture", notesPages: unitNotesPages }, constants, 1)
             : undefined;
 
+        // Reading the notes is its own task, and nothing in the catalogue
+        // represents it. The provider ships one notes PDF per topic, so there is
+        // no per-unit `notes` RESOURCE to find; what the inventory does record,
+        // per unit, is which pages of those notes cover it. That page range is
+        // exactly the input the effort model's "notes" case wants.
+        //
+        // Without this the notes layer could never produce a task: noteMinutes
+        // only ever summed `byKind["notes"]`, no resource had that kind, so it
+        // was always zero and `content-notes` was unreachable. The spec gives
+        // notes pre-reads 27.1 of 349.4 hours, and that whole layer had nothing
+        // behind it.
+        //
+        // Using the same pages for both a video task and a reading task is not
+        // double counting: the model rates them differently on purpose
+        // (PAGE_RATE 6.0 min/page to watch the lecture covering those pages,
+        // NOTES_RATE 2.5 to read them yourself) because they are two distinct
+        // activities over the same material.
+        //
+        // Pushed as an ordinary input so it goes through the same exam-weight
+        // factor and the same module cap as everything else. It is added once
+        // per unit rather than once per resource, since the page range belongs
+        // to the unit.
+        if (unitNotesPages !== undefined) {
+          resourceInputs.push({ kind: "notes", notesPages: unitNotesPages });
+          resourceKeys.push({ provider, kind: "notes", topic: topic.id });
+        }
+
         for (const res of ur.unit.resources) {
           if (!KNOWN_EFFORT_KINDS.has(res.kind)) continue;
 
@@ -239,8 +266,9 @@ async function buildTopicEstimates(
       );
 
       totalTopicMinutes += est.total;
-      // "lecture" is video (content-video), not notes - only the (currently
-      // nonexistent in this catalogue) "notes" kind belongs in noteMinutes.
+      // "lecture" is video (content-video), not notes. The "notes" kind is
+      // synthesised per unit from its notes page range just above, since the
+      // provider ships notes per topic rather than per unit.
       noteMinutes += est.byKind["notes"] ?? 0;
       lectureRaw += est.byKind["lecture"] ?? 0;
       reviewRaw += est.byKind["review"] ?? 0;

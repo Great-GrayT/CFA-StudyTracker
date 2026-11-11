@@ -129,5 +129,24 @@ test("real catalogue: generate horizon and report first seven days", async () =>
   expect(kinds.has("questions")).toBe(true);
   expect(kinds.has("content-video")).toBe(true);
   expect(kinds.has("eocq")).toBe(true);
+
+  // content-notes was unreachable against the real catalogue for the same
+  // family of reason: noteMinutes only ever summed resources of kind "notes",
+  // the provider ships notes per topic rather than per unit so no such resource
+  // exists, and the sum was therefore always zero. The spec gives notes
+  // pre-reads 27.1 of 349.4 hours, so an entire layer of the plan silently had
+  // nothing behind it while every other assertion here passed.
+  expect(kinds.has("content-notes")).toBe(true);
+
+  // Counted rather than merely present: a single stray task would satisfy the
+  // set check while the layer was still effectively missing.
+  const noteTasks = allTasks.filter((t) => t.kind === "content-notes");
+  expect(noteTasks.length).toBeGreaterThan(0);
+  for (const task of noteTasks) {
+    // Reading minutes come from NOTES_RATE times a real page count, so a task
+    // of zero or negative minutes means the page range never arrived.
+    expect(task.estimatedMinutes).toBeGreaterThan(0);
+  }
+
   expect(kinds.size).toBeGreaterThan(1);
 }, REAL_CATALOGUE_TIMEOUT_MS);
