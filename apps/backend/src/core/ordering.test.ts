@@ -59,7 +59,12 @@ const GROUPS_WITH_PREREQS: SchedulableGroup[] = [
   }),
 ];
 
-// Basic groups with no prerequisites, different phase bands and weights.
+// Groups with prerequisite that must be respected by both strategies.
+// Curriculum and weight strategies should differ in ordering because:
+// - fsa/lm1 (band 1, weight 8) vs fsa/lm2 (band 2, weight 15): different band and weight
+// Under curriculum: band 1 comes before band 2, so fsa/lm1 before fsa/lm2
+// Under weight: higher weight comes first, so fsa/lm2 before fsa/lm1
+// But both must respect: qm/lm1 (regression) -> qm/lm5 (time series)
 const GROUPS: SchedulableGroup[] = [
   group({
     ref: "fsa/lm1",
@@ -67,7 +72,7 @@ const GROUPS: SchedulableGroup[] = [
     phaseBand: 1,
     moduleOrder: 1,
     priorityRank: 30,
-    weight: 12,
+    weight: 8,
     estimatedMinutes: 180,
     weightImpliedMinutes: 180,
     confidence: 3,
@@ -76,9 +81,9 @@ const GROUPS: SchedulableGroup[] = [
     ref: "fsa/lm2",
     readingRefs: ["fsa/lm2"],
     phaseBand: 2,
-    moduleOrder: 2,
+    moduleOrder: 1,
     priorityRank: 20,
-    weight: 10,
+    weight: 15,
     estimatedMinutes: 150,
     weightImpliedMinutes: 150,
     confidence: 3,
@@ -89,9 +94,21 @@ const GROUPS: SchedulableGroup[] = [
     phaseBand: 1,
     moduleOrder: 1,
     priorityRank: 40,
-    weight: 8,
+    weight: 10,
     estimatedMinutes: 200,
     weightImpliedMinutes: 200,
+    confidence: 3,
+  }),
+  group({
+    ref: "qm/lm5",
+    readingRefs: ["qm/lm5"],
+    prereqRefs: ["qm/lm1"],
+    phaseBand: 1,
+    moduleOrder: 5,
+    priorityRank: 35,
+    weight: 8,
+    estimatedMinutes: 180,
+    weightImpliedMinutes: 180,
     confidence: 3,
   }),
 ];
@@ -179,14 +196,52 @@ test("the same input always gives the same order", () => {
 });
 
 test("strategy changes which term leads, not the prerequisite graph", () => {
-  const byCurriculum = orderModules(GROUPS, "curriculum");
-  const byWeight = orderModules(GROUPS, "weight");
-  expect(byCurriculum).not.toEqual(byWeight);
-  // Both still respect prerequisites.
-  for (const out of [byCurriculum, byWeight]) {
-    // No prerequisites in GROUPS, so just verify both returned all groups
-    expect(out).toHaveLength(GROUPS.length);
-  }
+  // Create a minimal fixture where band and weight rankings conflict.
+  // fsa/lm1: band 1 (lower), weight 8 (lower)
+  // fsa/lm2: band 2 (higher), weight 15 (higher)
+  // Under curriculum, band leads: fsa/lm1 should come first (band 1 < band 2).
+  // Under weight, weight leads: fsa/lm2 should come first (weight 15 > weight 8).
+  const strategyConflict: SchedulableGroup[] = [
+    group({
+      ref: "fsa/lm1",
+      phaseBand: 1,
+      moduleOrder: 1,
+      priorityRank: 20,
+      weight: 8,
+    }),
+    group({
+      ref: "fsa/lm2",
+      phaseBand: 2,
+      moduleOrder: 2,
+      priorityRank: 20,
+      weight: 15,
+    }),
+    group({
+      ref: "qm/lm1",
+      phaseBand: 1,
+      moduleOrder: 1,
+      priorityRank: 10,
+      weight: 5,
+    }),
+    group({
+      ref: "qm/lm5",
+      prereqRefs: ["qm/lm1"],
+      phaseBand: 1,
+      moduleOrder: 5,
+      priorityRank: 10,
+      weight: 5,
+    }),
+  ];
+
+  const byCurriculum = orderModules(strategyConflict, "curriculum");
+  const byWeight = orderModules(strategyConflict, "weight");
+  const curriculumRefs = byCurriculum.map((g) => g.ref);
+  const weightRefs = byWeight.map((g) => g.ref);
+  expect(curriculumRefs).not.toEqual(weightRefs);
+
+  // Both still respect the qm/lm1 -> qm/lm5 prerequisite.
+  expect(indexOf(byCurriculum, "qm/lm1")).toBeLessThan(indexOf(byCurriculum, "qm/lm5"));
+  expect(indexOf(byWeight, "qm/lm1")).toBeLessThan(indexOf(byWeight, "qm/lm5"));
 });
 
 test("a fanned-out group is scheduled once, carrying every module it covers", () => {
@@ -199,6 +254,152 @@ test("a fanned-out group is scheduled once, carrying every module it covers", ()
 test("a module cannot rank high merely because it has no material", () => {
   const out = orderModules([CHEAP_UNCOVERED, NORMAL_GROUP], "weight");
   expect(indexOf(out, "fsa/lm6")).toBeGreaterThan(indexOf(out, "fsa/lm1"));
+});
+
+test("fan-out: one prerequisite precedes multiple dependants", () => {
+  // Regression (qm/lm1) must come before both time series (qm/lm2) and machine learning (qm/lm3).
+  const fanOut: SchedulableGroup[] = [
+    group({
+      ref: "qm/lm1",
+      readingRefs: ["qm/lm1"],
+      phaseBand: 1,
+      moduleOrder: 1,
+      priorityRank: 50,
+    }),
+    group({
+      ref: "qm/lm2",
+      readingRefs: ["qm/lm2"],
+      prereqRefs: ["qm/lm1"],
+      phaseBand: 1,
+      moduleOrder: 2,
+      priorityRank: 40,
+    }),
+    group({
+      ref: "qm/lm3",
+      readingRefs: ["qm/lm3"],
+      prereqRefs: ["qm/lm1"],
+      phaseBand: 1,
+      moduleOrder: 3,
+      priorityRank: 35,
+    }),
+  ];
+  const out = orderModules(fanOut, "curriculum");
+  expect(indexOf(out, "qm/lm1")).toBeLessThan(indexOf(out, "qm/lm2"));
+  expect(indexOf(out, "qm/lm1")).toBeLessThan(indexOf(out, "qm/lm3"));
+});
+
+test("chain: three-deep prerequisite sequence is preserved", () => {
+  // Term structure (fp/lm1) -> arbitrage-free valuation (fp/lm2) -> bonds with embedded options (fp/lm3).
+  const chain: SchedulableGroup[] = [
+    group({
+      ref: "fp/lm1",
+      readingRefs: ["fp/lm1"],
+      phaseBand: 2,
+      moduleOrder: 1,
+      priorityRank: 45,
+    }),
+    group({
+      ref: "fp/lm2",
+      readingRefs: ["fp/lm2"],
+      prereqRefs: ["fp/lm1"],
+      phaseBand: 2,
+      moduleOrder: 2,
+      priorityRank: 42,
+    }),
+    group({
+      ref: "fp/lm3",
+      readingRefs: ["fp/lm3"],
+      prereqRefs: ["fp/lm2"],
+      phaseBand: 2,
+      moduleOrder: 3,
+      priorityRank: 40,
+    }),
+  ];
+  const out = orderModules(chain, "curriculum");
+  expect(indexOf(out, "fp/lm1")).toBeLessThan(indexOf(out, "fp/lm2"));
+  expect(indexOf(out, "fp/lm2")).toBeLessThan(indexOf(out, "fp/lm3"));
+});
+
+test("many-to-one: five prerequisites precede one dependant", () => {
+  // Five FSA modules (fsa/lm1-5) must all come before FSA Integration (fsa/integration).
+  const manyToOne: SchedulableGroup[] = [
+    group({
+      ref: "fsa/lm1",
+      readingRefs: ["fsa/lm1"],
+      phaseBand: 1,
+      moduleOrder: 1,
+      priorityRank: 30,
+    }),
+    group({
+      ref: "fsa/lm2",
+      readingRefs: ["fsa/lm2"],
+      phaseBand: 1,
+      moduleOrder: 2,
+      priorityRank: 30,
+    }),
+    group({
+      ref: "fsa/lm3",
+      readingRefs: ["fsa/lm3"],
+      phaseBand: 1,
+      moduleOrder: 3,
+      priorityRank: 30,
+    }),
+    group({
+      ref: "fsa/lm4",
+      readingRefs: ["fsa/lm4"],
+      phaseBand: 1,
+      moduleOrder: 4,
+      priorityRank: 30,
+    }),
+    group({
+      ref: "fsa/lm5",
+      readingRefs: ["fsa/lm5"],
+      phaseBand: 1,
+      moduleOrder: 5,
+      priorityRank: 30,
+    }),
+    group({
+      ref: "fsa/integration",
+      readingRefs: ["fsa/integration"],
+      prereqRefs: ["fsa/lm1", "fsa/lm2", "fsa/lm3", "fsa/lm4", "fsa/lm5"],
+      phaseBand: 2,
+      moduleOrder: 1,
+      priorityRank: 50,
+    }),
+  ];
+  const out = orderModules(manyToOne, "curriculum");
+  expect(indexOf(out, "fsa/lm1")).toBeLessThan(indexOf(out, "fsa/integration"));
+  expect(indexOf(out, "fsa/lm2")).toBeLessThan(indexOf(out, "fsa/integration"));
+  expect(indexOf(out, "fsa/lm3")).toBeLessThan(indexOf(out, "fsa/integration"));
+  expect(indexOf(out, "fsa/lm4")).toBeLessThan(indexOf(out, "fsa/integration"));
+  expect(indexOf(out, "fsa/lm5")).toBeLessThan(indexOf(out, "fsa/integration"));
+});
+
+test("prerequisite blocks high-ranked dependant until satisfied", () => {
+  // A prerequisite is necessary to prevent the dependant from being scheduled first.
+  // dependant would win on weight (20 > 5) if not for the prerequisite.
+  const forced: SchedulableGroup[] = [
+    group({
+      ref: "qm/prereq",
+      readingRefs: ["qm/prereq"],
+      phaseBand: 2,
+      moduleOrder: 0,
+      priorityRank: 10,
+      weight: 5,
+    }),
+    group({
+      ref: "qm/dependent",
+      readingRefs: ["qm/dependent"],
+      prereqRefs: ["qm/prereq"],
+      phaseBand: 1,
+      moduleOrder: 0,
+      priorityRank: 50,
+      weight: 20, // High weight would rank it first under weight strategy
+    }),
+  ];
+  const out = orderModules(forced, "weight");
+  // Even under weight strategy, prerequisite must come first.
+  expect(indexOf(out, "qm/prereq")).toBeLessThan(indexOf(out, "qm/dependent"));
 });
 
 test("a prerequisite cycle is reported, not hung or silently dropped", () => {

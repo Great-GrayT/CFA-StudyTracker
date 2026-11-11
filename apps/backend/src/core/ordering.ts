@@ -63,11 +63,11 @@ function compareGroups(
   }
 
   if (aFirst !== bFirst) {
-    // For confidence, lower is better; for others, higher is better.
-    if (strategy === "confidence") {
-      return aFirst - bFirst;
-    } else {
+    // For weight, higher is better (reverse). For curriculum and confidence, lower is better.
+    if (strategy === "weight") {
       return bFirst - aFirst;
+    } else {
+      return aFirst - bFirst;
     }
   }
 
