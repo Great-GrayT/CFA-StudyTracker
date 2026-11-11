@@ -52,9 +52,55 @@ export const createPlanSchema = z.object({
   initialLogs: z.array(initialLogSchema).optional(),
 });
 
+/**
+ * An IANA zone name, validated by asking the platform rather than by matching a
+ * pattern. A regex that accepts anything shaped like "Area/City" would let
+ * "Europe/Narnia" through, and the failure then surfaces as every email going
+ * out at the wrong hour rather than as a rejected request.
+ */
+const timeZoneSchema = z.string().refine(
+  (tz) => {
+    try {
+      new Intl.DateTimeFormat("en-GB", { timeZone: tz });
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  { message: "timeZone must be a valid IANA zone name" }
+);
+
+/**
+ * Where the candidate says they are, used only to colour the coach's copy with
+ * local weather and daylight.
+ *
+ * All four fields move together: coordinates without a city name would give the
+ * copy nothing to say, and a city name without coordinates could not be looked
+ * up. Passing null clears the location entirely, which is how a candidate
+ * withdraws it.
+ *
+ * Coordinates come from the client because the candidate picks their city from
+ * a geocoded list, so the ranges are checked here. A valid but wrong coordinate
+ * only affects that candidate's own weather lines, which is why this needs
+ * range validation rather than a trust boundary.
+ */
+const locationSchema = z.object({
+  city: z.string().min(1).max(120),
+  countryCode: z.string().length(2),
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+  timeZone: timeZoneSchema,
+});
+
 export const patchPlanSchema = z.object({
   examDate: examDateSchema.optional(),
   weeklyAvailability: weeklyAvailabilitySchema.optional(),
+  timeZone: timeZoneSchema.optional(),
+  // Closed set, matching the StudyPlan.emailCoach column comment. Nothing could
+  // set this before, so the preference existed but was unreachable.
+  emailCoach: z.enum(["all", "debrief-only", "off"]).optional(),
+  // null clears it; omitted leaves it untouched.
+  location: locationSchema.nullable().optional(),
 });
 
 export const createHolidaySchema = z.object({

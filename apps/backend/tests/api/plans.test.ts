@@ -137,3 +137,190 @@ test("tagging a package with roles on a plan, then re-tagging it, replaces the r
   const list = await readJson(await GET(authedRequest(user, `/api/plans/${plan.id}/packages`)));
   expect(list).toEqual([expect.objectContaining({ packageId: pkg.id, roles: ["content", "questions"] })]);
 });
+
+// LOCATION, TIMEZONE AND COACH PREFERENCE
+//
+// All three columns existed before any route could set them. timeZone in
+// particular shipped with a UTC default and no way to change it, so every
+// candidate outside UTC would have received their "half past six" email at the
+// wrong hour with no means of correcting it.
+
+test("PATCHing a location sets all four columns together", async () => {
+  const { PATCH } = await import("../../src/app/api/plans/[id]/route");
+  const { user, plan } = await setupUserWithPlan();
+  const res = await PATCH(
+    authedRequest(user, `/api/plans/${plan.id}`, {
+      location: {
+        city: "Manchester",
+        countryCode: "GB",
+        latitude: 53.48,
+        longitude: -2.24,
+        timeZone: "Europe/London",
+      },
+    }),
+  );
+  expect(res.status).toBe(200);
+
+  const updated = await db.studyPlan.findUniqueOrThrow({ where: { id: plan.id } });
+  expect(updated.city).toBe("Manchester");
+  expect(updated.countryCode).toBe("GB");
+  expect(updated.latitude).toBeCloseTo(53.48, 5);
+  expect(updated.longitude).toBeCloseTo(-2.24, 5);
+  // Choosing a city sets the zone, since the geocoder returns it and leaving a
+  // candidate in Manchester on UTC is the bug the column exists to prevent.
+  expect(updated.timeZone).toBe("Europe/London");
+});
+
+test("an explicit timeZone beats the one implied by the chosen city", async () => {
+  // Real case: a candidate living in one zone and sitting the exam in another,
+  // who wants their emails on exam-centre time.
+  const { PATCH } = await import("../../src/app/api/plans/[id]/route");
+  const { user, plan } = await setupUserWithPlan();
+  await PATCH(
+    authedRequest(user, `/api/plans/${plan.id}`, {
+      timeZone: "Asia/Dubai",
+      location: {
+        city: "Manchester",
+        countryCode: "GB",
+        latitude: 53.48,
+        longitude: -2.24,
+        timeZone: "Europe/London",
+      },
+    }),
+  );
+  const updated = await db.studyPlan.findUniqueOrThrow({ where: { id: plan.id } });
+  expect(updated.timeZone).toBe("Asia/Dubai");
+  expect(updated.city).toBe("Manchester");
+});
+
+test("PATCHing location to null clears every location column", async () => {
+  const { PATCH } = await import("../../src/app/api/plans/[id]/route");
+  const { user, plan } = await setupUserWithPlan();
+  await PATCH(
+    authedRequest(user, `/api/plans/${plan.id}`, {
+      location: {
+        city: "Oslo",
+        countryCode: "NO",
+        latitude: 59.91,
+        longitude: 10.75,
+        timeZone: "Europe/Oslo",
+      },
+    }),
+  );
+  await PATCH(authedRequest(user, `/api/plans/${plan.id}`, { location: null }));
+
+  const updated = await db.studyPlan.findUniqueOrThrow({ where: { id: plan.id } });
+  expect(updated.city).toBeNull();
+  expect(updated.countryCode).toBeNull();
+  expect(updated.latitude).toBeNull();
+  expect(updated.longitude).toBeNull();
+  // Withdrawing a location must not reset the zone: the emails would silently
+  // move to UTC as a side effect of a privacy choice.
+  expect(updated.timeZone).toBe("Europe/Oslo");
+});
+
+test("omitting location leaves an existing one untouched", async () => {
+  const { PATCH } = await import("../../src/app/api/plans/[id]/route");
+  const { user, plan } = await setupUserWithPlan();
+  await PATCH(
+    authedRequest(user, `/api/plans/${plan.id}`, {
+      location: {
+        city: "Oslo",
+        countryCode: "NO",
+        latitude: 59.91,
+        longitude: 10.75,
+        timeZone: "Europe/Oslo",
+      },
+    }),
+  );
+  await PATCH(authedRequest(user, `/api/plans/${plan.id}`, { emailCoach: "off" }));
+
+  const updated = await db.studyPlan.findUniqueOrThrow({ where: { id: plan.id } });
+  expect(updated.city).toBe("Oslo");
+  expect(updated.emailCoach).toBe("off");
+});
+
+test.each([
+  ["a latitude past the pole", { latitude: 91, longitude: 0 }],
+  ["a latitude past the south pole", { latitude: -91, longitude: 0 }],
+  ["a longitude past the date line", { latitude: 0, longitude: 181 }],
+  ["a longitude past the other side", { latitude: 0, longitude: -181 }],
+])("an out-of-range coordinate is rejected with 400: %s", async (_label, coords) => {
+  const { PATCH } = await import("../../src/app/api/plans/[id]/route");
+  const { user, plan } = await setupUserWithPlan();
+  const res = await PATCH(
+    authedRequest(user, `/api/plans/${plan.id}`, {
+      location: { city: "Nowhere", countryCode: "XX", timeZone: "UTC", ...coords },
+    }),
+  );
+  expect(res.status).toBe(400);
+});
+
+test("a half-set location is rejected rather than stored", async () => {
+  // There is no state the coach can use with a city and no coordinates, so the
+  // route must refuse instead of writing one and failing later at send time.
+  const { PATCH } = await import("../../src/app/api/plans/[id]/route");
+  const { user, plan } = await setupUserWithPlan();
+  const res = await PATCH(
+    authedRequest(user, `/api/plans/${plan.id}`, { location: { city: "Lisbon" } }),
+  );
+  expect(res.status).toBe(400);
+
+  const unchanged = await db.studyPlan.findUniqueOrThrow({ where: { id: plan.id } });
+  expect(unchanged.city).toBeNull();
+});
+
+test("a plausible but fictional timezone is rejected with 400", async () => {
+  // A pattern match on "Area/City" would accept this. The failure then shows up
+  // as every email arriving at the wrong hour rather than as a bad request.
+  const { PATCH } = await import("../../src/app/api/plans/[id]/route");
+  const { user, plan } = await setupUserWithPlan();
+  const res = await PATCH(
+    authedRequest(user, `/api/plans/${plan.id}`, { timeZone: "Europe/Narnia" }),
+  );
+  expect(res.status).toBe(400);
+});
+
+test.each(["all", "debrief-only", "off"])(
+  "emailCoach accepts the documented value %s",
+  async (value) => {
+    const { PATCH } = await import("../../src/app/api/plans/[id]/route");
+    const { user, plan } = await setupUserWithPlan();
+    const res = await PATCH(authedRequest(user, `/api/plans/${plan.id}`, { emailCoach: value }));
+    expect(res.status).toBe(200);
+    const updated = await db.studyPlan.findUniqueOrThrow({ where: { id: plan.id } });
+    expect(updated.emailCoach).toBe(value);
+  },
+);
+
+test("an emailCoach value outside the closed set is rejected with 400", async () => {
+  // The column is a String, so nothing at the database level stops a typo from
+  // being stored, and a stored typo silently behaves as "all" in FUNC-coach.
+  const { PATCH } = await import("../../src/app/api/plans/[id]/route");
+  const { user, plan } = await setupUserWithPlan();
+  const res = await PATCH(
+    authedRequest(user, `/api/plans/${plan.id}`, { emailCoach: "debrief_only" }),
+  );
+  expect(res.status).toBe(400);
+});
+
+test("another user cannot set the location on a plan that is not theirs", async () => {
+  const { PATCH } = await import("../../src/app/api/plans/[id]/route");
+  const { plan } = await setupUserWithPlan();
+  const stranger = await registerUser();
+  const res = await PATCH(
+    authedRequest(stranger, `/api/plans/${plan.id}`, {
+      location: {
+        city: "Lagos",
+        countryCode: "NG",
+        latitude: 6.45,
+        longitude: 3.4,
+        timeZone: "Africa/Lagos",
+      },
+    }),
+  );
+  expect(res.status).toBe(403);
+
+  const unchanged = await db.studyPlan.findUniqueOrThrow({ where: { id: plan.id } });
+  expect(unchanged.city).toBeNull();
+});

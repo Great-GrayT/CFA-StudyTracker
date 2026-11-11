@@ -37,6 +37,29 @@ export async function PATCH(req: Request): Promise<Response> {
   if (parsed.data.weeklyAvailability !== undefined) {
     data.weeklyAvailability = parsed.data.weeklyAvailability as Prisma.InputJsonValue;
   }
+  if (parsed.data.timeZone !== undefined) data.timeZone = parsed.data.timeZone;
+  if (parsed.data.emailCoach !== undefined) data.emailCoach = parsed.data.emailCoach;
+
+  // The four location columns move as one unit: a half-set location (a city
+  // with no coordinates, or coordinates with no city) is not a state the coach
+  // can do anything useful with, so there is no path that produces one.
+  if (parsed.data.location === null) {
+    data.city = null;
+    data.countryCode = null;
+    data.latitude = null;
+    data.longitude = null;
+  } else if (parsed.data.location !== undefined) {
+    const loc = parsed.data.location;
+    data.city = loc.city;
+    data.countryCode = loc.countryCode;
+    data.latitude = loc.latitude;
+    data.longitude = loc.longitude;
+    // Choosing a city sets the zone too, since the geocoder returns it and an
+    // explicit timeZone in the same request would otherwise silently disagree
+    // with the place just chosen. An explicit timeZone still wins, for the
+    // candidate who studies in one zone and sits the exam in another.
+    if (parsed.data.timeZone === undefined) data.timeZone = loc.timeZone;
+  }
 
   const updated = await db.studyPlan.update({ where: { id: planId }, data });
 

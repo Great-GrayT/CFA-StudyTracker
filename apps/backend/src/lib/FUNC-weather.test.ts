@@ -1,5 +1,5 @@
 import { test, expect } from "vitest";
-import { parseForecast, parseGeocode, roundToGrid } from "./FUNC-weather";
+import { parseForecast, parseGeocode, parseGeocodeList, roundToGrid } from "./FUNC-weather";
 
 // A real Open-Meteo daily response, trimmed to the fields we ask for. Three
 // days rather than one, so a parser that ignores the date and reads index 0
@@ -77,26 +77,84 @@ test("a temperature of zero is a real reading, not a missing field", () => {
 
 // GEOCODING
 
-test("the first geocoding match is returned with all four fields", () => {
-  const result = parseGeocode({
-    results: [
-      { name: "Manchester", country_code: "GB", latitude: 53.48, longitude: -2.24 },
-      { name: "Manchester", country_code: "US", latitude: 42.99, longitude: -71.46 },
-    ],
-  });
-  expect(result).toEqual({
+const MANCHESTERS = {
+  results: [
+    {
+      name: "Manchester",
+      country_code: "GB",
+      latitude: 53.48,
+      longitude: -2.24,
+      timezone: "Europe/London",
+      admin1: "England",
+    },
+    {
+      name: "Manchester",
+      country_code: "US",
+      latitude: 42.99,
+      longitude: -71.46,
+      timezone: "America/New_York",
+      admin1: "New Hampshire",
+    },
+  ],
+};
+
+test("the first geocoding match is returned with every field", () => {
+  expect(parseGeocode(MANCHESTERS)).toEqual({
     city: "Manchester",
     countryCode: "GB",
     latitude: 53.48,
     longitude: -2.24,
+    timeZone: "Europe/London",
+    admin1: "England",
   });
+});
+
+test("every match is returned so the candidate can disambiguate", () => {
+  // The reason this returns a list at all: picking the first Manchester for
+  // someone in New Hampshire puts their weather and their email times on the
+  // wrong continent, and nothing downstream could detect it.
+  const all = parseGeocodeList(MANCHESTERS);
+  expect(all).toHaveLength(2);
+  expect(all.map((r) => r.countryCode)).toEqual(["GB", "US"]);
+  expect(all.map((r) => r.timeZone)).toEqual(["Europe/London", "America/New_York"]);
+});
+
+test("a malformed entry is dropped without costing the good ones", () => {
+  const mixed = {
+    results: [
+      { name: "Nowhere", country_code: "XX" },
+      MANCHESTERS.results[1],
+    ],
+  };
+  const all = parseGeocodeList(mixed);
+  expect(all).toHaveLength(1);
+  expect(all[0]!.countryCode).toBe("US");
+});
+
+test("a match with no timezone is unusable and is dropped", () => {
+  // The zone is what sets the plan's email times. A result without one would
+  // silently leave a candidate on UTC, which is the exact bug this field
+  // exists to prevent, so it is required rather than defaulted.
+  const noZone = {
+    results: [{ name: "Somewhere", country_code: "GB", latitude: 1, longitude: 1 }],
+  };
+  expect(parseGeocodeList(noZone)).toEqual([]);
+});
+
+test("a missing admin1 is null rather than absent", () => {
+  const noAdmin = {
+    results: [
+      { name: "Monaco", country_code: "MC", latitude: 43.73, longitude: 7.42, timezone: "Europe/Monaco" },
+    ],
+  };
+  expect(parseGeocodeList(noAdmin)[0]!.admin1).toBeNull();
 });
 
 test.each([
   ["an empty result set", { results: [] }],
   ["no results key at all", {}],
   ["a result missing its coordinates", { results: [{ name: "Atlantis", country_code: "XX" }] }],
-  ["a result with a string latitude", { results: [{ name: "A", country_code: "GB", latitude: "53.4", longitude: -2.2 }] }],
+  ["a result with a string latitude", { results: [{ name: "A", country_code: "GB", latitude: "53.4", longitude: -2.2, timezone: "Europe/London" }] }],
 ])("geocoding returns null for %s", (_label, payload) => {
   // Null rather than a throw: a city we cannot find is an ordinary outcome the
   // profile form reports back, not a failure.

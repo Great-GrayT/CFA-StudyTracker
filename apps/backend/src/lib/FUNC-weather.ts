@@ -37,6 +37,15 @@ export type GeocodeResult = {
   countryCode: string;
   latitude: number;
   longitude: number;
+  /**
+   * IANA zone for the place, which the candidate's plan also needs and which
+   * nothing else in the app currently sets. Coming from the same lookup means
+   * choosing a city sets the zone correctly instead of leaving it on UTC and
+   * mailing somebody in Sydney at half past six London time.
+   */
+  timeZone: string;
+  /** Region or state, where the provider gives one. Only for disambiguating. */
+  admin1: string | null;
 };
 
 /**
@@ -85,24 +94,56 @@ export function parseForecast(payload: unknown, localDate: string): Observation 
   };
 }
 
-/** Pulls the first match out of an Open-Meteo geocoding response, or null. */
-export function parseGeocode(payload: unknown): GeocodeResult | null {
+/**
+ * Pulls every usable match out of an Open-Meteo geocoding response.
+ *
+ * Returns a list rather than one result because city names are genuinely
+ * ambiguous: Manchester is in England and in New Hampshire, and guessing wrong
+ * puts the candidate's weather and, worse, their email times on the wrong
+ * continent. The caller shows the list and the candidate picks.
+ *
+ * Individual malformed entries are dropped rather than failing the whole
+ * lookup: one odd row from the provider should not cost the candidate the four
+ * good ones next to it.
+ */
+export function parseGeocodeList(payload: unknown): GeocodeResult[] {
   const results = (payload as { results?: unknown[] })?.results;
-  if (!Array.isArray(results) || results.length === 0) return null;
+  if (!Array.isArray(results)) return [];
 
-  const first = results[0] as Record<string, unknown>;
-  const { name, country_code: countryCode, latitude, longitude } = first;
+  const parsed: GeocodeResult[] = [];
+  for (const row of results) {
+    const r = row as Record<string, unknown>;
+    const name = r.name;
+    const countryCode = r.country_code;
+    const latitude = r.latitude;
+    const longitude = r.longitude;
+    const timeZone = r.timezone;
 
-  if (
-    typeof name !== "string" ||
-    typeof countryCode !== "string" ||
-    typeof latitude !== "number" ||
-    typeof longitude !== "number"
-  ) {
-    return null;
+    if (
+      typeof name !== "string" ||
+      typeof countryCode !== "string" ||
+      typeof latitude !== "number" ||
+      typeof longitude !== "number" ||
+      typeof timeZone !== "string"
+    ) {
+      continue;
+    }
+
+    parsed.push({
+      city: name,
+      countryCode,
+      latitude,
+      longitude,
+      timeZone,
+      admin1: typeof r.admin1 === "string" ? r.admin1 : null,
+    });
   }
+  return parsed;
+}
 
-  return { city: name, countryCode, latitude, longitude };
+/** The single best match, for callers that do not need to disambiguate. */
+export function parseGeocode(payload: unknown): GeocodeResult | null {
+  return parseGeocodeList(payload)[0] ?? null;
 }
 
 async function getJson(url: string): Promise<unknown | null> {
@@ -124,15 +165,17 @@ async function getJson(url: string): Promise<unknown | null> {
  * not find that place" rather than as a failure. Nothing downstream requires a
  * location, so a candidate who cannot be geocoded simply has no weather copy.
  */
-export async function geocodeCity(query: string): Promise<GeocodeResult | null> {
+export async function geocodeCity(query: string, count = 5): Promise<GeocodeResult[]> {
   const trimmed = query.trim();
-  if (trimmed.length === 0) return null;
+  if (trimmed.length === 0) return [];
 
-  const url = `${GEOCODE_URL}?name=${encodeURIComponent(trimmed)}&count=1&language=en&format=json`;
+  const url =
+    `${GEOCODE_URL}?name=${encodeURIComponent(trimmed)}` +
+    `&count=${count}&language=en&format=json`;
   const payload = await getJson(url);
-  if (payload === null) return null;
+  if (payload === null) return [];
 
-  return parseGeocode(payload);
+  return parseGeocodeList(payload);
 }
 
 /**
