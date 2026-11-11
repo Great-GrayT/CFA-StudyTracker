@@ -15,6 +15,7 @@ import type {
   CronStatus,
   PushDevice,
   Los,
+  Prescription,
 } from "./types";
 
 export const keys = {
@@ -29,7 +30,31 @@ export const keys = {
   holidays: (planId: string) => ["holidays", planId] as const,
   cron: ["cron"] as const,
   devices: ["devices"] as const,
+  prescription: (planId: string, from: string, to: string) =>
+    ["prescription", planId, from, to] as const,
 };
+
+/**
+ * The days themselves: which module, which video, which pages, how many
+ * questions, and the link that opens them.
+ *
+ * Dates are the candidate's own calendar days as YYYY-MM-DD, never instants,
+ * so a plan is not shifted a day by the reader's time zone.
+ */
+export function usePrescription(
+  planId: string | undefined,
+  from: string,
+  to: string,
+): UseQueryResult<Prescription> {
+  return useQuery({
+    queryKey: keys.prescription(planId ?? "", from, to),
+    queryFn: () =>
+      api.get<Prescription>(
+        `plans/${encodeURIComponent(planId!)}/tasks?from=${from}&to=${to}`,
+      ),
+    enabled: !!planId,
+  });
+}
 
 export function usePlan(): UseQueryResult<Plan> {
   return useQuery({ queryKey: keys.plan, queryFn: () => api.get<Plan>("plans") });

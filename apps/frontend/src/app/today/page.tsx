@@ -5,7 +5,7 @@ import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 
 import { DeviationSparkline, buildSeries } from "@/components/pace-field";
-import { StudyNextList } from "@/components/study-next-list";
+import { DayPlan } from "@/components/day-plan";
 import { Countdown } from "@/components/countdown";
 import {
   usePlan,
@@ -14,6 +14,7 @@ import {
   useLogs,
   useHolidays,
   usePackages,
+  usePrescription,
   flattenCurriculum,
 } from "@/lib/hooks";
 import { readPace, missedDays, remainingWeekSplit, startOfUTCDay, addUTCDays } from "@/lib/pace";
@@ -38,6 +39,22 @@ export default function TodayPage() {
   const logs = useLogs(planId);
   const holidays = useHolidays(planId);
   const packages = usePackages();
+
+  // The candidate's own calendar day, formatted the way the API wants it.
+  // en-CA is the shortest route to YYYY-MM-DD without pulling in a formatter.
+  const todayISO = useMemo(() => new Intl.DateTimeFormat("en-CA").format(new Date()), []);
+  const prescription = usePrescription(planId, todayISO, todayISO);
+  const today = prescription.data?.days.find((d) => d.date === todayISO);
+
+  // What this weekday is nominally worth, so the day can say when it is
+  // running long rather than leaving the candidate to wonder.
+  const todayBudgetMinutes = useMemo(() => {
+    const availability = plan.data?.weeklyAvailability;
+    if (!availability) return undefined;
+    const key = (["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const)[new Date().getDay()];
+    const hoursToday = (availability as Record<string, number>)[key];
+    return typeof hoursToday === "number" ? Math.round(hoursToday * 60) : undefined;
+  }, [plan.data?.weeklyAvailability]);
 
   const totalOutcomes = useMemo(
     () => flattenCurriculum(curriculum.data).length,
@@ -193,11 +210,7 @@ export default function TodayPage() {
             </section>
           )}
 
-          <StudyNextList
-            items={progress.data?.studyNext ?? []}
-            curriculum={curriculum.data}
-            onLog={() => setComposing(true)}
-          />
+          <DayPlan day={today} heading="Today" budgetMinutes={todayBudgetMinutes} />
         </>
       )}
 

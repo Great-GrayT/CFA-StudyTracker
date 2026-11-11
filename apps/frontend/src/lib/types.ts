@@ -180,3 +180,39 @@ export type CronStatus = {
 };
 
 export type PushDevice = { id: string; endpoint: string; createdAt: string };
+
+/**
+ * One thing to open and do, named the way the provider names it rather than
+ * by the outcome it serves. A candidate cannot watch an outcome.
+ */
+export type PrescribedMaterial = {
+  action: string;
+  label: string;
+  packageName: string;
+  url: string | null;
+  questionCount: number | null;
+};
+
+export type PrescribedTask = {
+  id: string;
+  order: number;
+  kind: string;
+  status: string;
+  estimatedMinutes: number;
+  topicName: string | null;
+  moduleTitle: string | null;
+  materials: PrescribedMaterial[];
+};
+
+export type PrescribedDay = {
+  date: string;
+  totalMinutes: number;
+  tasks: PrescribedTask[];
+};
+
+export type Prescription = {
+  planId: string;
+  from: string;
+  to: string;
+  days: PrescribedDay[];
+};
