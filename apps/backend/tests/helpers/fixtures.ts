@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -467,6 +467,30 @@ export async function setupPlanWithCatalogue(): Promise<{ planId: string }> {
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BACKEND_ROOT = join(HERE, "..", "..");
+
+/**
+ * Whether the local-only inputs the real-catalogue test needs are present.
+ *
+ * Both are deliberately absent from CI and from the Docker image. The
+ * curriculum text and provider inventories are licensed, so
+ * `prisma/seed-data/*.json` is gitignored, and `.env.test` holds a local
+ * database URL. A test that depends on them can only run on a developer
+ * machine that has them.
+ *
+ * Checked rather than assumed, because the alternative shapes are both bad: a
+ * hard failure breaks CI for a test that could never pass there, and a
+ * synthetic fallback would turn an integration test against the real catalogue
+ * into one that cannot fail, which is precisely the thing it exists to catch.
+ */
+export function hasRealSeedData(): boolean {
+  const required = [
+    join(BACKEND_ROOT, ".env.test"),
+    join(BACKEND_ROOT, "prisma", "seed-data", "level-2.json"),
+    join(BACKEND_ROOT, "prisma", "seed-data", "package-mm-l2-2026.json"),
+    join(BACKEND_ROOT, "prisma", "seed-data", "package-uworld-l2-2025.json"),
+  ];
+  return required.every((path) => existsSync(path));
+}
 
 /** Reads DATABASE_URL straight out of .env.test, never out of process.env,
  * so the guard below cannot be fooled by something upstream having

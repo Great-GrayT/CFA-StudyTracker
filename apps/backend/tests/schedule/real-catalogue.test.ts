@@ -2,7 +2,7 @@ import { test, expect } from "vitest";
 import { db } from "../../src/lib/db";
 import { resetDb } from "../helpers/test-db";
 import { generateHorizon } from "../../src/lib/FUNC-schedule";
-import { setupPlanWithRealCatalogue } from "../helpers/fixtures";
+import { setupPlanWithRealCatalogue, hasRealSeedData } from "../helpers/fixtures";
 
 /**
  * End-to-end validation against the REAL curriculum and provider catalogue
@@ -19,7 +19,23 @@ import { setupPlanWithRealCatalogue } from "../helpers/fixtures";
 // here fails on a loaded machine and teaches everyone to ignore the suite.
 const REAL_CATALOGUE_TIMEOUT_MS = 60_000;
 
-test("real catalogue: generate horizon and report first seven days", async () => {
+/**
+ * Local only, and skipped rather than failed where the inputs do not exist.
+ *
+ * It needs the private `prisma/seed-data/*.json` files and `.env.test`, both
+ * gitignored because the curriculum text and provider inventories are licensed.
+ * Neither reaches CI or the Docker image, so in CI this test could never pass:
+ * it failed the deploy gate on the first push after it was written.
+ *
+ * Skipping is the honest option of the three. Failing breaks CI for something
+ * that cannot work there. Substituting the synthetic fixture would be worse
+ * still: this test exists precisely to check the REAL catalogue produces every
+ * task kind, and a synthetic stand-in would make it a test that cannot fail,
+ * which is exactly how `content-notes` stayed unreachable for so long.
+ */
+const describeRealCatalogue = hasRealSeedData() ? test : test.skip;
+
+describeRealCatalogue("real catalogue: generate horizon and report first seven days", async () => {
   await resetDb();
 
   const { planId } = await setupPlanWithRealCatalogue();
