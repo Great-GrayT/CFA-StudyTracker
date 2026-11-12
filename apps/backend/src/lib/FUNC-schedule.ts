@@ -562,6 +562,18 @@ function taskMatchesPlan(
 export async function generateHorizon(
   planId: string,
   today: string,
+  opts: {
+    /** Days to plan. Defaults to the rolling horizon the app writes. */
+    horizonDays?: number;
+    /**
+     * Plan without writing. Nothing is frozen, deleted or created, and the
+     * dated days come back on `days` for a caller that wants to read the shape
+     * of a plan rather than install it. The campaign projection uses this so
+     * there is exactly one pipeline, and a long-range view cannot contradict
+     * the horizon it sits above.
+     */
+    dryRun?: boolean;
+  } = {},
 ): Promise<{
   created: number;
   frozen: number;
@@ -578,6 +590,7 @@ export async function generateHorizon(
   reviewReason: string;
   coverageProjection: { date: string; slackDays: number } | null;
   rejectedTuning: Array<{ field: string; reason: string }>;
+  days: PlannedDay[];
 }> {
   const plan = await db.studyPlan.findUniqueOrThrow({ where: { id: planId } });
 
@@ -596,9 +609,10 @@ export async function generateHorizon(
   });
   const tuning = parsed.tuning;
 
+  const horizonDays = Math.max(1, Math.floor(opts.horizonDays ?? HORIZON_DAYS));
   const todayDate = new Date(today + "T00:00:00Z");
   const horizonEnd = new Date(todayDate);
-  horizonEnd.setUTCDate(horizonEnd.getUTCDate() + HORIZON_DAYS - 1);
+  horizonEnd.setUTCDate(horizonEnd.getUTCDate() + horizonDays - 1);
 
   // Derive calibration factor from completed tasks, and actually use it:
   // every estimate below is scaled by the candidate's own observed pace
@@ -742,7 +756,7 @@ export async function generateHorizon(
       Object.entries(weeklyAvailability).map(([day, hours]) => [day, hours * 60]),
     ),
     startDate: today,
-    horizonDays: HORIZON_DAYS,
+    horizonDays,
     holidays: [],
   };
 
@@ -870,6 +884,25 @@ export async function generateHorizon(
   // Freeze, delete and write all happen in one transaction: a crash
   // between any of these steps must never leave the plan half-regenerated
   // (rows deleted with their replacements never written, or vice versa).
+  const reported = {
+    planMode: tuning.planMode,
+    reviewPolicy: tuning.reviewPolicy,
+    requestedQuestionMultiple: solved.requested,
+    effectiveQuestionMultiple: solved.budget,
+    calendarTooShort: solved.calendarTooShort,
+    writeOffs,
+    underPractised,
+    injectionCap: reviewPhase.cap,
+    reviewReason: reviewPhase.reason,
+    coverageProjection,
+    rejectedTuning: parsed.rejected.map((r) => ({ field: r.field, reason: r.reason })),
+    days: plannedDays,
+  };
+
+  if (opts.dryRun) {
+    return { created: 0, frozen: 0, kept: 0, deleted: 0, ...reported };
+  }
+
   const result = await db.$transaction(async (tx) => {
     // Freeze tasks before today.
     let frozenCount = 0;
@@ -993,18 +1026,5 @@ export async function generateHorizon(
     };
   }, { timeout: 30000 });
 
-  return {
-    ...result,
-    planMode: tuning.planMode,
-    reviewPolicy: tuning.reviewPolicy,
-    requestedQuestionMultiple: solved.requested,
-    effectiveQuestionMultiple: solved.budget,
-    calendarTooShort: solved.calendarTooShort,
-    writeOffs,
-    underPractised,
-    injectionCap: reviewPhase.cap,
-    reviewReason: reviewPhase.reason,
-    coverageProjection,
-    rejectedTuning: parsed.rejected.map((r) => ({ field: r.field, reason: r.reason })),
-  };
+  return { ...result, ...reported };
 }

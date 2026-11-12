@@ -364,6 +364,42 @@ export async function seedCatalogue(opts: { levelId?: "I" | "II" | "III"; slug?:
  * Sets up a complete plan with a seeded level and catalogue for schedule generation tests.
  * Seeds Level II with three topics, creates a plan, and links readings to catalogue resources.
  */
+/**
+ * Give every unit in a plan a question bank.
+ *
+ * setupPlanWithCatalogue seeds lecture resources only, so a plan built from it
+ * has reading minutes and no question minutes at all. That is fine for the
+ * tests about ordering and freezing, but it makes any assertion about PAIRING
+ * pass trivially: there is nothing to pair a reading with. Call this when the
+ * behaviour under test is the ratio rather than the sequence.
+ *
+ * questionCount and calcCount are what effort.ts prices a set from, so these
+ * figures turn into real minutes through the real estimator rather than being
+ * injected downstream of it.
+ */
+export async function addQuestionBank(
+  opts: { questionsPerUnit?: number; calcShare?: number } = {},
+): Promise<void> {
+  const questionCount = opts.questionsPerUnit ?? 36;
+  const calcCount = Math.round(questionCount * (opts.calcShare ?? 0.5));
+
+  const units = await db.packageUnit.findMany({ select: { id: true, editionId: true, ref: true } });
+  for (const unit of units) {
+    await db.packageResource.create({
+      data: {
+        editionId: unit.editionId,
+        unitId: unit.id,
+        ref: `${unit.ref}/questions`,
+        kind: "question_set",
+        questionCount,
+        calcCount,
+        vignetteCount: Math.max(1, Math.round(questionCount / 6)),
+        externalId: `${unit.ref}-questions`,
+      },
+    });
+  }
+}
+
 export async function setupPlanWithCatalogue(): Promise<{ planId: string }> {
   // Seed Level II with topics and readings (like in seedLevel)
   await db.level.upsert({

@@ -1,7 +1,7 @@
 import { beforeEach, describe, test, expect } from "vitest";
 import { db } from "../../src/lib/db";
 import { resetDb } from "../helpers/test-db";
-import { setupPlanWithCatalogue } from "../helpers/fixtures";
+import { addQuestionBank, setupPlanWithCatalogue } from "../helpers/fixtures";
 import { generateHorizon } from "../../src/lib/FUNC-schedule";
 
 const READING_KINDS = new Set(["content-notes", "content-video", "seminar"]);
@@ -73,6 +73,7 @@ describe("planner modes", () => {
   // material it has not already asked the candidate to read.
   test("no question task in a generated plan precedes the reading of its own unit", async () => {
     const { planId } = await setupPlanWithCatalogue();
+    await addQuestionBank();
     await generateHorizon(planId, "2027-01-04");
 
     const firstRead = new Map<string, number>();
@@ -89,7 +90,11 @@ describe("planner modes", () => {
   });
 
   test("a reading task is paired with questions on the same unit the same day", async () => {
+    // The base catalogue seeds lecture resources only. Without a question bank
+    // every unit would have nothing to pair with and this would pass without
+    // exercising Rule A at all.
     const { planId } = await setupPlanWithCatalogue();
+    await addQuestionBank();
     await generateHorizon(planId, "2027-01-04");
 
     const tasks = await db.planTask.findMany({
@@ -102,25 +107,40 @@ describe("planner modes", () => {
       byDate.set(key, [...(byDate.get(key) ?? []), t]);
     }
 
+    // The promise is that practice follows reading in the same sitting, which
+    // bites hardest on the day a unit OPENS: that is the "asap" in the rule.
+    //
+    // Later days of the same unit may legitimately carry reading alone. A
+    // unit's question target is capped by the budget the calendar affords and
+    // by the exam-weight trim, so when the budget falls below the pacing
+    // multiple the bank empties before the reading does and the tail is
+    // reading only. Asserting every day would be asserting that no calendar is
+    // ever tight.
+    const firstReadingDay = new Map<string, string>();
     for (const [date, dayTasks] of byDate) {
       for (const t of dayTasks) {
         if (!READING_KINDS.has(t.kind)) continue;
         const ref = t.readingIds[0];
-        if (!ref) continue;
-
-        // A unit whose question bank is empty has nothing to pair with, which
-        // is a fact about the catalogue rather than about the packer.
-        const hasQuestionsAnywhere = tasks.some(
-          (o) => QUESTION_KINDS.has(o.kind) && o.readingIds[0] === ref,
-        );
-        if (!hasQuestionsAnywhere) continue;
-
-        const paired = dayTasks.some(
-          (o) => QUESTION_KINDS.has(o.kind) && o.readingIds[0] === ref,
-        );
-        expect(paired, `reading on ${ref} unpaired on ${date}`).toBe(true);
+        if (!ref || firstReadingDay.has(ref)) continue;
+        firstReadingDay.set(ref, date);
       }
     }
+    expect(firstReadingDay.size).toBeGreaterThan(0);
+
+    let checked = 0;
+    for (const [ref, date] of firstReadingDay) {
+      const hasQuestionsAnywhere = tasks.some(
+        (o) => QUESTION_KINDS.has(o.kind) && o.readingIds[0] === ref,
+      );
+      if (!hasQuestionsAnywhere) continue;
+
+      const paired = (byDate.get(date) ?? []).some(
+        (o) => QUESTION_KINDS.has(o.kind) && o.readingIds[0] === ref,
+      );
+      expect(paired, `unit ${ref} opened on ${date} with no practice beside it`).toBe(true);
+      checked++;
+    }
+    expect(checked, "no unit with a question bank was exercised").toBeGreaterThan(0);
   });
 
   test("generation reports the requested ratio and the one the calendar supports", async () => {
