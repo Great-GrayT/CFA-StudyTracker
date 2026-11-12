@@ -29,3 +29,6 @@ apps/frontend/tsconfig.tsbuildinfo
 # Scratch state from the brainstorming tool: a local server pid, its port and
 # token, and throwaway HTML. Machine-local, never useful to another checkout.
 .superpowers/
+
+# Superpowers brainstorming mockups and plan ledgers: local scratch, never shipped.
+.superpowers/
