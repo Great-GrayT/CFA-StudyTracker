@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
 import {
@@ -9,6 +11,7 @@ import {
   watchInstallability,
   type BeforeInstallPromptEvent,
 } from "@/lib/install";
+import { Icon, type IconName } from "./icons";
 import styles from "./utility-strip.module.css";
 
 /**
@@ -90,7 +93,33 @@ const THEME_LABEL = {
   dark: "Theme: dark",
 };
 
-export function UtilityStrip({ className }: { className?: string }) {
+/**
+ * The pages that need a permanent way in but do not earn one of the five
+ * slots in the bottom bar.
+ *
+ * They used to be the sixth slot, which is what stopped the compose button
+ * from sitting on the centre line. Moving them up here is not just tidying:
+ * /settings, /logs and /mocks were once reachable only by typing the URL,
+ * and dropping them from the bar without a new home would put them straight
+ * back there.
+ */
+const SECONDARY: ReadonlyArray<{ href: string; label: string; icon: IconName }> = [
+  { href: "/logs", label: "Study log", icon: "Logged" },
+  { href: "/mocks", label: "Mock exams", icon: "Mock" },
+  { href: "/watchdogs", label: "Watchdogs", icon: "Health" },
+  { href: "/settings", label: "Settings", icon: "Settings" },
+];
+
+export function UtilityStrip({
+  className,
+  secondary = false,
+}: {
+  className?: string;
+  /** Carry the secondary pages too. The phone strip does; the rail has its
+      own list and would otherwise show them twice. */
+  secondary?: boolean;
+}) {
+  const pathname = usePathname();
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
@@ -163,6 +192,21 @@ export function UtilityStrip({ className }: { className?: string }) {
 
   return (
     <div className={`${styles.strip} ${className ?? ""}`}>
+      {secondary
+        ? SECONDARY.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={styles.button}
+              aria-current={pathname.startsWith(item.href) ? "page" : undefined}
+              aria-label={item.label}
+              title={item.label}
+            >
+              <Icon name={item.icon} size={18} />
+            </Link>
+          ))
+        : null}
+
       <button
         type="button"
         className={styles.button}

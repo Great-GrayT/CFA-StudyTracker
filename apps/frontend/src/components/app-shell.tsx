@@ -87,12 +87,16 @@ export function AppShell({
       {/* On a phone the bottom bar is already full at six slots, and a
           seventh would put every touch target under the 44px floor, so the
           utilities sit top right instead. The rail carries its own copy. */}
-      <UtilityStrip className={styles.topUtility} />
+      <UtilityStrip className={styles.topUtility} secondary />
 
       <main className={styles.main} id="main">
         {children}
       </main>
 
+      {/* Five slots, so the compose button is the middle one and sits dead
+          centre. With six it was third of six and visibly left of centre.
+          Settings moved to the utility cluster above, which is where the
+          other occasional controls already live. */}
       <nav className={styles.bar} aria-label="Main">
         {NAV.slice(0, 2).map((item) => (
           <BarLink
@@ -121,7 +125,6 @@ export function AppShell({
             pathname={pathname}
           />
         ))}
-        <BarLink href="/settings" label="Settings" icon="Settings" pathname={pathname} />
       </nav>
     </div>
   );

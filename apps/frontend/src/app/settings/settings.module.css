@@ -1,8 +1,15 @@
 .page {
   max-width: 680px;
   margin: 0 auto;
-  padding: var(--space-5);
+  /* No horizontal padding: the shell's main already insets the content, and
+     doubling it cost a phone 48px of a 375px screen while making the cards
+     narrower than every other page's. */
+  padding: var(--space-5) 0;
   display: grid;
+  /* minmax(0, …), never a bare 1fr: a grid column's default min-width is its
+     min-content, so one unshrinkable child stretched the column past the
+     page and every card overflowed the padding together. */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-6);
 }
 

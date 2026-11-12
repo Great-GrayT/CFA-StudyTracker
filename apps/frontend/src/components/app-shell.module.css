@@ -1,6 +1,11 @@
 .shell {
   min-height: 100dvh;
   display: grid;
+  /* Rows take their content height and no more. Without this the grid has
+     100dvh to fill, auto rows stretch to share the slack, and the top strip
+     grew to 172px on a short page with its icons floating in the middle of
+     the gap. */
+  align-content: start;
   /* minmax(0, 1fr), never a bare 1fr. A grid item's default min-width is
      auto, which is its MIN-CONTENT width, so one unbreakable string anywhere
      in the page (an email address, a package name, a long outcome id) widens
@@ -32,7 +37,9 @@
   position: fixed;
   inset: auto 0 0 0;
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  /* Five, so the middle column is the compose button and it lands on the
+     centre line of the screen. */
+  grid-template-columns: repeat(5, 1fr);
   align-items: center;
   gap: var(--space-1);
   padding: var(--space-2) var(--space-2) calc(var(--space-2) + env(safe-area-inset-bottom));
@@ -223,13 +230,22 @@
 
 /* The utility cluster. On a phone it floats top right over the content; on a
    desktop the rail carries it instead and this copy is hidden. */
+/* The phone's secondary navigation: the pages that need a permanent way in
+   but do not earn one of the five slots in the bottom bar. A strip across
+   the top rather than a floating cluster, now that it carries five controls
+   instead of two. */
 .topUtility {
-  position: fixed;
-  top: max(var(--space-1), env(safe-area-inset-top));
-  right: var(--space-2);
+  position: sticky;
+  top: 0;
   z-index: 10;
-  background: color-mix(in srgb, var(--ground) 86%, transparent);
-  border-radius: var(--radius-pill);
+  justify-content: flex-end;
+  gap: 0;
+  /* Its own padding, no negative margins: pulling it out past main's inset
+     made it wider than the viewport and pushed the last icon off the right
+     edge. */
+  padding: env(safe-area-inset-top) var(--space-2) 0 var(--space-2);
+  background: var(--ground);
+  border-bottom: 1px solid var(--rule);
 }
 
 .railUtility {

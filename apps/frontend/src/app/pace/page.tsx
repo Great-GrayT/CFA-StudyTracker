@@ -279,7 +279,16 @@ export default function PacePage() {
 
         {series.length > 0 && (
           <>
-            <div className={styles.rollupControls} role="group" aria-label="Rollup view">
+            {/* Labelled, because two bare buttons under a chart look like
+                orphaned controls until one is pressed and a table appears. */}
+            <p className={styles.rollupLabel} id="rollup-label">
+              Break it down by
+            </p>
+            <div
+              className={styles.rollupControls}
+              role="group"
+              aria-labelledby="rollup-label"
+            >
               <button
                 type="button"
                 className={`${styles.rollupButton} ${

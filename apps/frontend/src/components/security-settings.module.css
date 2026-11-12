@@ -1,5 +1,10 @@
 .section {
-  margin-bottom: var(--space-6);
+  /* No bottom margin: this sits in the settings page's own grid, which
+     already spaces its children, and the extra margin made the gap below
+     Security twice the gap above it. */
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
 }
 
 .heading {
@@ -11,9 +16,11 @@
 
 .block {
   padding: var(--space-4);
-  margin-bottom: var(--space-4);
   background: var(--raised);
   border: 1px solid var(--rule-strong);
+  /* Spacing comes from the section's grid gap, not a margin on each block:
+     a margin on the last one left a stray gap under the group. */
+  min-width: 0;
 }
 
 .subheading {

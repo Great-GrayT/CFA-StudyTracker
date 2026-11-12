@@ -338,9 +338,12 @@ export default function SettingsPage() {
             System health
           </Link>
         </section>
-      </div>
-      <SecuritySettings twoStepEnabled={user?.twoStepEnabled ?? false} />
 
+        {/* Inside the page container, not after it. Rendered as a sibling it
+            only picked up main's padding and sat 24px wider on each side than
+            every other card on the screen. */}
+        <SecuritySettings twoStepEnabled={user?.twoStepEnabled ?? false} />
+      </div>
     </AppShell>
   );
 }
