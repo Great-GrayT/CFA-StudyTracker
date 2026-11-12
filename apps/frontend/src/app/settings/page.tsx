@@ -10,6 +10,8 @@ import { toast } from "sonner";
 import styles from "./settings.module.css";
 import { SecuritySettings } from "@/components/security-settings";
 import { CoachSettings, LocationSettings } from "@/components/coach-settings";
+import { PlannerSettings } from "@/components/planner-settings";
+import { PriorWork } from "@/components/prior-work";
 
 const numbers = new Intl.NumberFormat("en");
 const plural = new Intl.PluralRules("en");
@@ -255,6 +257,8 @@ export default function SettingsPage() {
           </section>
         ) : plan.data ? (
           <>
+            <PlannerSettings plan={plan.data} onSaved={() => plan.refetch()} />
+            <PriorWork plan={plan.data} onSaved={() => plan.refetch()} />
             <CoachSettings plan={plan.data} onSaved={() => plan.refetch()} />
             <LocationSettings plan={plan.data} onSaved={() => plan.refetch()} />
           </>

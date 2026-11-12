@@ -1,0 +1,425 @@
+/*
+ * How your plan is built.
+ *
+ * Borrows the card and the spacing scale from coach-settings.module.css rather
+ * than inventing a second settings language. It diverges on two things, each
+ * noted where it happens: the radio stays visible, and the status list sets the
+ * engine's own figures inside sentences, the figure taking --text against
+ * --muted body copy so the number is what the eye lands on without needing a
+ * tile around it.
+ */
+
+.section {
+  background: var(--raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-input);
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.lede {
+  margin: 0;
+  max-width: 62ch;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+/* ---------------------------------------------------------------- choices */
+
+.choiceSet {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.legend {
+  padding: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+/*
+ * The radio is VISIBLE here, unlike the pill group in coach-settings which
+ * hides it and fills the selected pill solid. Two reasons. These options are
+ * full-width rows carrying a sentence of explanation, and a 64-character
+ * paragraph reversed out on --claimed is hard to read. And a filled background
+ * is state carried by colour alone; the control itself carries it for everyone,
+ * including anyone who cannot tell the two blues apart.
+ */
+.option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-input);
+  background: var(--ground);
+  transition: border-color var(--dur-tap) var(--ease-settle);
+}
+
+.radio {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  /* Lines the control up with the cap height of the option name beside it
+     rather than the top of its line box. */
+  margin-top: 0.1875rem;
+  accent-color: var(--claimed);
+}
+
+.optionLabel {
+  display: grid;
+  gap: 2px;
+  cursor: pointer;
+}
+
+.option:hover {
+  border-color: var(--rule-strong);
+}
+
+.optionName {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.optionDetail {
+  max-width: 64ch;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+/* Secondary reinforcement only. The radio dot is what actually says which one
+   is chosen, so losing this border tells nobody anything they did not know. */
+.option:has(.radio:checked) {
+  border-color: var(--claimed);
+  background: var(--raised);
+}
+
+.option:has(.radio:checked) .optionName {
+  color: var(--claimed-ink);
+}
+
+.option:has(.radio:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.option:has(.radio:disabled) {
+  opacity: 0.6;
+}
+
+.option:has(.radio:disabled) .optionLabel {
+  cursor: default;
+}
+
+/* ------------------------------------------------------------- fixed date */
+
+.dateRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.dateLabel {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.dateInput {
+  min-height: 44px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-input);
+  background: var(--ground);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.875rem;
+}
+
+.dateInput:focus-visible,
+.number:focus-visible,
+.slider:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.inlineSave {
+  min-height: 44px;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--claimed);
+  border-radius: var(--radius-pill);
+  background: var(--claimed);
+  color: #fff;
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.inlineSave:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ---------------------------------------------------------------- status */
+
+.status {
+  padding: var(--space-4);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-input);
+  background: var(--ground);
+}
+
+.statusTitle {
+  margin: 0 0 var(--space-2);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.statusList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.statusList li {
+  max-width: 66ch;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+/* The figure is what the eye should land on, so it takes the ink the sentence
+   around it does not. No tile, no badge, no accent colour. */
+.figure {
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.figureAlarm {
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--alarm-ink);
+}
+
+.warn {
+  color: var(--alarm-ink);
+}
+
+/* --------------------------------------------------------------- the numbers */
+
+.details {
+  border-top: 1px solid var(--rule);
+  padding-top: var(--space-4);
+}
+
+.summary {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--claimed-ink);
+  cursor: pointer;
+  width: fit-content;
+}
+
+.summary:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.detailsLede {
+  margin: var(--space-3) 0 0;
+  max-width: 62ch;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.group {
+  margin-top: var(--space-5);
+}
+
+.groupTitle {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.groupNote {
+  margin: var(--space-1) 0 var(--space-3);
+  max-width: 64ch;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-3) var(--space-4);
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--rule);
+}
+
+.fieldText {
+  min-width: 0;
+}
+
+.fieldLabel {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.fieldDetail {
+  margin: 2px 0 0;
+  max-width: 54ch;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.fieldControl {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.number {
+  width: 5.5rem;
+  min-height: 44px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-input);
+  background: var(--ground);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.slider {
+  width: 9rem;
+  min-height: 44px;
+  accent-color: var(--claimed);
+}
+
+.readout,
+.unit {
+  min-width: 4.5rem;
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.normalised {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--claimed-ink);
+}
+
+/* --------------------------------------------------------------- actions */
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--rule);
+}
+
+.save {
+  min-height: 44px;
+  padding: var(--space-2) var(--space-5);
+  border: 1px solid var(--claimed);
+  border-radius: var(--radius-pill);
+  background: var(--claimed);
+  color: #fff;
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.reset {
+  min-height: 44px;
+  padding: var(--space-2) var(--space-5);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.save:disabled,
+.reset:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.save:focus-visible,
+.reset:focus-visible,
+.inlineSave:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+@media (max-width: 560px) {
+  .field {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .fieldControl {
+    justify-content: flex-start;
+  }
+
+  .slider {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .option {
+    transition: none;
+  }
+}

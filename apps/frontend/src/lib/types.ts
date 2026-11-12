@@ -58,6 +58,68 @@ export type Plan = {
   countryCode: string | null;
   latitude: number | null;
   longitude: number | null;
+  // How the plan is built. The mode picks the reading sequence, the policy
+  // decides when review starts, and reviewStartDate is read only under the
+  // date-picked policy.
+  planMode: PlanMode;
+  reviewPolicy: ReviewPolicy;
+  reviewStartDate: string | null;
+};
+
+export type PlanMode = "effort-return" | "curriculum-strict" | "curriculum-topic";
+
+export type ReviewPolicy =
+  | "decay-triggered"
+  | "after-coverage"
+  | "weekly-interleave"
+  | "fixed-date";
+
+/** Every constant the planner reads. Names match core/tuning.ts exactly. */
+export type Tuning = {
+  planMode: PlanMode;
+  reviewPolicy: ReviewPolicy;
+  reviewStartDate: string | null;
+  firstPassQuestionMultiple: number;
+  questionMultipleFloor: number;
+  coverageDeadlineWeeks: number;
+  reviewQuestionMultiple: number;
+  minNewUnitReadMinutes: number;
+  weeklyInterleaveShare: number;
+  reviewInjectionCapShare: number;
+  masteryWeightAccuracy: number;
+  masteryWeightCoverage: number;
+  masteryWeightConfidence: number;
+  masteryHalfLifeDays: number;
+  masteryBar: number;
+  readingWriteOffBar: number;
+  confidenceTriggerValue: number;
+  accuracyFloor: number;
+  accuracyMinSample: number;
+};
+
+/** The numeric fields only, which is what the form edits and sends. */
+export type TuningNumbers = Omit<Tuning, "planMode" | "reviewPolicy" | "reviewStartDate">;
+
+/**
+ * The planner block from GET /api/settings: what is set, what each constant is
+ * allowed to be, and the figures that only exist as the output of a planning
+ * run.
+ */
+export type PlannerSettings = {
+  tuning: Tuning;
+  rejected: Array<{ field: string; reason: string }>;
+  ranges: Record<string, { min: number; max: number }>;
+  defaults: Tuning;
+  modes: PlanMode[];
+  policies: ReviewPolicy[];
+  requestedQuestionMultiple: number;
+  effectiveQuestionMultiple: number | null;
+  calendarTooShort: boolean;
+  injectionCap: number | null;
+  reviewReason: string | null;
+  coverageProjection: { date: string; slackDays: number } | null;
+  writeOffs: Array<{ ref: string; mastery: number; readingMinutesDropped: number }>;
+  underPractised: Array<{ ref: string; shortfallMinutes: number }>;
 };
 
 /** One match from the city lookup, which returns several so the candidate picks. */
