@@ -39,6 +39,24 @@
 
   --shadow-float: 0 8px 24px -8px rgb(11 15 46 / 0.16);
 
+  /* The four study stages of the long-term plan. A categorical scale, so it
+     is NOT the confidence ramp: these are different kinds of work, not more
+     or less of one thing. Cool hues are the first pass and warm are review,
+     so the phase change is what the eye reads first.
+
+     Checked with the dataviz palette validator in both themes: lightness
+     band, chroma floor, CVD separation across every pair, normal-vision
+     floor, and contrast against the chart surface. CVD separation lands in
+     the 6 to 8 floor band, which is only legal alongside a second encoding,
+     so the chart also carries a labelled legend, 2px gaps between segments,
+     a readout naming each one, and a table view. Mock exams are deliberately
+     absent: a fifth fill could not clear the dark theme's narrow band, and a
+     mock is an event rather than a stage, so it is drawn as a hatched cap. */
+  --stage-fp-reading: #56b4e9;
+  --stage-fp-questions: #009e73;
+  --stage-rv-reading: #e69f00;
+  --stage-rv-questions: #cc79a7;
+
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -87,6 +105,13 @@
     --untouched: var(--raised);
 
     --shadow-float: 0 8px 24px -8px rgb(2 4 20 / 0.55);
+
+    /* Stepped for the dark surface, not flipped: the dark band is narrower
+       (L 0.48 to 0.67), so these are their own values. */
+    --stage-fp-reading: #3f93c9;
+    --stage-fp-questions: #00916a;
+    --stage-rv-reading: #c08a00;
+    --stage-rv-questions: #b96d96;
   }
 }
 
@@ -112,6 +137,11 @@
   --conf-4: #a8bfff;
   --untouched: var(--raised);
   --shadow-float: 0 8px 24px -8px rgb(2 4 20 / 0.55);
+
+  --stage-fp-reading: #3f93c9;
+  --stage-fp-questions: #00916a;
+  --stage-rv-reading: #c08a00;
+  --stage-rv-questions: #b96d96;
 }
 
 *,

@@ -1,0 +1,248 @@
+/* The campaign: one stacked bar per period, from today to the exam.
+
+   Colours are the four study stages, validated with the dataviz palette
+   checker in both themes (lightness band, chroma floor, CVD separation
+   across ALL pairs, normal-vision floor, contrast against the surface).
+   Cool hues are the first pass, warm hues are review, so the phase change
+   is the thing the eye reads first.
+
+   CVD separation lands in the 6-8 floor band, which is legal only with a
+   second encoding, so every segment also has: a 2px gap to its neighbour, a
+   labelled legend grouped by phase, a tooltip naming it, and a table view.
+   Colour alone never carries identity here. */
+
+.wrap {
+  display: grid;
+  gap: var(--space-3);
+  margin: var(--space-5) 0;
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.heading {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+.caption {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--muted);
+  max-width: 64ch;
+}
+
+.captionWarn {
+  composes: caption;
+  color: var(--alarm-ink);
+}
+
+/* The plot. Wide spans scroll inside their own box; the page never does. */
+.plotWrap {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.plot {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 180px;
+  /* A single baseline rule and nothing else. No gridlines: the question this
+     answers is "where does the shape change", not "how many minutes exactly",
+     and the tooltip carries the exact figure. */
+  border-bottom: 1px solid var(--rule-strong);
+  min-width: 100%;
+}
+
+.col {
+  position: relative;
+  display: flex;
+  flex-direction: column-reverse;
+  justify-content: flex-start;
+  /* Never thinner than a comfortable hit target band; the wrapper scrolls
+     when there are more periods than fit. */
+  min-width: 18px;
+  flex: 1 1 18px;
+  height: 100%;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: default;
+}
+
+.col:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* 2px of surface between stacked segments, so each is its own shape rather
+   than a band in a gradient. Required here, not decorative: it is part of
+   the secondary encoding the CVD warning obliges. */
+.seg {
+  display: block;
+  width: 100%;
+  border-top: 2px solid var(--raised);
+}
+
+.seg:first-child {
+  border-top: 0;
+}
+
+.segFpReading {
+  background: var(--stage-fp-reading);
+}
+.segFpQuestions {
+  background: var(--stage-fp-questions);
+}
+.segRvReading {
+  background: var(--stage-rv-reading);
+}
+.segRvQuestions {
+  background: var(--stage-rv-questions);
+}
+
+/* Mocks are events, not a stage, so they are a cap on the bar rather than a
+   fifth colour: five fills could not clear the colour checks in the dark
+   theme's narrow lightness band, and a mock is genuinely a different kind of
+   thing from an hour of reading. */
+.mockCap {
+  display: block;
+  width: 100%;
+  height: 4px;
+  background: repeating-linear-gradient(
+    45deg,
+    var(--text) 0 2px,
+    transparent 2px 4px
+  );
+}
+
+/* Today and the exam, the only two fixed points worth drawing. */
+.marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--rule-strong);
+  pointer-events: none;
+}
+
+.markerLabel {
+  position: absolute;
+  top: 0;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.axis {
+  display: flex;
+  gap: 3px;
+  min-width: 100%;
+}
+
+.tick {
+  min-width: 18px;
+  flex: 1 1 18px;
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+  /* Only some periods are labelled; the rest hold their column's width so
+     the ticks stay under their bars. */
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* Hover and focus readout. Not a floating tooltip: on a phone there is no
+   hover at all, so the figure lands in a fixed line under the chart where a
+   tap can reach it and it never covers the bar it describes. */
+.readout {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  background: var(--raised);
+  border: 1px solid var(--rule);
+  min-height: 92px;
+}
+
+.readoutHead {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.readoutRows {
+  margin: 0;
+  display: grid;
+  gap: 2px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.readoutRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.readoutRow dt {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.readoutRow dd {
+  margin: 0;
+  color: var(--text);
+}
+
+.swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.legendGroup {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.legendPhase {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.empty {
+  margin: 0;
+  padding: var(--space-4);
+  background: var(--raised);
+  border: 1px solid var(--rule);
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--muted);
+}

@@ -2,7 +2,18 @@
 
 import { useMemo, useState } from "react";
 import { AppShell } from "@/components/app-shell";
-import { usePlan, useLogs, useHolidays, usePlanPackages, usePackages } from "@/lib/hooks";
+import {
+  usePlan,
+  useLogs,
+  useHolidays,
+  usePlanPackages,
+  usePackages,
+  usePrescription,
+} from "@/lib/hooks";
+import { Icon } from "@/components/icons";
+import { CampaignChart } from "@/components/campaign-chart";
+import { WeekStrip, weekOf, buildWeek } from "@/components/week-strip";
+import { DayPlan } from "@/components/day-plan";
 import { api } from "@/lib/api";
 import { hoursBetween, startOfUTCDay } from "@/lib/pace";
 import { WEEKDAYS, WEEKDAY_LABELS, type WeeklyAvailability, type PackageRole } from "@/lib/types";
@@ -13,10 +24,30 @@ const hours = new Intl.NumberFormat("en", { maximumFractionDigits: 1 });
 const dayCount = new Intl.PluralRules("en");
 
 export default function PlanPage() {
+  const [tab, setTab] = useState<"view" | "setup">("view");
+
+  // The same week the Today screen reads, so the two never disagree about
+  // what a day holds.
+  const todayISO = useMemo(() => new Intl.DateTimeFormat("en-CA").format(new Date()), []);
+  const weekDates = useMemo(() => weekOf(todayISO), [todayISO]);
+  const [selectedDate, setSelectedDate] = useState(todayISO);
+
   const plan = usePlan();
   const planId = plan.data?.id;
   const logs = useLogs(planId);
   const holidays = useHolidays(planId);
+  const prescription = usePrescription(planId, weekDates[0], weekDates[6]);
+  const selectedDay = prescription.data?.days.find((d) => d.date === selectedDate);
+  const weekDays = useMemo(
+    () =>
+      buildWeek(
+        weekDates,
+        prescription.data?.days,
+        plan.data?.weeklyAvailability as Record<string, number> | undefined,
+        todayISO,
+      ),
+    [weekDates, prescription.data?.days, plan.data?.weeklyAvailability, todayISO],
+  );
   const planPackages = usePlanPackages(planId);
   const allPackages = usePackages();
 
@@ -233,6 +264,68 @@ export default function PlanPage() {
           Plan
         </h1>
 
+        {/* Folder tabs. The plan is two different jobs: reading what the plan
+            says, and changing what it is. They were one long scroll, so the
+            view a candidate opens daily sat underneath the settings they
+            touch twice a campaign. */}
+        <div className={styles.tabs} role="tablist" aria-label="Plan">
+          <button
+            type="button"
+            role="tab"
+            id="tab-view"
+            aria-selected={tab === "view"}
+            aria-controls="panel-view"
+            className={tab === "view" ? styles.tabOn : styles.tab}
+            onClick={() => setTab("view")}
+          >
+            <Icon name="Today" size={16} />
+            The plan
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="tab-setup"
+            aria-selected={tab === "setup"}
+            aria-controls="panel-setup"
+            className={tab === "setup" ? styles.tabOn : styles.tab}
+            onClick={() => setTab("setup")}
+          >
+            <Icon name="Settings" size={16} />
+            Setup
+          </button>
+        </div>
+
+        {tab === "view" ? (
+          <div id="panel-view" role="tabpanel" aria-labelledby="tab-view">
+            <CampaignChart campaign={undefined} />
+            <WeekStrip
+              week={weekDays}
+              selected={selectedDate}
+              onSelect={setSelectedDate}
+            />
+            <DayPlan
+              day={selectedDay}
+              heading={
+                selectedDate === todayISO
+                  ? "Today"
+                  : new Date(`${selectedDate}T00:00:00Z`).toLocaleDateString(undefined, {
+                      weekday: "long",
+                      day: "numeric",
+                      month: "short",
+                      timeZone: "UTC",
+                    })
+              }
+              budgetMinutes={weekDays.find((d) => d.date === selectedDate)?.budgetMinutes}
+            />
+          </div>
+        ) : null}
+
+        <div
+          id="panel-setup"
+          role="tabpanel"
+          aria-labelledby="tab-setup"
+          hidden={tab !== "setup"}
+        >
         <div className={styles.section}>
           <div className={styles.infoRow}>
             <div>
@@ -580,6 +673,7 @@ export default function PlanPage() {
               Import plan
             </button>
           </div>
+        </div>
         </div>
       </section>
     </AppShell>
