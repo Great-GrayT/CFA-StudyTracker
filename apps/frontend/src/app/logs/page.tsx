@@ -7,6 +7,7 @@ import { useLogs, useCurriculum, usePlan, useDeleteLog, flattenCurriculum } from
 import { startOfUTCDay, addUTCDays } from "@/lib/pace";
 import type { LogEntry } from "@/lib/types";
 import styles from "./logs.module.css";
+import { ConfidenceMeter } from "@/components/confidence";
 
 const plural = new Intl.PluralRules("en");
 const logWord = (n: number) => (plural.select(n) === "one" ? "session" : "sessions");
@@ -174,8 +175,8 @@ function LogRow({
           </div>
         )}
         <div className={styles.meta}>
-          Conf {entry.confidence}, {entry.questionsCorrect} of {entry.questionsAnswered}{" "}
-          {answeredWord}
+          <ConfidenceMeter value={entry.confidence} />
+          {entry.questionsCorrect} of {entry.questionsAnswered} {answeredWord}
         </div>
       </div>
       <button

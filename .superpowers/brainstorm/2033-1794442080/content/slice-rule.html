@@ -1,0 +1,106 @@
+<h2>Mode 3: which slicing rule did you mean?</h2>
+<p class="subtitle">Your three days fit rule A exactly and rule B does not, so I think it is A. Confirm, because the two diverge whenever a topic's question stock is not exactly twice its reading.</p>
+
+<div class="section">
+  <div class="label">The stock you described</div>
+  <table style="width:100%;border-collapse:collapse;font-size:14px;margin-top:8px">
+    <tr style="text-align:left;opacity:.7"><th style="padding:6px 10px">Topic</th><th style="padding:6px 10px">Reading</th><th style="padding:6px 10px">Questions</th><th style="padding:6px 10px">Its own ratio</th></tr>
+    <tr><td style="padding:6px 10px"><strong>QM Topic 1</strong></td><td style="padding:6px 10px">56 min</td><td style="padding:6px 10px">140 min</td><td style="padding:6px 10px">1 : 2.50</td></tr>
+    <tr><td style="padding:6px 10px"><strong>QM Topic 2</strong></td><td style="padding:6px 10px">51 min</td><td style="padding:6px 10px">104 min</td><td style="padding:6px 10px">1 : 2.04</td></tr>
+  </table>
+</div>
+
+<div class="split">
+
+  <div class="mockup">
+    <div class="mockup-header">Rule A &mdash; reading is capacity &divide; 3, questions are 2&times; the reading, drain the leftovers</div>
+    <div class="mockup-body">
+
+      <div style="margin-bottom:14px">
+        <div class="label">Day 1 &middot; 120 min available</div>
+        <div style="display:flex;height:26px;border-radius:4px;overflow:hidden;margin:6px 0;font-size:11px;line-height:26px;text-align:center;color:#fff">
+          <div style="width:33.3%;background:#3b6ea5">read 40</div>
+          <div style="width:66.7%;background:#2b8a6b">questions 80</div>
+        </div>
+        <div style="font-size:12px;opacity:.75">T1 reading 40, T1 questions 80. Fills the day. 1 : 2.</div>
+      </div>
+
+      <div style="margin-bottom:14px">
+        <div class="label">Day 2 &middot; 127 min available</div>
+        <div style="display:flex;height:26px;border-radius:4px;overflow:hidden;margin:6px 0;font-size:11px;line-height:26px;text-align:center;color:#fff">
+          <div style="width:12.6%;background:#3b6ea5">16</div>
+          <div style="width:47.2%;background:#2b8a6b">questions 60</div>
+          <div style="width:13.4%;background:#7a5ea8">17</div>
+          <div style="width:26.8%;background:#a8784a">questions 34</div>
+        </div>
+        <div style="font-size:12px;opacity:.75">T1 reading has only 16 left, so 2&times; would be 32, but 60 remain in the bank and the topic is closing, so all 60 go now. 51 min of day left: new topic, reading 17, questions 34.</div>
+      </div>
+
+      <div>
+        <div class="label">Day 3 &middot; 104 min available</div>
+        <div style="display:flex;height:26px;border-radius:4px;overflow:hidden;margin:6px 0;font-size:11px;line-height:26px;text-align:center;color:#fff">
+          <div style="width:32.7%;background:#7a5ea8">read 34</div>
+          <div style="width:67.3%;background:#a8784a">questions 70</div>
+        </div>
+        <div style="font-size:12px;opacity:.75">T2 closes out. Matches your day 3 exactly.</div>
+      </div>
+
+      <p style="margin-top:14px;font-size:13px"><strong>Matches all three of your days.</strong></p>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">Rule B &mdash; each day takes a proportional slice of the whole topic bundle</div>
+    <div class="mockup-body">
+
+      <div style="margin-bottom:14px">
+        <div class="label">Day 1 &middot; 120 min available</div>
+        <div style="display:flex;height:26px;border-radius:4px;overflow:hidden;margin:6px 0;font-size:11px;line-height:26px;text-align:center;color:#fff">
+          <div style="width:28.6%;background:#3b6ea5">read 34</div>
+          <div style="width:71.4%;background:#2b8a6b">questions 86</div>
+        </div>
+        <div style="font-size:12px;opacity:.75">T1's own ratio is 1 : 2.50, so 120 min splits 34 / 86, <strong>not</strong> your 40 / 80.</div>
+      </div>
+
+      <div style="margin-bottom:14px">
+        <div class="label">Day 2 &middot; 127 min available</div>
+        <div style="display:flex;height:26px;border-radius:4px;overflow:hidden;margin:6px 0;font-size:11px;line-height:26px;text-align:center;color:#fff">
+          <div style="width:17.3%;background:#3b6ea5">22</div>
+          <div style="width:42.5%;background:#2b8a6b">questions 54</div>
+          <div style="width:13.4%;background:#7a5ea8">17</div>
+          <div style="width:26.8%;background:#a8784a">questions 34</div>
+        </div>
+        <div style="font-size:12px;opacity:.75">T1's tail is 22 / 54 instead of 16 / 60. The reading runs one day longer than you drew.</div>
+      </div>
+
+      <div>
+        <div class="label">Day 3 &middot; 104 min available</div>
+        <div style="display:flex;height:26px;border-radius:4px;overflow:hidden;margin:6px 0;font-size:11px;line-height:26px;text-align:center;color:#fff">
+          <div style="width:32.7%;background:#7a5ea8">read 34</div>
+          <div style="width:67.3%;background:#a8784a">questions 70</div>
+        </div>
+        <div style="font-size:12px;opacity:.75">Same as A here, because T2 happens to sit at 1 : 2.04 already.</div>
+      </div>
+
+      <p style="margin-top:14px;font-size:13px">Diverges from your day 1 and day 2.</p>
+    </div>
+  </div>
+
+</div>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Rule A, the 1:2 clamp</h3>
+      <p>Reading is a third of what is left of the day, questions are twice the reading, and a closing topic's leftover questions are flushed in the same sitting.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Rule B, the proportional slice</h3>
+      <p>Every day gets the topic's own reading-to-questions ratio, whatever that ratio happens to be.</p>
+    </div>
+  </div>
+</div>

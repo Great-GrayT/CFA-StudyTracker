@@ -1,0 +1,112 @@
+/* Five slots. Compact enough to sit inline in a log row or a table cell,
+   with enough air between them that they read as five things rather than one
+   striped bar. */
+
+.meter {
+  display: inline-flex;
+  align-items: center;
+  /* 2px: tighter and the marks merge, looser and the group stops reading as
+     a single value. */
+  gap: 2px;
+  /* Keeps the meter off the text it sits beside without needing the caller
+     to remember a margin. The inline-end space matters: every caller puts it
+     in front of a sentence fragment, and without it the last slot and the
+     first word touch. */
+  vertical-align: -0.2em;
+  margin-inline-end: var(--space-2);
+}
+
+.slot,
+.slotEmpty {
+  display: block;
+  position: relative;
+  width: var(--confidence-slot, 15px);
+  height: var(--confidence-slot, 15px);
+  border-radius: var(--radius-pill);
+  /* The slot's own ring: it is what makes an unfilled slot a slot rather
+     than a gap, so the scale is visible even at zero. */
+  box-shadow: inset 0 0 0 1px var(--rule-strong);
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+
+/* An empty slot keeps the ring and nothing else. Deliberately not a faint
+   ghost of the mark: a greyed logo at 15px is indistinguishable from a
+   filled one. */
+.slotEmpty {
+  background: transparent;
+}
+
+.slot {
+  background: var(--raised);
+}
+
+.glyph {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Half a mark: the left half of a whole one, cut down the middle. The inner
+   span is the window; the glyph inside stays full width so the geometry is
+   the same mark, just half seen. */
+.half {
+  display: block;
+  position: absolute;
+  inset: 0 50% 0 0;
+  overflow: hidden;
+}
+
+.half .glyph {
+  width: calc(var(--confidence-slot, 15px));
+  height: 100%;
+}
+
+/* The picker. Same slots, bigger, because these are touch targets rather
+   than a readout. */
+.picker {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.pickerSlot {
+  position: relative;
+  display: grid;
+  place-items: center;
+  /* 44px is the floor for a touch target. The slot inside stays small; the
+     label around it is what the thumb actually hits. */
+  min-width: 44px;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.pickerSlot .slot,
+.pickerSlot .slotEmpty {
+  --confidence-slot: 26px;
+}
+
+/* Visually hidden, NOT display:none: the input must stay in the
+   accessibility tree and the tab order, because it provides the single tab
+   stop and the arrow-key navigation a radiogroup needs. */
+.pickerInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.pickerInput:focus-visible + .slot,
+.pickerInput:focus-visible + .slotEmpty {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.pickerSlot:hover .slotEmpty {
+  box-shadow: inset 0 0 0 1px var(--claimed);
+}
