@@ -36,6 +36,7 @@ export default function WatchdogsPage() {
   const [missedDayAlerts, setMissedDayAlerts] = useState(true);
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [iosNotInstalled, setIosNotInstalled] = useState(false);
+  const [testing, setTesting] = useState<"email" | "push" | null>(null);
 
   useEffect(() => {
     async function loadCurrentSubscription() {
@@ -113,6 +114,28 @@ export default function WatchdogsPage() {
       }
     } finally {
       setSubscribing(false);
+    }
+  }
+
+  async function handleTest(channel: "email" | "push") {
+    setTesting(channel);
+    try {
+      const res = await api.post<{ ok: boolean; to?: string; devices?: number }>(
+        "coach/test",
+        { channel },
+      );
+      toast.success(
+        channel === "email"
+          ? `Sent to ${res.to ?? "your address"}. If it does not arrive, check spam.`
+          : "Sent. It should appear on every device you have added.",
+      );
+    } catch (err) {
+      // The route reports WHY rather than failing blank: no SMTP, no device
+      // registered, or the send itself refused.
+      const msg = err instanceof ApiError ? err.message : "Could not send.";
+      toast.error(msg);
+    } finally {
+      setTesting(null);
     }
   }
 
@@ -259,6 +282,30 @@ export default function WatchdogsPage() {
                 >
                   {currentSubscription ? "Added" : "Add this device"}
                 </button>
+
+                {/* The coach speaks at three fixed local times, so without
+                    these there is no way to tell a working channel from a
+                    silent one until one of those times comes round. Both
+                    channels were in fact broken for the life of the app and
+                    nothing on this screen could have shown it. */}
+                <div className={styles.testRow}>
+                  <button
+                    type="button"
+                    className={styles.secondaryButton}
+                    onClick={() => handleTest("email")}
+                    disabled={testing !== null}
+                  >
+                    {testing === "email" ? "Sending" : "Send a test email"}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.secondaryButton}
+                    onClick={() => handleTest("push")}
+                    disabled={testing !== null || !currentSubscription}
+                  >
+                    {testing === "push" ? "Sending" : "Send a test notification"}
+                  </button>
+                </div>
               </section>
             )}
 

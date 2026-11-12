@@ -409,3 +409,33 @@
     min-width: 24px;
   }
 }
+
+/* The two "send me one now" buttons. Secondary to "Add this device", which
+   is the thing that has to happen first. */
+.testRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.secondaryButton {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  padding: var(--space-2) var(--space-3);
+  background: transparent;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-pill);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.secondaryButton:hover:not(:disabled) {
+  background: var(--ground);
+}
+
+.secondaryButton:disabled {
+  opacity: 0.55;
+  cursor: default;
+}

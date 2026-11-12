@@ -53,10 +53,55 @@ export function urlBase64ToUint8Array(base64String: string): Uint8Array {
   return outputArray;
 }
 
-interface SubscribeRequest {
+export interface SubscribeRequest {
   endpoint: string;
-  p256dh: string;
-  auth: string; // base64-encoded
+  /**
+   * Nested, because that is the shape POST /api/push/subscribe validates and
+   * the shape the Push API's own `PushSubscription.toJSON()` produces. This
+   * used to be sent flat, as `{ endpoint, p256dh, auth }`, which zod rejected
+   * every time: "Add this device" returned "Invalid request body" on every
+   * browser and no candidate ever had a working subscription.
+   */
+  keys: { p256dh: string; auth: string };
+}
+
+/**
+ * base64url, which is what the Web Push spec uses and what `web-push` decodes
+ * on the server.
+ *
+ * Standard base64 was the second half of the same bug. `btoa` emits '+' and
+ * '/', and decoding those as base64url yields different bytes, so even a
+ * subscription that got past validation would have produced a key the push
+ * service could not decrypt against.
+ */
+function base64Url(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  // A loop, not String.fromCharCode(...spread): a spread of a few hundred
+  // bytes is fine, but this is the kind of call that throws
+  // "Maximum call stack size exceeded" the day a key gets longer.
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/**
+ * The exact body the API expects for a subscription.
+ *
+ * Separated from the network call so the contract can be tested without a
+ * browser. Both sides of this were tested in isolation and neither test
+ * noticed they disagreed, which is why the feature was broken from the first
+ * deploy.
+ */
+export function toSubscribePayload(subscription: PushSubscription): SubscribeRequest {
+  const p256dh = subscription.getKey("p256dh");
+  const auth = subscription.getKey("auth");
+  if (!p256dh || !auth) {
+    throw new Error("Failed to extract encryption keys from subscription.");
+  }
+  return {
+    endpoint: subscription.endpoint,
+    keys: { p256dh: base64Url(p256dh), auth: base64Url(auth) },
+  };
 }
 
 // Subscribe to push notifications. Requests permission first if not yet granted.
@@ -89,27 +134,7 @@ export async function subscribeToPush(vapidPublicKey: string): Promise<void> {
       applicationServerKey: urlBase64ToUint8Array(vapidPublicKey) as BufferSource,
     });
 
-    // Extract the keys from the subscription.
-    const keys = subscription.getKey("p256dh");
-    const auth = subscription.getKey("auth");
-    if (!keys || !auth) {
-      throw new Error("Failed to extract encryption keys from subscription.");
-    }
-
-    // Convert ArrayBuffer to base64 for transmission.
-    const p256dh = btoa(
-      String.fromCharCode(...Array.from(new Uint8Array(keys))),
-    );
-    const authToken = btoa(
-      String.fromCharCode(...Array.from(new Uint8Array(auth))),
-    );
-
-    // Send subscription to the server.
-    await api.post<void>("push/subscribe", {
-      endpoint: subscription.endpoint,
-      p256dh,
-      auth: authToken,
-    } as SubscribeRequest);
+    await api.post<void>("push/subscribe", toSubscribePayload(subscription));
   } catch (error) {
     // Re-throw API errors and subscription failures as-is; wrap other errors
     // so the caller has a consistent exception to handle.
