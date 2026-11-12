@@ -78,12 +78,22 @@ function sequenceByCurriculum(groups: SequencableGroup[]): SequencableGroup[] {
 export function sequenceUnits(
   groups: SequencableGroup[],
   mode: PlanMode,
+  legacyStrategy: Strategy = "curriculum",
 ): SequencableGroup[] {
   if (mode === "effort-return") {
     // orderModules returns SchedulableGroup, but every element is one of the
     // inputs, so the topicOrder each carries survives the round trip.
-    return orderModules(groups, "curriculum" satisfies Strategy) as SequencableGroup[];
+    //
+    // legacyStrategy is StudyPlan.orderingStrategy. It is no longer a
+    // candidate-facing choice, but inside this mode it is still the thing that
+    // picks the leading sort term, and dropping it would silently reduce three
+    // old behaviours to one. Throws on an unrecognised value, as it always
+    // did, which is what makes a corrupt strategy a loud failure rather than a
+    // quiet fallback.
+    return orderModules(groups, legacyStrategy) as SequencableGroup[];
   }
 
+  // The two curriculum modes share this sequence exactly and ignore
+  // legacyStrategy: a candidate who asked for curriculum order gets it.
   return sequenceByCurriculum(groups);
 }

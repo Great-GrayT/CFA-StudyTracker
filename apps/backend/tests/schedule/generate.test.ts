@@ -293,8 +293,19 @@ describe("generateHorizon", () => {
     expect(still!.timerStartedAt?.getTime()).toBe(timerStartedAt.getTime());
   });
 
+  // Pinned to effort-return on purpose. orderingStrategy is no longer a
+  // candidate-facing choice, but inside effort-return it is still what reaches
+  // ordering.ts, and that mode is the one this assertion needs: it keeps both
+  // runs on the same packer, so the task COUNT is held constant and only the
+  // sequence moves. Switching planMode instead would change the packer as
+  // well, and a changed row count cannot distinguish a real reorder from a
+  // differently shaped plan, which is the whole point of the check below.
   test("changing the ordering strategy actually reorders the plan's modules", async () => {
     const { planId } = await setupPlanWithCatalogue();
+    await db.studyPlan.update({
+      where: { id: planId },
+      data: { planMode: "effort-return" },
+    });
     await generateHorizon(planId, "2027-01-04");
 
     const before = await db.planTask.findMany({

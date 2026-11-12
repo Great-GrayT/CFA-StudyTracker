@@ -71,6 +71,29 @@ test("effort-return delegates to today's engine unchanged", () => {
   );
 });
 
+test("effort-return honours the legacy ordering strategy it is handed", () => {
+  const groups = fixtureMixedTopics();
+  expect(sequenceUnits(groups, "effort-return", "weight").map((x) => x.ref)).toEqual(
+    orderModules(groups, "weight").map((x) => x.ref),
+  );
+  expect(sequenceUnits(groups, "effort-return", "weight").map((x) => x.ref)).not.toEqual(
+    sequenceUnits(groups, "effort-return", "curriculum").map((x) => x.ref),
+  );
+});
+
+test("effort-return still throws on a strategy ordering.ts does not know", () => {
+  expect(() =>
+    sequenceUnits(fixtureMixedTopics(), "effort-return", "not-a-real-strategy" as never),
+  ).toThrow(/strategy/i);
+});
+
+test("the curriculum modes ignore the legacy strategy entirely", () => {
+  const groups = fixtureEthicsAndQm();
+  expect(sequenceUnits(groups, "curriculum-topic", "weight").map((x) => x.ref)).toEqual(
+    sequenceUnits(groups, "curriculum-topic", "curriculum").map((x) => x.ref),
+  );
+});
+
 test("curriculum-strict runs whole topic areas in curriculum order", () => {
   const refs = sequenceUnits(fixtureEthicsAndQm(), "curriculum-strict").map((x) => x.ref);
   expect(refs).toEqual(["qm/lm1", "qm/lm2", "qm/lm3", "ethics/lm1", "ethics/lm2"]);

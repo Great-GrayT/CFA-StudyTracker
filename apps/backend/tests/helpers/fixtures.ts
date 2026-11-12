@@ -600,10 +600,20 @@ export async function setupPlanWithRealCatalogue(): Promise<{ planId: string }> 
  * weeklyAvailability is > 0 minutes, so a longer lookback would otherwise
  * always find at least one missed day).
  *
- * `breakRegeneration` corrupts orderingStrategy to a value ordering.ts does
- * not recognise, so a streak-triggered generateHorizon call genuinely
- * throws (synchronously, before its transaction opens) instead of being
- * told to by a mock.
+ * `breakRegeneration` makes two of this catalogue's readings prerequisites of
+ * each other, so a streak-triggered generateHorizon call genuinely throws on
+ * the cycle (synchronously, inside sequenceUnits, before its transaction
+ * opens) instead of being told to by a mock.
+ *
+ * It used to corrupt orderingStrategy, relying on ordering.ts to reject an
+ * unknown strategy. The plan mode replaced that field as the ordering lever,
+ * and parseTuning deliberately clamps an unrecognised mode to the default
+ * rather than throwing, so that lever stopped breaking anything. Corrupting
+ * weeklyAvailability was tried next and is too blunt: the coach computes a
+ * streak BEFORE it regenerates, so a null there throws in plannedHoursFor and
+ * escapes runCoachForPlan rather than being the caught regeneration failure
+ * this test is about. A prerequisite cycle fails in exactly one place, which
+ * is the point.
  */
 export async function setupPlanWithTasks(
   opts: Partial<{
@@ -679,9 +689,19 @@ export async function setupPlanWithTasks(
       timeZone: opts.timeZone ?? "UTC",
       emailCoach: opts.emailCoach ?? "all",
       startDate,
-      orderingStrategy: opts.breakRegeneration ? "not-a-real-strategy" : "curriculum",
+      orderingStrategy: "curriculum",
     },
   });
+
+  if (opts.breakRegeneration) {
+    const [first, second] = await db.reading.findMany({
+      where: { topic: { levelId: "II" } },
+      orderBy: { id: "asc" },
+      take: 2,
+    });
+    await db.reading.update({ where: { id: first.id }, data: { prereqRefs: [second.id] } });
+    await db.reading.update({ where: { id: second.id }, data: { prereqRefs: [first.id] } });
+  }
 
   // Independent of the pacing engine, so the sender tests' day shape
   // (taskMinutes, tasksDone) is exact rather than whatever packDays

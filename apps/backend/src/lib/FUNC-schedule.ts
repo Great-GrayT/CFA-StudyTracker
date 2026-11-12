@@ -6,19 +6,30 @@ import type {
 import { DEFAULT_EFFORT_CONSTANTS, estimateModule, estimateResource } from "../core/effort";
 import type { TopicEstimate } from "../core/allocation";
 import { allocate, weightImpliedMinutes } from "../core/allocation";
-import type {
-  SchedulableGroup,
-  Strategy,
-} from "../core/ordering";
-import { orderModules } from "../core/ordering";
+import type { Strategy } from "../core/ordering";
+import type { SequencableGroup } from "../core/sequence";
+import { sequenceUnits } from "../core/sequence";
 import type {
   PackableGroup,
   Calendar,
+  PlannedDay,
   PlannedTask,
 } from "../core/packing";
 import { packDays } from "../core/packing";
 import type { FactorKey, FactorTree } from "../core/calibration";
 import { factorFor, updateFactor } from "../core/calibration";
+import { parseTuning } from "../core/tuning";
+import type { MasteryObservation } from "../core/mastery";
+import { isEligibleToJump, masteryOfUnit } from "../core/mastery";
+import type { UnderPractised, WriteOff } from "../core/pairing";
+import {
+  packFirstPass,
+  questionMinutesOf,
+  readingMinutesOf,
+  reconcile,
+  solveQuestionMultiple,
+} from "../core/pairing";
+import { packReview, projectCoverageDate, reviewPhaseStart, reviewQueue } from "../core/review";
 
 const HORIZON_DAYS = 14;
 
@@ -37,6 +48,191 @@ const KNOWN_EFFORT_KINDS = new Set([
   "question_set",
   "answer_set",
 ]);
+
+// The resource kinds that count as reading and as questions, for working out
+// what a candidate has already done. Mirrors readingMinutesOf and
+// questionMinutesOf in core/pairing.ts, which own the split; these are the
+// TASK kinds the packers emit rather than the resource kinds the estimator
+// prices. "review" is absent from both on purpose: it belongs to the review
+// phase and settles no first-pass debt.
+const READING_TASK_KINDS = new Set(["content-notes", "content-video", "seminar"]);
+const QUESTION_TASK_KINDS = new Set(["questions", "eocq"]);
+
+/**
+ * Minutes of reading and of questions already completed, per unit.
+ *
+ * Uses actualMinutes where the candidate recorded one and the estimate
+ * otherwise, because a debt should be settled by the time really spent, not by
+ * what the plan guessed it would take.
+ */
+async function loadWorkDone(planId: string): Promise<{
+  readingDoneByRef: Map<string, number>;
+  questionsDoneByRef: Map<string, number>;
+}> {
+  const done = await db.planTask.findMany({
+    where: { planId, status: "done" },
+    select: { kind: true, readingIds: true, estimatedMinutes: true, actualMinutes: true },
+  });
+
+  const readingDoneByRef = new Map<string, number>();
+  const questionsDoneByRef = new Map<string, number>();
+
+  for (const task of done) {
+    const minutes = task.actualMinutes ?? task.estimatedMinutes;
+    if (minutes <= 0) continue;
+    const target = READING_TASK_KINDS.has(task.kind)
+      ? readingDoneByRef
+      : QUESTION_TASK_KINDS.has(task.kind)
+        ? questionsDoneByRef
+        : null;
+    if (!target) continue;
+
+    // A task can span several readings (an ethics task covers seven modules),
+    // so split its minutes evenly rather than crediting each in full.
+    const refs = task.readingIds.length > 0 ? task.readingIds : [];
+    const share = refs.length > 0 ? minutes / refs.length : 0;
+    for (const ref of refs) {
+      target.set(ref, (target.get(ref) ?? 0) + share);
+    }
+  }
+
+  return { readingDoneByRef, questionsDoneByRef };
+}
+
+/**
+ * Logged work as mastery observations, grouped by unit.
+ *
+ * `available` has to be a question COUNT, since `answered` is one, but the
+ * catalogue records question minutes per resource. Inverting the effort model
+ * recovers the count exactly: estimateResource prices a set at
+ * count * (Q_BASE + (Q_CALC - Q_BASE) * calcShare), so dividing by that same
+ * per-question figure gives the count back, using the candidate's own
+ * calibrated constants rather than a second guess at them.
+ *
+ * Question stock is recorded per unit, not per outcome, so each outcome gets
+ * its unit's stock divided pro rata. That is an approximation and it is the
+ * honest one available: the provider does not tag questions by outcome.
+ */
+async function loadMasteryObservations(
+  planId: string,
+  readings: Array<{ id: string; los: Array<{ id: string }> }>,
+  packable: PackableGroup[],
+  effortConstants: EffortConstants,
+): Promise<Map<string, MasteryObservation[]>> {
+  const logs = await db.studyLogEntry.findMany({
+    where: { planId },
+    select: {
+      losId: true,
+      confidence: true,
+      questionsAnswered: true,
+      questionsCorrect: true,
+      date: true,
+    },
+    orderBy: { date: "asc" },
+  });
+
+  // Latest row per outcome wins for confidence and date; counts accumulate.
+  type Agg = { answered: number; correct: number; confidence: number | null; lastTouch: Date | null };
+  const byLos = new Map<string, Agg>();
+  for (const row of logs) {
+    const prev = byLos.get(row.losId) ?? { answered: 0, correct: 0, confidence: null, lastTouch: null };
+    byLos.set(row.losId, {
+      answered: prev.answered + row.questionsAnswered,
+      correct: prev.correct + row.questionsCorrect,
+      confidence: row.confidence,
+      lastTouch: row.date,
+    });
+  }
+
+  const losByReading = new Map(readings.map((r) => [r.id, r.los.map((l) => l.id)]));
+  const result = new Map<string, MasteryObservation[]>();
+
+  for (const g of packable) {
+    const losIds = losByReading.get(g.ref) ?? [];
+    if (losIds.length === 0) continue;
+
+    const questionMinutes = questionMinutesOf(g);
+    const perQuestion =
+      effortConstants.Q_BASE +
+      (effortConstants.Q_CALC - effortConstants.Q_BASE) * g.calculationShare;
+    const unitQuestions = perQuestion > 0 ? questionMinutes / perQuestion : 0;
+
+    result.set(
+      g.ref,
+      losIds.map((losId) => {
+        const agg = byLos.get(losId);
+        return {
+          losId,
+          answered: agg?.answered ?? 0,
+          correct: agg?.correct ?? 0,
+          available: unitQuestions / losIds.length,
+          confidence: agg?.confidence ?? null,
+          lastTouch: agg?.lastTouch ?? null,
+          questionMinutes: questionMinutes / losIds.length,
+        };
+      }),
+    );
+  }
+
+  return result;
+}
+
+/**
+ * Minutes of real study per study day, measured rather than estimated: the
+ * minutes the candidate actually recorded, over the number of distinct days
+ * they recorded anything on.
+ *
+ * Per STUDY day, not per calendar day, because the coverage projection then
+ * walks only the days the calendar says are available, and dividing by
+ * calendar days here would discount the rest days twice.
+ *
+ * Zero when nothing is logged yet, which the review throttle reads as "no
+ * projection possible" rather than "stopped".
+ */
+function realisedPace(
+  completed: Array<{ date: Date; estimatedMinutes: number; actualMinutes: number | null }>,
+): number {
+  if (completed.length === 0) return 0;
+
+  let minutes = 0;
+  const days = new Set<string>();
+  for (const task of completed) {
+    minutes += task.actualMinutes ?? task.estimatedMinutes;
+    days.add(task.date.toISOString().slice(0, 10));
+  }
+
+  return days.size > 0 ? minutes / days.size : 0;
+}
+
+/** A calendar with every day's minutes scaled, for splitting a day between phases. */
+function scaleCalendar(cal: Calendar, share: number): Calendar {
+  return {
+    ...cal,
+    weeklyAvailability: Object.fromEntries(
+      Object.entries(cal.weeklyAvailability).map(([day, minutes]) => [
+        day,
+        Math.max(0, Math.floor(minutes * share)),
+      ]),
+    ),
+  };
+}
+
+/** Merge two phases' days by date, first pass before review on any given day. */
+function mergeDays(first: PlannedDay[], review: PlannedDay[]): PlannedDay[] {
+  const byDate = new Map<string, PlannedDay>();
+  for (const day of first) {
+    byDate.set(day.date, { date: day.date, tasks: [...day.tasks] });
+  }
+  for (const day of review) {
+    const existing = byDate.get(day.date);
+    if (existing) {
+      existing.tasks.push(...day.tasks);
+    } else {
+      byDate.set(day.date, { date: day.date, tasks: [...day.tasks] });
+    }
+  }
+  return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
+}
 
 /**
  * Derive the calibration factor tree from completed PlanTask rows in date order.
@@ -366,8 +562,39 @@ function taskMatchesPlan(
 export async function generateHorizon(
   planId: string,
   today: string,
-): Promise<{ created: number; frozen: number; kept: number; deleted: number }> {
+): Promise<{
+  created: number;
+  frozen: number;
+  kept: number;
+  deleted: number;
+  planMode: string;
+  reviewPolicy: string;
+  requestedQuestionMultiple: number;
+  effectiveQuestionMultiple: number;
+  calendarTooShort: boolean;
+  writeOffs: WriteOff[];
+  underPractised: UnderPractised[];
+  injectionCap: number;
+  reviewReason: string;
+  coverageProjection: { date: string; slackDays: number } | null;
+  rejectedTuning: Array<{ field: string; reason: string }>;
+}> {
   const plan = await db.studyPlan.findUniqueOrThrow({ where: { id: planId } });
+
+  // Every constant the engine reads, with the candidate's overrides clamped
+  // into range. The columns hold the two choices; the json column holds the
+  // numbers. Nothing below reads plan.tuning directly.
+  const parsed = parseTuning({
+    ...(plan.tuning && typeof plan.tuning === "object" && !Array.isArray(plan.tuning)
+      ? (plan.tuning as Record<string, unknown>)
+      : {}),
+    planMode: plan.planMode,
+    reviewPolicy: plan.reviewPolicy,
+    reviewStartDate: plan.reviewStartDate
+      ? plan.reviewStartDate.toISOString().slice(0, 10)
+      : null,
+  });
+  const tuning = parsed.tuning;
 
   const todayDate = new Date(today + "T00:00:00Z");
   const horizonEnd = new Date(todayDate);
@@ -379,7 +606,7 @@ export async function generateHorizon(
   const completedTasks = await db.planTask.findMany({
     where: { planId, status: "done" },
     orderBy: { date: "asc" },
-    select: { estimatedMinutes: true, actualMinutes: true },
+    select: { date: true, estimatedMinutes: true, actualMinutes: true },
   });
 
   const factorTree = deriveFactorTree(completedTasks);
@@ -410,10 +637,10 @@ export async function generateHorizon(
   // Get all readings and build SchedulableGroup objects
   const readings = await db.reading.findMany({
     where: { topic: { levelId: plan.levelId } },
-    include: { topic: true },
+    include: { topic: true, los: { select: { id: true } } },
   });
 
-  const groups: SchedulableGroup[] = [];
+  const groups: SequencableGroup[] = [];
   for (const reading of readings) {
     const budget = allocationResult.byTopic.get(reading.topicId);
     if (!budget || budget.minutes <= 0) continue;
@@ -430,6 +657,11 @@ export async function generateHorizon(
       prereqRefs: reading.prereqRefs ?? [],
       phaseBand: reading.phaseBand ?? 1,
       moduleOrder: reading.order,
+      // The ordinal ordering.ts never had. Taken from the Topic row rather
+      // than parsed out of the ref, because parsing a curriculum position out
+      // of a string identifier is how a planner comes to read Ethics before
+      // Quantitative Methods.
+      topicOrder: reading.topic.order,
       priorityRank: reading.priorityRank ?? 0,
       weight: weightMid,
       estimatedMinutes: Math.max(1, budget.minutes / readingCountForTopic),
@@ -440,12 +672,16 @@ export async function generateHorizon(
     });
   }
 
-  // Order modules based on strategy
-  const strategy = (plan.orderingStrategy ?? "curriculum") as Strategy;
-  const ordered = groups.length > 0 ? orderModules(groups, strategy) : [];
+  // Sequence by plan mode. effort-return delegates to the old engine, so
+  // switching back to it really does reproduce the old behaviour; the two
+  // curriculum modes run whole topic areas in curriculum order.
+  const ordered =
+    groups.length > 0
+      ? sequenceUnits(groups, tuning.planMode, (plan.orderingStrategy ?? "curriculum") as Strategy)
+      : [];
 
   // Convert SchedulableGroup to PackableGroup with per-kind breakdown
-  const packable: PackableGroup[] = [];
+  const packable: Array<PackableGroup & { topicOrder: number }> = [];
   for (const group of ordered) {
     const reading = readings.find((r) => r.id === group.ref);
     if (!reading) continue;
@@ -510,7 +746,116 @@ export async function generateHorizon(
     holidays: [],
   };
 
-  const plannedDays = packable.length > 0 ? packDays(packable, calendar, {}) : [];
+  // -------------------------------------------------------------------------
+  // Pack. effort-return keeps the original packer untouched, so its output
+  // cannot drift. The curriculum modes run the paired first pass and the
+  // review phase, composed below.
+  // -------------------------------------------------------------------------
+  let plannedDays: PlannedDay[];
+  let solved = { pacing: tuning.firstPassQuestionMultiple, budget: tuning.firstPassQuestionMultiple, requested: tuning.firstPassQuestionMultiple, calendarTooShort: false };
+  let writeOffs: WriteOff[] = [];
+  let underPractised: UnderPractised[] = [];
+  let reviewPhase = { active: false, cap: 0, reason: "not applicable to this plan mode" };
+  let coverageProjection: { date: string; slackDays: number } | null = null;
+
+  if (packable.length === 0) {
+    plannedDays = [];
+  } else if (tuning.planMode === "effort-return") {
+    plannedDays = packDays(packable, calendar, {});
+  } else {
+    const asOf = todayDate;
+
+    // What the candidate has actually done, on plan or off it. Reading and
+    // question minutes come from completed tasks; mastery comes from the log.
+    const { readingDoneByRef, questionsDoneByRef } = await loadWorkDone(planId);
+    const logsByRef = await loadMasteryObservations(planId, readings, packable, DEFAULT_EFFORT_CONSTANTS);
+
+    const totalReadingMinutes = packable.reduce((sum, g) => sum + readingMinutesOf(g), 0);
+    solved = solveQuestionMultiple(totalReadingMinutes, totalPlanMinutes, tuning);
+
+    const reconciled = reconcile(
+      packable,
+      logsByRef,
+      readingDoneByRef,
+      questionsDoneByRef,
+      solved.budget,
+      asOf,
+      tuning,
+    );
+    writeOffs = reconciled.writeOffs;
+    underPractised = reconciled.underPractised;
+
+    const unreadMinutes = reconciled.units.reduce((sum, u) => sum + u.readingDebt, 0);
+    const allCovered = unreadMinutes <= 0;
+    const realisedPacePerDay = realisedPace(completedTasks);
+
+    reviewPhase = reviewPhaseStart(
+      calendar,
+      { unreadMinutes, realisedPacePerDay, allCovered },
+      plan.examDate.toISOString().slice(0, 10),
+      asOf,
+      tuning,
+    );
+    if (realisedPacePerDay > 0 && !allCovered) {
+      coverageProjection = projectCoverageDate(
+        unreadMinutes,
+        realisedPacePerDay,
+        asOf,
+        calendar,
+        plan.examDate.toISOString().slice(0, 10),
+        tuning,
+      );
+    }
+
+    // Only units already read once are eligible for review. Unread material
+    // belongs to the first pass, whatever its mastery says.
+    const covered = new Set(
+      packable
+        .filter((g) => (readingDoneByRef.get(g.ref) ?? 0) >= readingMinutesOf(g) && readingMinutesOf(g) > 0)
+        .map((g) => g.ref),
+    );
+    const queue = reviewQueue(
+      packable
+        .filter((g) => covered.has(g.ref))
+        .map((g) => {
+          const obs = logsByRef.get(g.ref) ?? [];
+          return {
+            ref: g.ref,
+            readingRefs: g.readingRefs,
+            topicOrder: g.topicOrder,
+            moduleOrder: g.moduleOrder,
+            reviewReadMinutes: g.reviewMinutes ?? 0,
+            questionMinutes: questionMinutesOf(g),
+            mastery: masteryOfUnit(obs, asOf, tuning),
+            eligible: isEligibleToJump(obs, asOf, tuning),
+            vignetteCount: g.vignetteCount,
+            calculationShare: g.calculationShare,
+          };
+        }),
+      tuning.planMode,
+    );
+
+    // Compose the two phases by splitting each day's availability rather than
+    // interleaving inside one packer. The review cap is a share of the day, so
+    // scaling the calendar is exactly what it means, and each phase keeps its
+    // own weekly budget and its own floors.
+    // Reserving the review share when there is nothing to review would simply
+    // lose it. On a brand new plan nothing is covered yet, so a 35% cap turned
+    // every 60 minute day into 39 for the first pass, floor(39/3) fell under
+    // the 15 minute reading floor, and the day came back empty. An empty queue
+    // means no cap.
+    const requestedCap = reviewPhase.active ? Math.min(1, Math.max(0, reviewPhase.cap)) : 0;
+    const cap = queue.length === 0 ? 0 : requestedCap;
+
+    const firstPassDays =
+      cap >= 1
+        ? []
+        : packFirstPass(reconciled.units, scaleCalendar(calendar, 1 - cap), solved.pacing, tuning);
+    const reviewDays = cap <= 0 ? [] : packReview(queue, scaleCalendar(calendar, cap), tuning);
+    reviewPhase = { ...reviewPhase, cap };
+
+    plannedDays = mergeDays(firstPassDays, reviewDays);
+  }
 
   // Build set of (date, order) tuples that are in the new plan.
   const newPlanSlots = new Set<string>();
@@ -648,5 +993,18 @@ export async function generateHorizon(
     };
   }, { timeout: 30000 });
 
-  return result;
+  return {
+    ...result,
+    planMode: tuning.planMode,
+    reviewPolicy: tuning.reviewPolicy,
+    requestedQuestionMultiple: solved.requested,
+    effectiveQuestionMultiple: solved.budget,
+    calendarTooShort: solved.calendarTooShort,
+    writeOffs,
+    underPractised,
+    injectionCap: reviewPhase.cap,
+    reviewReason: reviewPhase.reason,
+    coverageProjection,
+    rejectedTuning: parsed.rejected.map((r) => ({ field: r.field, reason: r.reason })),
+  };
 }
