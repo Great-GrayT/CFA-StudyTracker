@@ -184,7 +184,29 @@ model StudyPlan {
   startDate          DateTime           @default(now())
   weeklyAvailability Json
   // Strategy for ordering tasks on each day (e.g., "curriculum", "weakness-first", "practice-dense")
+  // Superseded as a candidate-facing choice by planMode below, but kept: it is
+  // still what effort-return passes down to ordering.ts, and the existing
+  // ordering tests and fixtures are written against it.
   orderingStrategy   String             @default("curriculum")
+  // Which sequence the first pass follows. One of "effort-return" (the engine
+  // as it was, topic cohesion before phase band), "curriculum-strict" (a fixed
+  // sequence nothing reorders) or "curriculum-topic" (the default: identical
+  // first pass, and only the review phase may depart from it, on evidence).
+  planMode           String             @default("curriculum-topic")
+  // When the review phase starts. One of "decay-triggered" (the default: the
+  // first pass owns the calendar until a unit's mastery actually breaks its
+  // bar), "after-coverage", "weekly-interleave" or "fixed-date".
+  reviewPolicy       String             @default("decay-triggered")
+  // Only read under the "fixed-date" policy, where the candidate names the
+  // switchover themselves.
+  reviewStartDate    DateTime?
+  // Every constant the planner reads, as ONE json column rather than nineteen
+  // typed ones. These are a single coherent settings object: always read
+  // together, always written together, never queried individually, and adding
+  // the twentieth constant should not cost a migration. core/tuning.ts is the
+  // only thing that parses it, and it defaults every field, so a plan written
+  // before this column existed needs no backfill.
+  tuning             Json?
   isActive           Boolean            @default(true)
   // IANA timezone name (e.g., "Europe/London"). Defaults to UTC so an existing plan without an explicit
   // zone still behaves correctly without requiring a backfill migration.
@@ -283,6 +305,12 @@ model StudyLogEntry {
   confidence        Int
   questionsAnswered Int           @default(0)
   questionsCorrect  Int           @default(0)
+  // True for work the candidate declared at onboarding rather than logged as
+  // they did it. Mastery treats these rows as real, because they are the best
+  // evidence available about material studied before the plan existed, but the
+  // flag keeps them distinguishable: a coach should not congratulate someone on
+  // a session they only told us about.
+  selfDeclared      Boolean       @default(false)
   note              String?
   user              User          @relation(fields: [userId], references: [id])
   plan              StudyPlan     @relation(fields: [planId], references: [id])
