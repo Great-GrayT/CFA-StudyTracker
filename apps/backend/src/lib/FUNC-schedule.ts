@@ -65,14 +65,39 @@ const QUESTION_TASK_KINDS = new Set(["questions", "eocq"]);
  * otherwise, because a debt should be settled by the time really spent, not by
  * what the plan guessed it would take.
  */
-async function loadWorkDone(planId: string): Promise<{
+async function loadWorkDone(
+  planId: string,
+  readings: Array<{ id: string; los: Array<{ id: string }> }>,
+): Promise<{
   readingDoneByRef: Map<string, number>;
   questionsDoneByRef: Map<string, number>;
+  declaredReadRefs: Set<string>;
 }> {
-  const done = await db.planTask.findMany({
-    where: { planId, status: "done" },
-    select: { kind: true, readingIds: true, estimatedMinutes: true, actualMinutes: true },
-  });
+  const [done, declared] = await Promise.all([
+    db.planTask.findMany({
+      where: { planId, status: "done" },
+      select: { kind: true, readingIds: true, estimatedMinutes: true, actualMinutes: true },
+    }),
+    // A candidate who told us at onboarding that they have read a topic area
+    // has settled its reading debt as surely as a completed task would, and
+    // telling them to read it again is the fastest way to lose their trust in
+    // the schedule. Minutes are unknown, so the caller credits the unit's whole
+    // reading rather than a figure nobody measured.
+    db.studyLogEntry.findMany({
+      where: { planId, selfDeclared: true, declaredRead: true },
+      select: { losId: true },
+    }),
+  ]);
+
+  const readingByLos = new Map<string, string>();
+  for (const reading of readings) {
+    for (const los of reading.los) readingByLos.set(los.id, reading.id);
+  }
+  const declaredReadRefs = new Set<string>();
+  for (const row of declared) {
+    const ref = readingByLos.get(row.losId);
+    if (ref) declaredReadRefs.add(ref);
+  }
 
   const readingDoneByRef = new Map<string, number>();
   const questionsDoneByRef = new Map<string, number>();
@@ -96,7 +121,7 @@ async function loadWorkDone(planId: string): Promise<{
     }
   }
 
-  return { readingDoneByRef, questionsDoneByRef };
+  return { readingDoneByRef, questionsDoneByRef, declaredReadRefs };
 }
 
 /**
@@ -781,7 +806,17 @@ export async function generateHorizon(
 
     // What the candidate has actually done, on plan or off it. Reading and
     // question minutes come from completed tasks; mastery comes from the log.
-    const { readingDoneByRef, questionsDoneByRef } = await loadWorkDone(planId);
+    const { readingDoneByRef, questionsDoneByRef, declaredReadRefs } = await loadWorkDone(
+      planId,
+      readings,
+    );
+    // Credit a declared reading in full. The declaration carries no minutes, so
+    // the unit's own reading total is the only honest figure to settle it with.
+    for (const g of packable) {
+      if (declaredReadRefs.has(g.ref)) {
+        readingDoneByRef.set(g.ref, Math.max(readingDoneByRef.get(g.ref) ?? 0, readingMinutesOf(g)));
+      }
+    }
     const logsByRef = await loadMasteryObservations(planId, readings, packable, DEFAULT_EFFORT_CONSTANTS);
 
     const totalReadingMinutes = packable.reduce((sum, g) => sum + readingMinutesOf(g), 0);

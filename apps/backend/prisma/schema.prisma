@@ -311,6 +311,12 @@ model StudyLogEntry {
   // flag keeps them distinguishable: a coach should not congratulate someone on
   // a session they only told us about.
   selfDeclared      Boolean       @default(false)
+  // Set on a declared row when the candidate said they had READ the material,
+  // as opposed to only having answered questions on it. The two are genuinely
+  // different states to arrive in, and the planner treats them differently: the
+  // first earns question-only days, the second earns reading-only days unless
+  // the practice already proves the material is known.
+  declaredRead      Boolean       @default(false)
   note              String?
   user              User          @relation(fields: [userId], references: [id])
   plan              StudyPlan     @relation(fields: [planId], references: [id])

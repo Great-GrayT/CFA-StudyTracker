@@ -137,6 +137,25 @@ export const patchPlanSchema = z.object({
   tuning: tuningSchema.optional(),
 });
 
+/**
+ * What the candidate had already studied before this plan existed, declared per
+ * topic area because that is the resolution anyone actually remembers.
+ *
+ * accuracyPercent is nullable because "I read it and did no questions" is a
+ * real answer, and demanding an accuracy for zero questions would force the
+ * candidate to invent one.
+ */
+const priorWorkDeclarationSchema = z.object({
+  topicId: z.string().min(1),
+  read: z.boolean(),
+  questionsAnswered: z.number().int().min(0).max(100_000),
+  accuracyPercent: z.number().min(0).max(100).nullable(),
+});
+
+export const priorWorkSchema = z.object({
+  declarations: z.array(priorWorkDeclarationSchema).max(50),
+});
+
 export const createHolidaySchema = z.object({
   startDate: z.coerce.date(),
   endDate: z.coerce.date(),

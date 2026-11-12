@@ -61,6 +61,10 @@ export async function POST(req: Request): Promise<Response> {
           losId: entry.losId,
           confidence: entry.confidence,
           questionsAnswered: entry.questionsAnswered,
+          // Entered at plan creation, so this is a statement about the past
+          // rather than work logged as it happened. Mastery still treats it as
+          // real evidence; the flag is what keeps the two tellable apart.
+          selfDeclared: true,
           date: startDate,
         })),
       });
