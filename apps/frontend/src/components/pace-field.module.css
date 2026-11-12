@@ -126,3 +126,21 @@
   background: var(--raised);
   border: 1px solid var(--rule);
 }
+
+/* The hover readout. A fixed line under the plot rather than a floating
+   tooltip: this is read on a phone, which has no hover, and a tooltip would
+   cover the lines it is describing. */
+.readout {
+  margin: var(--space-2) 0 0;
+  font-size: 13px;
+  color: var(--text);
+  min-height: 1.4em;
+}
+
+.readoutDate {
+  font-weight: 600;
+}
+
+.readoutIdle {
+  color: var(--muted);
+}

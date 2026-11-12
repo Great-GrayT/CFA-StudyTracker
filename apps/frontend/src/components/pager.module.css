@@ -1,0 +1,37 @@
+/* Paging controls. Quiet: they sit under a table and should never compete
+   with it for attention. */
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  margin: var(--space-3) 0 0;
+}
+
+.button {
+  /* 44px is the floor for a touch target, and an arrow glyph is small. */
+  min-width: 44px;
+  min-height: 44px;
+  background: transparent;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-input);
+  color: var(--text);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--ground);
+}
+
+.button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.count {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}

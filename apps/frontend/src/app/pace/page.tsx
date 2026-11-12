@@ -18,6 +18,7 @@ import {
   toISODate,
 } from "@/lib/pace";
 import styles from "./pace.module.css";
+import { Pager, usePaged } from "@/components/pager";
 
 const hours = new Intl.NumberFormat("en", { maximumFractionDigits: 1 });
 const plural = new Intl.PluralRules("en");
@@ -182,6 +183,11 @@ export default function PacePage() {
     [series],
   );
 
+  // A campaign runs to thirty-odd weeks, and an unpaged table of those
+  // pushes everything below it off a phone screen.
+  const weeklyPage = usePaged(weeklyRollups, 8);
+  const monthlyPage = usePaged(monthlyRollups, 8);
+
   if (plan.isLoading || curriculum.isLoading) {
     return (
       <AppShell>
@@ -328,7 +334,7 @@ export default function PacePage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {weeklyRollups.map((row) => (
+                    {weeklyPage.slice.map((row) => (
                       <tr key={row.label}>
                         <th scope="row" className={styles.tableLabel}>
                           {row.label}
@@ -350,6 +356,14 @@ export default function PacePage() {
                     ))}
                   </tbody>
                 </table>
+                <Pager
+                  page={weeklyPage.page}
+                  pages={weeklyPage.pages}
+                  total={weeklyPage.total}
+                  pageSize={weeklyPage.pageSize}
+                  onPage={weeklyPage.setPage}
+                  label="weeks"
+                />
               </div>
             )}
 
@@ -368,7 +382,7 @@ export default function PacePage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {monthlyRollups.map((row) => (
+                    {monthlyPage.slice.map((row) => (
                       <tr key={row.label}>
                         <th scope="row" className={styles.tableLabel}>
                           {row.label}
@@ -390,6 +404,14 @@ export default function PacePage() {
                     ))}
                   </tbody>
                 </table>
+                <Pager
+                  page={monthlyPage.page}
+                  pages={monthlyPage.pages}
+                  total={monthlyPage.total}
+                  pageSize={monthlyPage.pageSize}
+                  onPage={monthlyPage.setPage}
+                  label="months"
+                />
               </div>
             )}
           </>

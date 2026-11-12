@@ -9,6 +9,7 @@ import { useQueryClient, useMutation } from "@tanstack/react-query";
 import { keys } from "@/lib/hooks";
 import type { MockExam } from "@/lib/types";
 import styles from "./mocks.module.css";
+import { Pager, usePaged } from "@/components/pager";
 
 const pct = new Intl.NumberFormat("en", { maximumFractionDigits: 0 });
 const plural = new Intl.PluralRules("en");
@@ -342,8 +343,12 @@ function MockTable({ exams, packages, planId }: { exams: MockExam[]; packages: a
   const packageMap = new Map(packages.map((p: any) => [p.id, p.name]));
 
   const sorted = [...exams].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  // A full campaign ends with a lot of these, and they are the rows a
+  // candidate scrolls back through most.
+  const paged = usePaged(sorted, 10);
 
   return (
+    <>
     <table className={`${styles.table} tnum`}>
       <caption className="visually-hidden">Mock exams by date, newest first</caption>
       <thead>
@@ -355,7 +360,7 @@ function MockTable({ exams, packages, planId }: { exams: MockExam[]; packages: a
         </tr>
       </thead>
       <tbody>
-        {sorted.map((exam) => (
+        {paged.slice.map((exam) => (
           <MockTableRow
             key={exam.id}
             exam={exam}
@@ -366,6 +371,15 @@ function MockTable({ exams, packages, planId }: { exams: MockExam[]; packages: a
         ))}
       </tbody>
     </table>
+    <Pager
+      page={paged.page}
+      pages={paged.pages}
+      total={paged.total}
+      pageSize={paged.pageSize}
+      onPage={paged.setPage}
+      label="exams"
+    />
+    </>
   );
 }
 

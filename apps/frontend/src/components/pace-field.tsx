@@ -96,6 +96,7 @@ export function PaceField({
   totalOutcomes: number;
 }) {
   const [asTable, setAsTable] = useState(false);
+  const [hover, setHover] = useState<number | null>(null);
   const titleId = useId();
 
   const geometry = useMemo(() => {
@@ -147,6 +148,18 @@ export function PaceField({
   };
 
   const missedSet = new Set(missed);
+  const hovered = hover === null ? null : series[Math.min(series.length - 1, Math.max(0, hover))];
+
+  /** Which day the pointer is over, from its position across the plot. */
+  function pointTo(event: React.PointerEvent<HTMLDivElement>) {
+    const box = event.currentTarget.getBoundingClientRect();
+    if (box.width === 0) return;
+    const frac = (event.clientX - box.left) / box.width;
+    // The plot is inset by PAD, so the fraction has to be remapped onto the
+    // data range or every reading is offset by the left gutter.
+    const inner = (frac * W - PAD.left) / (W - PAD.left - PAD.right);
+    setHover(Math.round(inner * (series.length - 1)));
+  }
   const holidayRanges = holidays.map((h) => ({
     from: series.findIndex((p) => p.date >= toISODate(new Date(h.startDate))),
     to: series.findIndex((p) => p.date > toISODate(new Date(h.endDate))),
@@ -194,7 +207,12 @@ export function PaceField({
           </table>
         </div>
       ) : (
-        <div className={styles.chartWrap}>
+        <div
+          className={styles.chartWrap}
+          onPointerMove={pointTo}
+          onPointerDown={pointTo}
+          onPointerLeave={() => setHover(null)}
+        >
           <svg
             viewBox={`0 0 ${W} ${H}`}
             className={styles.svg}
@@ -226,9 +244,13 @@ export function PaceField({
               ) : null,
             )}
 
+            {/* The shortfall, at a weight that does not swallow the chart.
+                At 0.28 this was a solid wash over the whole plot for anyone
+                meaningfully behind, which is exactly the candidate who most
+                needs to read the lines underneath it. */}
             <g className="data-fill">
-              <path d={gapArea(true)} fill="var(--strong)" opacity="0.28" />
-              <path d={gapArea(false)} fill="var(--alarm)" opacity="0.28" />
+              <path d={gapArea(true)} fill="var(--strong)" opacity="0.16" />
+              <path d={gapArea(false)} fill="var(--alarm)" opacity="0.14" />
             </g>
 
             {/* Review work sits above new coverage in the stack, over a hatch,
@@ -245,7 +267,27 @@ export function PaceField({
               opacity="0.85"
             />
 
-            <path d={line((p) => p.target)} fill="none" stroke="var(--rule-strong)" strokeWidth="1.5" strokeDasharray="4 3" />
+            {/* Both series get a stroked line of their own. The areas alone
+                were unreadable at low coverage: two outcomes against a
+                target of a hundred is a sliver one pixel high, so the actual
+                simply was not on the chart. vectorEffect keeps every stroke
+                at its stated width despite preserveAspectRatio="none", which
+                otherwise stretches strokes and dashes with the box. */}
+            <path
+              d={line((p) => p.target)}
+              fill="none"
+              stroke="var(--rule-strong)"
+              strokeWidth="1.5"
+              strokeDasharray="4 3"
+              vectorEffect="non-scaling-stroke"
+            />
+            <path
+              d={line((p) => p.newCoverage + p.reviewWork)}
+              fill="none"
+              stroke="var(--claimed-ink)"
+              strokeWidth="2"
+              vectorEffect="non-scaling-stroke"
+            />
 
             {series.map((p, i) =>
               missedSet.has(p.date) ? (
@@ -261,14 +303,98 @@ export function PaceField({
               ) : null,
             )}
 
-            <line x1={PAD.left} x2={W - PAD.right} y1={H - PAD.bottom} y2={H - PAD.bottom} stroke="var(--rule-strong)" />
-            <text x={PAD.left - 6} y={y(maxY) + 4} textAnchor="end" className={styles.tick}>
-              {Math.round(maxY)}
-            </text>
-            <text x={PAD.left - 6} y={y(0) + 4} textAnchor="end" className={styles.tick}>
-              0
-            </text>
+            <line
+              x1={PAD.left}
+              x2={W - PAD.right}
+              y1={H - PAD.bottom}
+              y2={H - PAD.bottom}
+              stroke="var(--rule-strong)"
+              vectorEffect="non-scaling-stroke"
+            />
+
+            {/* Four values up the side rather than two. The old axis gave the
+                top and the bottom, which tells you the range and nothing
+                about where a point sits inside it. */}
+            {[0, 0.25, 0.5, 0.75, 1].map((f) => (
+              <g key={f}>
+                {f > 0 ? (
+                  <line
+                    x1={PAD.left}
+                    x2={W - PAD.right}
+                    y1={y(maxY * f)}
+                    y2={y(maxY * f)}
+                    stroke="var(--rule)"
+                    strokeWidth="1"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                ) : null}
+                <text x={PAD.left - 6} y={y(maxY * f) + 4} textAnchor="end" className={styles.tick}>
+                  {Math.round(maxY * f)}
+                </text>
+              </g>
+            ))}
+
+            {/* Dates along the bottom. There were none at all, so the x axis
+                was an unlabelled run of pixels. */}
+            {[0, 0.5, 1].map((f) => {
+              const i = Math.round((series.length - 1) * f);
+              return (
+                <text
+                  key={f}
+                  x={x(i)}
+                  y={H - PAD.bottom + 18}
+                  textAnchor={f === 0 ? "start" : f === 1 ? "end" : "middle"}
+                  className={styles.tick}
+                >
+                  {new Date(`${series[i].date}T00:00:00Z`).toLocaleDateString(undefined, {
+                    day: "numeric",
+                    month: "short",
+                    timeZone: "UTC",
+                  })}
+                </text>
+              );
+            })}
+            {hover !== null && hovered ? (
+              <line
+                x1={x(hover)}
+                x2={x(hover)}
+                y1={PAD.top}
+                y2={H - PAD.bottom}
+                stroke="var(--text)"
+                strokeWidth="1"
+                vectorEffect="non-scaling-stroke"
+                opacity="0.5"
+              />
+            ) : null}
           </svg>
+
+          {/* A fixed readout, not a floating tooltip: this chart is read on a
+              phone, where there is no hover at all and a tooltip would cover
+              the lines it describes. Touch drives it through onPointerDown. */}
+          <p className={`${styles.readout} tnum`} aria-live="polite">
+            {hovered ? (
+              <>
+                <span className={styles.readoutDate}>
+                  {new Date(`${hovered.date}T00:00:00Z`).toLocaleDateString(undefined, {
+                    day: "numeric",
+                    month: "short",
+                    timeZone: "UTC",
+                  })}
+                </span>
+                {" target "}
+                {hovered.target}
+                {", actual "}
+                {hovered.newCoverage + hovered.reviewWork}
+                {", "}
+                {hovered.newCoverage + hovered.reviewWork - hovered.target >= 0 ? "ahead " : "behind "}
+                {Math.abs(hovered.newCoverage + hovered.reviewWork - hovered.target)}
+              </>
+            ) : (
+              <span className={styles.readoutIdle}>
+                Point at the chart for a day&rsquo;s figures.
+              </span>
+            )}
+          </p>
 
           <ul className={styles.legend}>
             <li><span className={styles.swatchNew} /> New coverage</li>

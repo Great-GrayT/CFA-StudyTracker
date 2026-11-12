@@ -8,6 +8,7 @@ import { usePlan, useCurriculum, useLogs, usePackages, flattenCurriculum } from 
 import styles from "./los.module.css";
 import dynamic from "next/dynamic";
 import { ConfidenceMeter } from "@/components/confidence";
+import { Pager, usePaged } from "@/components/pager";
 
 // Loaded on demand: the sheet renders nothing until it is opened, so its
 // virtualized outcome list has no business in this route's first load.
@@ -45,6 +46,10 @@ export default function LosPage({ params }: { params: Promise<{ losId: string }>
         .sort((a, b) => b.date.localeCompare(a.date)),
     [logs.data, losId],
   );
+
+  // The history of one outcome grows for the life of the plan, and a
+  // re-drilled outcome can carry dozens of rows.
+  const history = usePaged(mine, 8);
 
   const answered = mine.reduce((s, l) => s + l.questionsAnswered, 0);
   const correct = mine.reduce((s, l) => s + l.questionsCorrect, 0);
@@ -208,7 +213,7 @@ export default function LosPage({ params }: { params: Promise<{ losId: string }>
                 </tr>
               </thead>
               <tbody>
-                {mine.map((l) => (
+                {history.slice.map((l) => (
                   <tr key={l.id}>
                     <th scope="row">{new Date(l.date).toLocaleDateString()}</th>
                     <td>
@@ -224,6 +229,14 @@ export default function LosPage({ params }: { params: Promise<{ losId: string }>
               </tbody>
             </table>
           )}
+          <Pager
+            page={history.page}
+            pages={history.pages}
+            total={history.total}
+            pageSize={history.pageSize}
+            onPage={history.setPage}
+            label="entries"
+          />
         </section>
 
         <button type="button" className={styles.primary} onClick={() => setComposing(true)}>
