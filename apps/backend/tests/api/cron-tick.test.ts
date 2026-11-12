@@ -62,20 +62,66 @@ test("one plan's processing failure doesn't prevent a second, healthy active pla
   expect(await db.progressSnapshot.findFirst({ where: { planId: badPlan.id } })).toBeNull();
 });
 
-// The plan's startDate must be well before "yesterday" here - otherwise
-// this would pass for the wrong reason (the now-fixed startDate-clipping
-// bug: a brand-new plan created today has no valid "yesterday" to have
-// missed yet, so missedDaysWindow is null and nothing would be sent
-// regardless of whether the push logic itself works). Backdating startDate
-// makes yesterday a genuine missed day, so this actually exercises the push.
-test("tick sends a push notification for each user with a missed day and an active subscription", async () => {
-  const { user } = await setupUserWithPlan({ weeklyAvailability: fullWeek, startDate: isoDate(daysAgo(10)) });
-  await db.pushSubscription.create({ data: { userId: user.id, endpoint: "https://push.example/abc", p256dh: "k1", auth: "k2" } });
+// The plan's startDate must be well before "yesterday" in both tests below,
+// otherwise they would pass for the wrong reason (the now-fixed
+// startDate-clipping bug: a brand-new plan created today has no valid
+// "yesterday" to have missed yet, so missedDaysWindow is null and nothing
+// would be sent regardless of whether the push logic itself works).
+// Backdating startDate makes yesterday a genuine missed day, so these
+// actually exercise the push.
+//
+// These two replace one test that drove the tick ROUTE, which reads the wall
+// clock at tick/route.ts:66. dueSlots only returns a slot whose local time has
+// already passed today, and the earliest is 06:30, so that test failed every
+// time the suite ran before 06:30 UTC and passed after. That is not a flaky
+// test to shrug at: it is a six-and-a-half hour window every day in which CI
+// cannot go green and nothing can be deployed, and it blocked six consecutive
+// pushes before anyone connected the deploy emails to the hour of day.
+//
+// runCoachForPlan already takes the instant as an argument, so the fix is to
+// hand it one instead of reading the clock. That the tick calls the coach for
+// every active plan is pinned by "the coach runs for every active plan" below,
+// so nothing is lost by not going through the route here.
+test("a missed day sends a push once a slot is due", async () => {
+  const { user, plan } = await setupUserWithPlan({
+    weeklyAvailability: fullWeek,
+    startDate: isoDate(daysAgo(10)),
+  });
+  await db.pushSubscription.create({
+    data: { userId: user.id, endpoint: "https://push.example/abc", p256dh: "k1", auth: "k2" },
+  });
   const sendSpy = vi.spyOn(pushModule, "sendPushToUser").mockResolvedValue(undefined);
 
-  await GET(jsonRequest("GET", "/api/cron/tick", undefined, { Authorization: `Bearer ${process.env.CRON_SECRET}` }));
+  // 23:00 in the plan's zone, past all three slot times, so a slot is due
+  // whatever hour the suite happens to run at. The DATE stays today, so
+  // yesterday is still the missed day the fixture set up.
+  const afterLastSlot = new Date(`${isoDate(new Date())}T23:00:00Z`);
+  await coachModule.runCoachForPlan(plan.id, afterLastSlot, async () => {});
 
-  expect(sendSpy).toHaveBeenCalledWith(user.id, expect.objectContaining({ title: expect.any(String) }));
+  expect(sendSpy).toHaveBeenCalledWith(
+    user.id,
+    expect.objectContaining({ title: expect.any(String) }),
+  );
+});
+
+test("nothing is pushed before the first slot of the day has passed", async () => {
+  // The other half of the same rule, and the reason the old test failed at
+  // night: nobody is prodded at two in the morning about a day that has
+  // barely started.
+  const { user, plan } = await setupUserWithPlan({
+    weeklyAvailability: fullWeek,
+    startDate: isoDate(daysAgo(10)),
+  });
+  await db.pushSubscription.create({
+    data: { userId: user.id, endpoint: "https://push.example/def", p256dh: "k1", auth: "k2" },
+  });
+  const sendSpy = vi.spyOn(pushModule, "sendPushToUser").mockResolvedValue(undefined);
+
+  const beforeFirstSlot = new Date(`${isoDate(new Date())}T02:00:00Z`);
+  const result = await coachModule.runCoachForPlan(plan.id, beforeFirstSlot, async () => {});
+
+  expect(sendSpy).not.toHaveBeenCalled();
+  expect(result.pushSent).toEqual([]);
 });
 
 // The two tests that used to sit here asserted that the tick's own ad-hoc
