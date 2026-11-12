@@ -6,7 +6,8 @@
 
 import type { MasteryObservation } from "./mastery";
 import { masteryOfUnit } from "./mastery";
-import type { PackableGroup } from "./packing";
+import type { Calendar, PackableGroup, PlannedDay, PlannedTask } from "./packing";
+import { MIN_TASK_MINUTES } from "./packing";
 import type { Tuning } from "./tuning";
 
 export type PairingTag = "paired" | "questions-only" | "reading-only";
@@ -187,4 +188,294 @@ export function reconcile(
   }
 
   return { units, writeOffs, underPractised };
+}
+
+// ---------------------------------------------------------------------------
+// Rule A: the first-pass packer
+// ---------------------------------------------------------------------------
+
+type ReadingKind = "content-notes" | "content-video" | "seminar";
+type QuestionKind = "questions" | "eocq";
+
+type UnitState = {
+  unit: ReconciledUnit;
+  started: boolean;
+  readingLeft: number;
+  questionsLeft: number;
+  // Per-kind remainders, drained in reading order, so a slice that straddles
+  // two kinds emits one task for each rather than mislabelling both.
+  readingByKind: Array<{ kind: ReadingKind; left: number }>;
+  questionsByKind: Array<{ kind: QuestionKind; left: number }>;
+  questionMinutesDone: number;
+  questionMinutesTotal: number;
+};
+
+const WEEKDAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
+
+function toISODate(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+function fromISODate(s: string): Date {
+  return new Date(s + "T00:00:00Z");
+}
+
+function addDays(d: Date, days: number): Date {
+  const out = new Date(d);
+  out.setUTCDate(out.getUTCDate() + days);
+  return out;
+}
+
+function availableMinutesOn(cal: Calendar, date: string): number {
+  if (cal.holidays.includes(date)) return 0;
+  return cal.weeklyAvailability[WEEKDAY_KEYS[fromISODate(date).getUTCDay()]] ?? 0;
+}
+
+function initState(unit: ReconciledUnit): UnitState {
+  // The debts are the authority, not the raw per-kind minutes: a reconciled
+  // unit may owe less reading than it holds, because the candidate read some of
+  // it off plan. Scale the kind remainders to the debt so the two agree.
+  const readingTotal = readingMinutesOf(unit);
+  const readScale = readingTotal > 0 ? unit.readingDebt / readingTotal : 0;
+  const questionTotal = questionMinutesOf(unit);
+  const questionScale = questionTotal > 0 ? unit.questionDebt / questionTotal : 0;
+
+  const readingKinds: Array<[ReadingKind, number]> = [
+    ["content-notes", unit.noteMinutes],
+    ["content-video", unit.videoMinutes],
+    ["seminar", unit.seminarMinutes ?? 0],
+  ];
+  const questionKinds: Array<[QuestionKind, number]> = [
+    ["questions", unit.questionMinutes],
+    ["eocq", unit.eocqMinutes],
+  ];
+
+  return {
+    unit,
+    started: false,
+    readingLeft: unit.readingDebt,
+    questionsLeft: unit.questionDebt,
+    readingByKind: readingKinds
+      .map(([kind, raw]) => ({ kind, left: raw * readScale }))
+      .filter((k) => k.left > 0),
+    questionsByKind: questionKinds
+      .map(([kind, raw]) => ({ kind, left: raw * questionScale }))
+      .filter((k) => k.left > 0),
+    questionMinutesDone: 0,
+    questionMinutesTotal: unit.questionDebt,
+  };
+}
+
+/**
+ * Draw `minutes` from a per-kind remainder list, one chunk per kind touched.
+ *
+ * Rounded so the chunks sum to exactly `minutes`: a day whose tasks do not add
+ * up to the slice it was given is a day the candidate cannot reconcile against
+ * the clock.
+ *
+ * A sub-floor chunk folds into its neighbour WITHIN the same bucket, never
+ * across. Folding an eight minute read into the question task beside it would
+ * report the reading as done under a question label, and the whole point of
+ * Rule A is that the pairing stays visible.
+ */
+function drawChunks<K extends string>(
+  byKind: Array<{ kind: K; left: number }>,
+  minutes: number,
+): Array<{ kind: K; minutes: number }> {
+  if (minutes <= 0) return [];
+
+  const taken: Array<{ kind: K; minutes: number }> = [];
+  let want = minutes;
+  for (const entry of byKind) {
+    if (want <= 0) break;
+    if (entry.left <= 0) continue;
+    const take = Math.min(entry.left, want);
+    entry.left -= take;
+    want -= take;
+    taken.push({ kind: entry.kind, minutes: take });
+  }
+  if (taken.length === 0) return [];
+
+  const rounded = taken.map((c) => ({ ...c, minutes: Math.round(c.minutes) }));
+  const drift = minutes - rounded.reduce((sum, c) => sum + c.minutes, 0);
+  if (drift !== 0) {
+    let largest = 0;
+    for (let i = 1; i < rounded.length; i++) {
+      if (rounded[i].minutes > rounded[largest].minutes) largest = i;
+    }
+    rounded[largest].minutes += drift;
+  }
+
+  const merged: Array<{ kind: K; minutes: number }> = [];
+  for (const chunk of rounded) {
+    if (chunk.minutes <= 0) continue;
+    const prev = merged[merged.length - 1];
+    if (chunk.minutes < MIN_TASK_MINUTES && prev) {
+      prev.minutes += chunk.minutes;
+    } else {
+      merged.push({ ...chunk });
+    }
+  }
+  return merged;
+}
+
+/**
+ * Pack the first pass under Rule A: a slice of reading, then the pacing
+ * multiple times that slice in questions, same unit, same sitting.
+ *
+ * `multiple` is the PACING multiple, not the budget one. The budget already
+ * shaped each unit's questionDebt back in reconcile; this is the rhythm inside
+ * the day, and it is why a 120 minute evening opens with 40 minutes of reading.
+ *
+ * Keeps packDays's weekly carry: an underfilled day lends its unused minutes to
+ * the days after it, because the budget that has to hold is the WEEK's, reset
+ * every seventh day so a quiet week cannot fund a brutal one a fortnight later.
+ * A day may reach at most twice its own nominal figure, since lending is meant
+ * to smooth a lumpy unit across a week, not turn a two hour Tuesday into a six
+ * hour one.
+ *
+ * Unlike packDays this needs no indivisible-task escape and no vignette
+ * boundary splitting, because every slice is computed to fit the room left.
+ * Vignette ranges are derived from the minute fraction and a vignette may
+ * therefore span two days, which is what the candidate asked for when they
+ * wrote "one third of the questions".
+ */
+export function packFirstPass(
+  units: ReconciledUnit[],
+  cal: Calendar,
+  multiple: number,
+  t: Tuning,
+): PlannedDay[] {
+  const states = units.map(initState);
+  const days: PlannedDay[] = [];
+
+  const startDate = fromISODate(cal.startDate);
+  const endDate = addDays(startDate, cal.horizonDays - 1);
+
+  let cursor = 0;
+  let carry = 0;
+  let dayIndex = 0;
+  let current = startDate;
+
+  while (current <= endDate) {
+    const date = toISODate(current);
+    const available = availableMinutesOn(cal, date);
+
+    if (dayIndex % 7 === 0) carry = 0;
+    dayIndex++;
+
+    if (available <= 0) {
+      // A day the candidate said they cannot study is not an underfilled one,
+      // so it lends nothing.
+      days.push({ date, tasks: [] });
+      current = addDays(current, 1);
+      continue;
+    }
+
+    const capacity = Math.max(0, Math.min(available + carry, available * 2));
+    const tasks: PlannedTask[] = [];
+    let remaining = capacity;
+
+    while (cursor < states.length && remaining >= MIN_TASK_MINUTES) {
+      const s = states[cursor];
+
+      if (s.readingLeft <= 0 && s.questionsLeft <= 0) {
+        cursor++;
+        continue;
+      }
+
+      // --- the reading slice ---
+      let readSlice = 0;
+      if (s.readingLeft > 0) {
+        readSlice = Math.min(s.readingLeft, Math.floor(remaining / (1 + multiple)));
+
+        if (!s.started && readSlice < t.minNewUnitReadMinutes) {
+          if (s.unit.readingDebt >= t.minNewUnitReadMinutes) {
+            // A bigger day can open this properly, and waiting one day is
+            // cheaper than starting a unit on four minutes of reading.
+            break;
+          }
+          // The unit's ENTIRE reading is under the floor, so waiting cannot
+          // help it and it has to go somewhere. Place it whole.
+          readSlice = s.readingLeft;
+        }
+
+        readSlice = Math.min(readSlice, remaining);
+      }
+
+      // --- the question slice ---
+      let questionSlice = 0;
+      if (s.questionsLeft > 0) {
+        const closesReading = readSlice >= s.readingLeft;
+        questionSlice = closesReading
+          ? // Flush: a closing unit empties its bank in the same sitting rather
+            // than leaving a stub to orphan a later day.
+            Math.min(s.questionsLeft, remaining - readSlice)
+          : Math.min(s.questionsLeft, Math.round(multiple * readSlice));
+        questionSlice = Math.max(0, Math.min(questionSlice, remaining - readSlice));
+      }
+
+      if (readSlice <= 0 && questionSlice <= 0) {
+        // Nothing placeable in the room left, and no progress is possible on
+        // this unit today. Advancing the cursor here would skip a unit that
+        // still owes work, so leave the day instead.
+        break;
+      }
+
+      // --- emit, reading before its questions, always ---
+      for (const chunk of drawChunks(s.readingByKind, readSlice)) {
+        tasks.push({
+          kind: chunk.kind,
+          readingIds: s.unit.readingRefs,
+          estimatedMinutes: chunk.minutes,
+          requiresConfidence: false,
+        });
+      }
+
+      if (questionSlice > 0) {
+        const count = Math.max(1, s.unit.vignetteCount);
+        const perVignette = s.questionMinutesTotal / count;
+        const from = perVignette > 0
+          ? Math.min(count - 1, Math.floor(s.questionMinutesDone / perVignette))
+          : 0;
+        const to = perVignette > 0
+          ? Math.min(
+              count - 1,
+              Math.max(
+                from,
+                Math.ceil((s.questionMinutesDone + questionSlice) / perVignette) - 1,
+              ),
+            )
+          : count - 1;
+        const isLast = questionSlice >= s.questionsLeft;
+
+        for (const chunk of drawChunks(s.questionsByKind, questionSlice)) {
+          tasks.push({
+            kind: chunk.kind,
+            readingIds: s.unit.readingRefs,
+            estimatedMinutes: chunk.minutes,
+            requiresConfidence: isLast,
+            mode: s.unit.calculationShare >= 0.35 ? "timed-drill" : "untimed-review",
+            vignetteFrom: from,
+            vignetteTo: to,
+          });
+        }
+        s.questionMinutesDone += questionSlice;
+      }
+
+      s.readingLeft -= readSlice;
+      s.questionsLeft -= questionSlice;
+      s.started = true;
+      remaining -= readSlice + questionSlice;
+
+      if (s.readingLeft <= 0 && s.questionsLeft <= 0) cursor++;
+    }
+
+    const used = tasks.reduce((sum, task) => sum + task.estimatedMinutes, 0);
+    carry = carry + available - used;
+    days.push({ date, tasks });
+    current = addDays(current, 1);
+  }
+
+  return days;
 }

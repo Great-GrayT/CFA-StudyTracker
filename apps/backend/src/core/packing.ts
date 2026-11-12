@@ -67,7 +67,9 @@ const WEEKDAY_KEYS: Array<keyof { mon: 0; tue: 1; wed: 2; thu: 3; fri: 4; sat: 5
   "sat",
 ];
 
-const MIN_TASK_MINUTES = 15;
+// Exported so pairing.ts holds to the same floor. A candidate handed a
+// three minute task reads it as noise whichever engine produced it.
+export const MIN_TASK_MINUTES = 15;
 
 // Get ISO date string from a Date
 function toISODate(d: Date): string {
