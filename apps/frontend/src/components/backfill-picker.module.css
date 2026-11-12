@@ -49,27 +49,8 @@
   margin: 0 0 var(--space-4);
 }
 
-.confidence {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: var(--space-2);
-}
 
-.conf,
-.confOn {
-  min-height: 44px;
-  border: 1px solid var(--rule-strong);
-  border-radius: var(--radius-input);
-  background: var(--ground);
-  color: var(--muted);
-  font-weight: 600;
-}
 
-.confOn {
-  background: var(--step);
-  border-color: var(--step);
-  color: var(--ground);
-}
 
 .tree {
   border: 1px solid var(--rule-strong);

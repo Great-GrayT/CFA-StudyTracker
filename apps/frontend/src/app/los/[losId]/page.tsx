@@ -7,6 +7,7 @@ import { AppShell } from "@/components/app-shell";
 import { usePlan, useCurriculum, useLogs, usePackages, flattenCurriculum } from "@/lib/hooks";
 import styles from "./los.module.css";
 import dynamic from "next/dynamic";
+import { ConfidenceMeter } from "@/components/confidence";
 
 // Loaded on demand: the sheet renders nothing until it is opened, so its
 // virtualized outcome list has no business in this route's first load.
@@ -125,8 +126,8 @@ export default function LosPage({ params }: { params: Promise<{ losId: string }>
               <>
                 <Sparkline values={[...mine].reverse().map((l) => l.confidence)} />
                 <p className={styles.metricMeta}>
-                  {mine.length} {plural.select(mine.length) === "one" ? "rating" : "ratings"},
-                  latest {latest?.confidence} of 5
+                  {latest ? <ConfidenceMeter value={latest.confidence} label="Latest" /> : null}
+                  {mine.length} {plural.select(mine.length) === "one" ? "rating" : "ratings"}
                 </p>
               </>
             )}
@@ -210,7 +211,9 @@ export default function LosPage({ params }: { params: Promise<{ losId: string }>
                 {mine.map((l) => (
                   <tr key={l.id}>
                     <th scope="row">{new Date(l.date).toLocaleDateString()}</th>
-                    <td>{l.confidence} of 5</td>
+                    <td>
+                      <ConfidenceMeter value={l.confidence} />
+                    </td>
                     <td>
                       {l.questionsAnswered > 0
                         ? `${l.questionsCorrect} of ${l.questionsAnswered}`

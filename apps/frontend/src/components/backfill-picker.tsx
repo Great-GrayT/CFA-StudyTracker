@@ -6,6 +6,7 @@ import { flattenCurriculum } from "@/lib/hooks";
 import { hoursBetween, startOfUTCDay } from "@/lib/pace";
 import type { Curriculum, WeeklyAvailability } from "@/lib/types";
 import styles from "./backfill-picker.module.css";
+import { ConfidenceMeter, ConfidencePicker } from "./confidence";
 
 // Declaring what you have already covered.
 //
@@ -17,7 +18,6 @@ import styles from "./backfill-picker.module.css";
 
 export type BackfillEntry = { losId: string; confidence: number; questionsAnswered: number };
 
-const CONFIDENCE = [1, 2, 3, 4, 5] as const;
 const fmt = new Intl.NumberFormat("en");
 const plural = new Intl.PluralRules("en");
 
@@ -124,21 +124,12 @@ export function BackfillPicker({
 
       <fieldset className={styles.confidenceWrap}>
         <legend className={styles.label}>Confidence for what you mark</legend>
-        <div className={styles.confidence} role="radiogroup" aria-label="Confidence, 1 to 5">
-          {CONFIDENCE.map((c) => (
-            <button
-              key={c}
-              type="button"
-              role="radio"
-              aria-checked={confidence === c}
-              className={confidence === c ? styles.confOn : styles.conf}
-              style={{ ["--step" as string]: `var(--conf-${Math.min(4, c - 1) + 1})` }}
-              onClick={() => setConfidence(c)}
-            >
-              {c}
-            </button>
-          ))}
-        </div>
+        <ConfidencePicker
+          name="backfill-confidence"
+          value={confidence}
+          onChange={setConfidence}
+          legend="Confidence for what you mark"
+        />
       </fieldset>
 
       {mode === "reading" ? (
@@ -223,7 +214,16 @@ export function BackfillPicker({
           <span className="tnum">{fmt.format(value.length)}</span> of{" "}
           <span className="tnum">{fmt.format(totalOutcomes)}</span>{" "}
           {plural.select(totalOutcomes) === "one" ? "outcome" : "outcomes"} marked
-          {value.length > 0 ? `, average confidence ${avgConfidence.toFixed(1)}` : ""}.
+          {value.length > 0 ? (
+            <>
+              , average confidence{" "}
+              {/* The fractional case this component exists for: an average of
+                  several ratings is rarely a whole number, and rounding 3.5 up
+                  to 4 overstates what was marked. */}
+              <ConfidenceMeter value={avgConfidence} label="Average confidence" />
+            </>
+          ) : null}
+          .
         </p>
         {standing && (
           <p className={styles.tallyMeta}>

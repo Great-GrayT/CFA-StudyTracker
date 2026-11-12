@@ -8,6 +8,7 @@ import { toISODate, startOfUTCDay } from "@/lib/pace";
 import type { Curriculum, StudyPackage } from "@/lib/types";
 import { ApiError } from "@/lib/api";
 import styles from "./composer.module.css";
+import { ConfidencePicker } from "./confidence";
 
 // Logging a session.
 //
@@ -15,7 +16,6 @@ import styles from "./composer.module.css";
 // the study-next list and offered no alternative, which left the product's core
 // verb unreachable for any outcome the list did not happen to suggest.
 
-const CONFIDENCE = [1, 2, 3, 4, 5] as const;
 
 export function Composer({
   open,
@@ -206,21 +206,11 @@ export function Composer({
 
           <fieldset className={styles.fieldset}>
             <legend className={styles.label}>Confidence</legend>
-            <div className={styles.confidence} role="radiogroup" aria-label="Confidence, 1 to 5">
-              {CONFIDENCE.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  role="radio"
-                  aria-checked={confidence === c}
-                  className={confidence === c ? styles.confOn : styles.conf}
-                  onClick={() => setConfidence(c)}
-                  style={{ ["--step" as string]: `var(--conf-${Math.min(4, c - 1) + 1})` }}
-                >
-                  {c}
-                </button>
-              ))}
-            </div>
+            <ConfidencePicker
+              name="composer-confidence"
+              value={confidence}
+              onChange={setConfidence}
+            />
           </fieldset>
 
           <div className={styles.pair}>
