@@ -17,6 +17,7 @@ import type {
   Los,
   Prescription,
 } from "./types";
+import type { Campaign } from "./campaign-types";
 
 export const keys = {
   plan: ["plan"] as const,
@@ -32,6 +33,8 @@ export const keys = {
   devices: ["devices"] as const,
   prescription: (planId: string, from: string, to: string) =>
     ["prescription", planId, from, to] as const,
+  campaign: (planId: string, periodDays: number) =>
+    ["campaign", planId, periodDays] as const,
 };
 
 /**
@@ -53,6 +56,32 @@ export function usePrescription(
         `plans/${encodeURIComponent(planId!)}/tasks?from=${from}&to=${to}`,
       ),
     enabled: !!planId,
+  });
+}
+
+/**
+ * The whole run to the exam, in periods.
+ *
+ * Fetched once and held, never per render: the projection runs the planner's
+ * entire pipeline over every remaining day, which for a 21 week plan is
+ * roughly 150 days of packing. It writes nothing, so it is safe to call; it
+ * is just expensive. Only an actual plan change makes it stale, and saving
+ * one already invalidates this key.
+ */
+export function useCampaign(
+  planId: string | undefined,
+  periodDays = 7,
+): UseQueryResult<Campaign> {
+  return useQuery({
+    queryKey: keys.campaign(planId ?? "", periodDays),
+    queryFn: () =>
+      api.get<Campaign>(
+        `plans/${encodeURIComponent(planId!)}/campaign?periodDays=${periodDays}`,
+      ),
+    enabled: !!planId,
+    staleTime: 30 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
   });
 }
 

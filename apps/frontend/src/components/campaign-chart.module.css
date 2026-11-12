@@ -48,6 +48,9 @@
 /* The plot. Wide spans scroll inside their own box; the page never does. */
 .plotWrap {
   overflow-x: auto;
+  /* Only sideways. Without this the absolutely positioned axis labels gave
+     the box a vertical scrollbar of its own. */
+  overflow-y: hidden;
   overscroll-behavior-x: contain;
 }
 
@@ -147,21 +150,50 @@
 }
 
 .axis {
+  position: relative;
   display: flex;
   gap: 3px;
   min-width: 100%;
+  /* Its labels are absolutely positioned so they can spill past their own
+     column, so the row needs a height of its own or it collapses to nothing
+     and the axis disappears. */
+  height: 18px;
+  margin-top: var(--space-1);
 }
 
 .tick {
+  position: relative;
   min-width: 18px;
   flex: 1 1 18px;
   font-size: 11px;
   color: var(--muted);
-  text-align: center;
-  /* Only some periods are labelled; the rest hold their column's width so
-     the ticks stay under their bars. */
-  overflow: hidden;
   white-space: nowrap;
+  /* Only some periods are labelled; the rest hold their column's width so
+     the labels stay under their own bars. The label is wider than its
+     column and is allowed to spill, centred on the column, rather than
+     being clipped to the middle few characters: "12 Nov" inside an 18px
+     box showed as "Nov". */
+  overflow: visible;
+}
+
+.tick > span {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+/* The first and last labels are centred on columns at the very edge, so half
+   of each would spill outside the plot and be cut: the first read "ov 12".
+   They anchor to their own edge instead. */
+.tickFirst > span {
+  left: 0;
+  transform: none;
+}
+
+.tickLast > span {
+  left: auto;
+  right: 0;
+  transform: none;
 }
 
 /* Hover and focus readout. Not a floating tooltip: on a phone there is no

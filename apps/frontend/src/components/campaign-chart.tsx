@@ -70,13 +70,18 @@ export function CampaignChart({ campaign }: { campaign: Campaign | undefined }) 
     );
   }
 
-  const shown = active ?? campaign.periods.length - 1;
+  // Defaults to the period the candidate is in, not the last one. The last
+  // is usually empty on a plan that finishes early, so the readout opened
+  // saying "0" about a week in May.
+  const shown = active ?? 0;
   const period = campaign.periods[shown];
   const total = periodTotal(period);
 
   // Label roughly every fourth period, so the axis stays readable over a
   // thirty week span instead of turning into a grey smear.
   const labelEvery = Math.max(1, Math.ceil(campaign.periods.length / 8));
+
+  const hasMocks = campaign.periods.some((p) => (p.minutes.mocks ?? 0) > 0);
 
   const shortfall =
     campaign.calendarTooShort ||
@@ -149,8 +154,17 @@ export function CampaignChart({ campaign }: { campaign: Campaign | undefined }) 
 
         <div className={styles.axis} aria-hidden="true">
           {campaign.periods.map((p, i) => (
-            <span key={p.start} className={styles.tick}>
-              {i % labelEvery === 0 ? shortDate(p.start) : ""}
+            <span
+              key={p.start}
+              className={`${styles.tick} ${
+                i === 0
+                  ? styles.tickFirst
+                  : i === campaign.periods.length - 1
+                    ? styles.tickLast
+                    : ""
+              }`}
+            >
+              {i % labelEvery === 0 ? <span>{shortDate(p.start)}</span> : null}
             </span>
           ))}
         </div>
@@ -186,6 +200,17 @@ export function CampaignChart({ campaign }: { campaign: Campaign | undefined }) 
           })}
         </dl>
       </div>
+
+      {/* Said plainly rather than left for someone to discover: the engine
+          counts a logged mock as a flat three hours because MockExam stores
+          a score and a date and never a duration. The band is real, its
+          height is nominal. */}
+      {hasMocks ? (
+        <p className={styles.caption}>
+          Mock exams are counted at a nominal 3 hours each; the app does not record how
+          long one actually took.
+        </p>
+      ) : null}
 
       {/* Grouped by phase, because the pairing is what the chart is for. */}
       <dl className={styles.legend}>

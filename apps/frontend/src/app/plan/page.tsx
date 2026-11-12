@@ -9,6 +9,7 @@ import {
   usePlanPackages,
   usePackages,
   usePrescription,
+  useCampaign,
 } from "@/lib/hooks";
 import { Icon } from "@/components/icons";
 import { CampaignChart } from "@/components/campaign-chart";
@@ -37,6 +38,9 @@ export default function PlanPage() {
   const logs = useLogs(planId);
   const holidays = useHolidays(planId);
   const prescription = usePrescription(planId, weekDates[0], weekDates[6]);
+  // Fetched once and held: the projection runs the planner's whole pipeline
+  // over every day left before the exam.
+  const campaign = useCampaign(planId, 7);
   const selectedDay = prescription.data?.days.find((d) => d.date === selectedDate);
   const weekDays = useMemo(
     () =>
@@ -297,7 +301,7 @@ export default function PlanPage() {
 
         {tab === "view" ? (
           <div id="panel-view" role="tabpanel" aria-labelledby="tab-view">
-            <CampaignChart campaign={undefined} />
+            <CampaignChart campaign={campaign.data} />
             <WeekStrip
               week={weekDays}
               selected={selectedDate}

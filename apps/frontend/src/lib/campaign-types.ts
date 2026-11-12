@@ -39,8 +39,13 @@ export type Campaign = {
   /** The ratio the calendar can actually reach. */
   budgetQuestionMultiple: number;
   calendarTooShort: boolean;
-  planMode: "effort-return" | "curriculum-strict" | "curriculum-topic";
-  reviewPolicy: "decay-triggered" | "after-coverage" | "weekly-interleave" | "fixed-date";
+  /** "effort-return" | "curriculum-strict" | "curriculum-topic" today. Typed
+      as a string because that is what the API guarantees; claiming a union
+      the server does not enforce would be false confidence. */
+  planMode: string;
+  /** "decay-triggered" (default) | "after-coverage" | "weekly-interleave"
+      | "fixed-date". */
+  reviewPolicy: string;
 };
 
 /**
