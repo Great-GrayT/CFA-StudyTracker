@@ -320,6 +320,34 @@ function drawChunks<K extends string>(
 }
 
 /**
+ * Collapse neighbouring tasks that are the same kind on the same unit.
+ *
+ * One pass over a unit can place reading twice in a day: once paired with its
+ * questions, then again to mop up once the bank is dry. Both are correct
+ * scheduling and both are confusing to read, because "watch the Equity video
+ * for 40 minutes" twice in one evening looks like a duplicated row rather than
+ * eighty minutes of video. Only ADJACENT tasks merge, so a genuine
+ * reading, questions, reading sequence keeps its shape.
+ */
+function collapseAdjacent(tasks: PlannedTask[]): PlannedTask[] {
+  const out: PlannedTask[] = [];
+  for (const task of tasks) {
+    const prev = out[out.length - 1];
+    const sameUnit = prev && prev.readingIds[0] === task.readingIds[0];
+    if (prev && sameUnit && prev.kind === task.kind) {
+      prev.estimatedMinutes += task.estimatedMinutes;
+      prev.requiresConfidence = prev.requiresConfidence || task.requiresConfidence;
+      if (task.vignetteTo !== undefined) {
+        prev.vignetteTo = Math.max(prev.vignetteTo ?? 0, task.vignetteTo);
+      }
+      continue;
+    }
+    out.push({ ...task });
+  }
+  return out;
+}
+
+/**
  * Pack the first pass under Rule A: a slice of reading, then the pacing
  * multiple times that slice in questions, same unit, same sitting.
  *
@@ -388,6 +416,25 @@ export function packFirstPass(
       let readSlice = 0;
       if (s.readingLeft > 0) {
         readSlice = Math.min(s.readingLeft, Math.floor(remaining / (1 + multiple)));
+
+        // The mirror of the flush below, and the fix for a defect found by
+        // reading a real generated plan rather than by any assertion: a 108
+        // minute Wednesday held six reading tasks for one reading, at 40, 24,
+        // 16, 10, 7 and 3 minutes.
+        //
+        // The cause is that reserving (multiple / (1 + multiple)) of the day
+        // for questions only makes sense while there are questions to put
+        // there. Once the bank cannot fill the paired share, the reserved room
+        // goes back to reading, and the loop would otherwise come round to the
+        // same unit and take a third of what was left, again and again.
+        //
+        // So when this unit's remaining questions cannot fill the slice's
+        // paired share, reading takes everything the day has except those
+        // questions, in one task. A day then reads as one sitting on one piece
+        // of material instead of a shrinking series that looks like noise.
+        if (s.questionsLeft <= multiple * readSlice) {
+          readSlice = Math.min(s.readingLeft, Math.max(readSlice, remaining - s.questionsLeft));
+        }
 
         if (!s.started && readSlice < t.minNewUnitReadMinutes) {
           if (s.unit.readingDebt >= t.minNewUnitReadMinutes) {
@@ -471,9 +518,10 @@ export function packFirstPass(
       if (s.readingLeft <= 0 && s.questionsLeft <= 0) cursor++;
     }
 
-    const used = tasks.reduce((sum, task) => sum + task.estimatedMinutes, 0);
+    const collapsed = collapseAdjacent(tasks);
+    const used = collapsed.reduce((sum, task) => sum + task.estimatedMinutes, 0);
     carry = carry + available - used;
-    days.push({ date, tasks });
+    days.push({ date, tasks: collapsed });
     current = addDays(current, 1);
   }
 

@@ -331,3 +331,55 @@ test("every unit in the sequence is eventually placed, given enough calendar", (
   const placed = new Set(days.flatMap((d) => d.tasks).map((t) => t.readingIds[0]));
   expect(placed.size).toBe(units.length);
 });
+
+test("a unit whose questions have run dry takes its remaining reading in one task, not a shrinking series", () => {
+  // Found by eyeballing a real generated plan: a 108 minute Wednesday held six
+  // content-video tasks for the same reading, at 40, 24, 16, 10, 7 and 3
+  // minutes. With no questions left to pair, each pass took a third of what
+  // remained and looped on the same unit, so the day fragmented geometrically.
+  const days = packFirstPass(
+    [recon("dry", { read: 300, questions: 40 })],
+    calendarOf([120, 120, 120]),
+    2,
+    T,
+  );
+
+  for (const day of days) {
+    const readingTasks = day.tasks.filter((t) => t.kind !== "questions");
+    expect(readingTasks.length, `${day.date} fragmented into ${readingTasks.length} reading tasks`)
+      .toBeLessThanOrEqual(1);
+  }
+});
+
+test("the reading-only mirror of the flush fills the day rather than a third of it", () => {
+  const days = packFirstPass(
+    [recon("r", { read: 300, questions: 0 }, { questionDebt: 0, pairing: "reading-only" })],
+    calendarOf([120]),
+    2,
+    T,
+  );
+  expect(summarise(days[0])).toEqual([
+    { kind: "content-notes", ref: "r", minutes: 120 },
+  ]);
+});
+
+test("a day never holds more reading tasks than the unit has kinds of reading", () => {
+  const spanning = recon(
+    "x",
+    { read: 0, questions: 0 },
+    {
+      noteMinutes: 100,
+      videoMinutes: 100,
+      seminarMinutes: 100,
+      questionMinutes: 20,
+      readingDebt: 300,
+      questionDebt: 20,
+      vignetteCount: 2,
+    },
+  );
+  const days = packFirstPass([spanning], calendarOf([150, 150, 150]), 2, T);
+  for (const day of days) {
+    const readingTasks = day.tasks.filter((t) => t.kind !== "questions");
+    expect(readingTasks.length).toBeLessThanOrEqual(3);
+  }
+});

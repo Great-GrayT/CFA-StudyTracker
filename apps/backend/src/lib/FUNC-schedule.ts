@@ -61,9 +61,16 @@ const QUESTION_TASK_KINDS = new Set(["questions", "eocq"]);
 /**
  * Minutes of reading and of questions already completed, per unit.
  *
- * Uses actualMinutes where the candidate recorded one and the estimate
- * otherwise, because a debt should be settled by the time really spent, not by
- * what the plan guessed it would take.
+ * Settled in ESTIMATED minutes, deliberately, not in the minutes the candidate
+ * actually spent. A debt here is a quantity of MATERIAL that happens to be
+ * denominated in minutes, and the estimate is what says how much material a
+ * task covered. Actual minutes say how long it took, which is a statement about
+ * pace, and pace is calibration's job.
+ *
+ * Crediting actual minutes conflates the two, and the test for pace
+ * recalibration caught it: a task estimated at 60 minutes that took 240 settled
+ * 240 minutes of debt against a reading holding 180, so one slow session marked
+ * a whole reading finished. Going slowly is not covering more ground.
  */
 async function loadWorkDone(
   planId: string,
@@ -76,7 +83,7 @@ async function loadWorkDone(
   const [done, declared] = await Promise.all([
     db.planTask.findMany({
       where: { planId, status: "done" },
-      select: { kind: true, readingIds: true, estimatedMinutes: true, actualMinutes: true },
+      select: { kind: true, readingIds: true, estimatedMinutes: true },
     }),
     // A candidate who told us at onboarding that they have read a topic area
     // has settled its reading debt as surely as a completed task would, and
@@ -103,7 +110,7 @@ async function loadWorkDone(
   const questionsDoneByRef = new Map<string, number>();
 
   for (const task of done) {
-    const minutes = task.actualMinutes ?? task.estimatedMinutes;
+    const minutes = task.estimatedMinutes;
     if (minutes <= 0) continue;
     const target = READING_TASK_KINDS.has(task.kind)
       ? readingDoneByRef
@@ -895,6 +902,19 @@ export async function generateHorizon(
     // means no cap.
     const requestedCap = reviewPhase.active ? Math.min(1, Math.max(0, reviewPhase.cap)) : 0;
     const cap = queue.length === 0 ? 0 : requestedCap;
+
+    // The reason reaches the settings screen, so it has to say why the cap is
+    // what it IS, not why the policy would have set it. An empty queue
+    // overrides the policy entirely, and reporting "no realised pace yet" when
+    // the real answer is "nothing has been read yet" sends the candidate
+    // looking for a pace problem they do not have.
+    if (queue.length === 0 && requestedCap > 0) {
+      reviewPhase = {
+        active: false,
+        cap: 0,
+        reason: "nothing has been read once yet, so there is nothing to review",
+      };
+    }
 
     const firstPassDays =
       cap >= 1
