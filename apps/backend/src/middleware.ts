@@ -37,6 +37,9 @@ function tierFor(pathname: string): Tier {
   if (
     pathname === "/api/auth/login" ||
     pathname === "/api/auth/password" ||
+    // Takes a password or a two-step code, so it is a route someone will try
+    // credentials against, and the thing behind it cannot be undone.
+    pathname === "/api/auth/account/delete" ||
     pathname.startsWith("/api/auth/oauth/")
   ) {
     return LOGIN_TIER;

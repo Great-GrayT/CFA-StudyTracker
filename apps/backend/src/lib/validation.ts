@@ -156,6 +156,29 @@ export const priorWorkSchema = z.object({
   declarations: z.array(priorWorkDeclarationSchema).max(50),
 });
 
+/**
+ * Deleting an account.
+ *
+ * The phrase is checked HERE, with z.literal, so an invalid body and a
+ * mistyped phrase are the same rejection and neither reaches the credential
+ * check. It must match exactly: no trimming, no case folding. Accepting
+ * "Delete My Account" would mean accepting that the candidate was pattern
+ * matching rather than reading, which is the one thing the phrase exists to
+ * rule out.
+ *
+ * All three credentials are optional because which one is REQUIRED depends on
+ * what the account has, and only the route knows that. Checking it here would
+ * have to duplicate that logic and the two copies would drift.
+ */
+export const DELETE_ACCOUNT_PHRASE = "delete my account";
+
+export const deleteAccountSchema = z.object({
+  confirmation: z.literal(DELETE_ACCOUNT_PHRASE),
+  password: z.string().optional(),
+  totpCode: z.string().optional(),
+  recoveryCode: z.string().optional(),
+});
+
 export const createHolidaySchema = z.object({
   startDate: z.coerce.date(),
   endDate: z.coerce.date(),

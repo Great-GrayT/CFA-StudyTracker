@@ -12,6 +12,7 @@ import { SecuritySettings } from "@/components/security-settings";
 import { CoachSettings, LocationSettings } from "@/components/coach-settings";
 import { PlannerSettings } from "@/components/planner-settings";
 import { PriorWork } from "@/components/prior-work";
+import { DeleteAccount } from "@/components/delete-account";
 
 const numbers = new Intl.NumberFormat("en");
 const plural = new Intl.PluralRules("en");
@@ -347,6 +348,16 @@ export default function SettingsPage() {
             only picked up main's padding and sat 24px wider on each side than
             every other card on the screen. */}
         <SecuritySettings twoStepEnabled={user?.twoStepEnabled ?? false} />
+
+        {/* Last on the page, and collapsed. An irreversible action belongs at
+            the end of a settings screen, not beside the ones you change often. */}
+        {!userLoading && (
+          <DeleteAccount
+            hasPassword={user?.hasPassword ?? true}
+            twoStepEnabled={user?.twoStepEnabled ?? false}
+            counts={dataCounts}
+          />
+        )}
       </div>
     </AppShell>
   );

@@ -1,0 +1,166 @@
+/*
+ * Deleting an account.
+ *
+ * The card is the same as every other section. --alarm is spent on the button
+ * and the summary only, never on the card itself: tinting the whole panel red
+ * would make the bottom of a settings page look like an error state every time
+ * anyone scrolled past it, and the thing that is actually dangerous is the one
+ * button.
+ */
+
+.section {
+  background: var(--raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-input);
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.lede {
+  margin: 0;
+  max-width: 62ch;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.details {
+  border-top: 1px solid var(--rule);
+  padding-top: var(--space-4);
+}
+
+.summary {
+  width: fit-content;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--alarm-ink);
+  cursor: pointer;
+}
+
+.summary:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* The specific loss, not a generic warning. "This cannot be undone" is a phrase
+   people click past; a count of their own sessions is one they read. */
+.loss {
+  margin: var(--space-4) 0 0;
+  max-width: 62ch;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: var(--text);
+}
+
+.loss strong {
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.note {
+  margin: var(--space-3) 0 0;
+  max-width: 62ch;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.field {
+  margin-top: var(--space-4);
+  display: grid;
+  gap: var(--space-2);
+  max-width: 24rem;
+}
+
+.label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+}
+
+/* The phrase has to be transcribable, so it is set apart from the sentence
+   around it without being made into a code block. */
+.phrase {
+  padding: 1px var(--space-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-input);
+  background: var(--ground);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.input {
+  min-height: 44px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-input);
+  background: var(--ground);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.875rem;
+}
+
+.input:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.input:disabled {
+  opacity: 0.6;
+}
+
+.help {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.destroy {
+  min-height: 44px;
+  width: fit-content;
+  margin-top: var(--space-5);
+  padding: var(--space-2) var(--space-5);
+  border: 1px solid var(--alarm);
+  border-radius: var(--radius-pill);
+  background: var(--alarm);
+  color: #fff;
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.destroy:disabled {
+  /* Disabled until the phrase matches, which is most of the time this is on
+     screen, so it has to read as "not yet" rather than as broken. */
+  border-color: var(--rule);
+  background: transparent;
+  color: var(--muted);
+  cursor: default;
+}
+
+.destroy:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+@media (max-width: 560px) {
+  .field {
+    max-width: none;
+  }
+
+  .destroy {
+    width: 100%;
+  }
+}
