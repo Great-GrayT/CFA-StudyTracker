@@ -71,37 +71,47 @@ test("review video minutes are held back from the first pass entirely", () => {
   expect(questionMinutesOf(g)).toBe(60);
 });
 
-test("a roomy calendar gets the requested multiple", () => {
+test("pacing is the candidate's preference and the calendar never moves it", () => {
+  for (const available of [0, 600, 2580, 5000, 50_000]) {
+    expect(solveQuestionMultiple(1000, available, T).pacing).toBe(2);
+  }
+});
+
+test("a roomy calendar reaches past the requested ratio, so the whole bank stays in play", () => {
+  // The candidate's own topic 1 sits at 1 to 2.5 and their days consumed all of
+  // it. A budget capped at the requested 2.0 would have abandoned the rest.
   const r = solveQuestionMultiple(1000, 5000, T);
-  expect(r.effective).toBe(2);
+  expect(r.budget).toBeCloseTo(4, 10);
+  expect(r.budget).toBeGreaterThan(r.requested);
   expect(r.calendarTooShort).toBe(false);
 });
 
-test("a tight calendar gets the largest multiple that fits, reported against the request", () => {
+test("a tight calendar budgets the largest ratio that fits, reported against the request", () => {
   // R = 1000, A = 2580, so (A - R) / R = 1.58.
   const r = solveQuestionMultiple(1000, 2580, T);
-  expect(r.effective).toBeCloseTo(1.58, 10);
+  expect(r.budget).toBeCloseTo(1.58, 10);
   expect(r.requested).toBe(2);
+  expect(r.budget).toBeLessThan(r.requested);
   expect(r.calendarTooShort).toBe(false);
 });
 
 test("a calendar shorter than the reading alone clamps to the floor and flags, never goes negative", () => {
   const r = solveQuestionMultiple(1000, 600, T);
-  expect(r.effective).toBe(T.questionMultipleFloor);
-  expect(r.effective).toBeGreaterThan(0);
+  expect(r.budget).toBe(T.questionMultipleFloor);
+  expect(r.budget).toBeGreaterThan(0);
   expect(r.calendarTooShort).toBe(true);
 });
 
 test("a zero-availability calendar clamps to the floor and flags", () => {
   const r = solveQuestionMultiple(1000, 0, T);
-  expect(r.effective).toBe(T.questionMultipleFloor);
+  expect(r.budget).toBe(T.questionMultipleFloor);
   expect(r.calendarTooShort).toBe(true);
 });
 
 test("zero reading minutes does not divide by zero", () => {
   const r = solveQuestionMultiple(0, 500, T);
-  expect(Number.isFinite(r.effective)).toBe(true);
-  expect(r.effective).toBe(2);
+  expect(Number.isFinite(r.budget)).toBe(true);
+  expect(r.budget).toBe(2);
 });
 
 test("a fresh unit owes all its reading and multiple times its reading in questions", () => {

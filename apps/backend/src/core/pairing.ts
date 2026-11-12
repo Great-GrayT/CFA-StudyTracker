@@ -44,45 +44,67 @@ export function questionMinutesOf(g: PackableGroup): number {
   return g.questionMinutes + g.eocqMinutes;
 }
 
+export type SolvedRatio = {
+  /** Question minutes per minute of reading, within a single sitting. */
+  pacing: number;
+  /** Question minutes per minute of reading, as a ceiling on the whole plan. */
+  budget: number;
+  /** What the candidate asked for, for display when the budget falls short. */
+  requested: number;
+  /** True when even questionMultipleFloor cannot be afforded. */
+  calendarTooShort: boolean;
+};
+
 /**
- * The largest practice multiple this calendar can actually afford.
+ * Two multiples, not one.
  *
- * Reading minutes R are fixed by the curriculum and a unit costs R + m*R, so
- * the calendar affords m = (A - R) / R. The ratio bends rather than the
- * coverage: trimming units would finish the plan having never opened
- * Derivatives, which is worse than practising everything slightly less.
+ * The spec conflated these and the candidate's own worked example proves they
+ * are different. Topic 1 holds 56 minutes of reading against 140 of questions,
+ * a ratio of 2.5, and their three days consume all 140. A single multiple
+ * capped at the requested 2.0 would have scheduled 112 and silently abandoned
+ * 28 minutes of the bank.
  *
- * Clamped below at questionMultipleFloor, beneath which a plan is not a study
- * plan and the candidate needs to be told the calendar is too short rather
- * than handed a ratio that pretends otherwise.
+ * `pacing` is the rule inside a sitting: read for a while, then answer
+ * questions for twice that long. It is the candidate's preference and the
+ * calendar never changes it.
+ *
+ * `budget` is how much of the question bank the calendar can reach at all.
+ * Reading minutes R are fixed by the curriculum and the plan costs R plus its
+ * question minutes, so the calendar affords (A - R) / R question minutes per
+ * minute of reading. On a roomy calendar this exceeds the requested pacing and
+ * the whole bank is reachable. On a tight one it falls below, and each unit's
+ * question target is trimmed to fit: the ratio bends rather than the coverage,
+ * because finishing the plan having never opened Derivatives is worse than
+ * practising everything slightly less.
+ *
+ * `budget` is clamped below at questionMultipleFloor, beneath which a plan is
+ * not a study plan and the candidate needs to be told the calendar is too
+ * short rather than handed a ratio that pretends otherwise.
  */
 export function solveQuestionMultiple(
   readingMinutes: number,
   availableMinutes: number,
   t: Tuning,
-): { effective: number; requested: number; calendarTooShort: boolean } {
+): SolvedRatio {
   const requested = t.firstPassQuestionMultiple;
 
   // No reading at all means nothing to pair against, so there is no ratio to
   // solve and no division to attempt.
   if (readingMinutes <= 0) {
-    return { effective: requested, requested, calendarTooShort: false };
+    return { pacing: requested, budget: requested, requested, calendarTooShort: false };
   }
 
   const affordable = (availableMinutes - readingMinutes) / readingMinutes;
   if (affordable < t.questionMultipleFloor) {
     return {
-      effective: t.questionMultipleFloor,
+      pacing: requested,
+      budget: t.questionMultipleFloor,
       requested,
       calendarTooShort: true,
     };
   }
 
-  return {
-    effective: Math.min(requested, affordable),
-    requested,
-    calendarTooShort: false,
-  };
+  return { pacing: requested, budget: affordable, requested, calendarTooShort: false };
 }
 
 /**
@@ -109,7 +131,7 @@ export function reconcile(
   logsByRef: Map<string, MasteryObservation[]>,
   readingDoneByRef: Map<string, number>,
   questionsDoneByRef: Map<string, number>,
-  multiple: number,
+  budgetMultiple: number,
   asOf: Date,
   t: Tuning,
 ): {
@@ -127,10 +149,11 @@ export function reconcile(
 
     const readingDebt = Math.max(0, readingTotal - (readingDoneByRef.get(g.ref) ?? 0));
 
-    // The ratio wants multiple * readingTotal minutes of practice. The stock is
-    // a hard ceiling: the engine does not invent questions, and does not borrow
-    // another unit's.
-    const wanted = multiple * readingTotal;
+    // The budget allows budgetMultiple * readingTotal minutes of practice. The
+    // stock is a hard ceiling: the engine does not invent questions, and does
+    // not borrow another unit's. On a roomy calendar the budget exceeds the
+    // stock and the whole bank is owed; on a tight one it trims the target.
+    const wanted = budgetMultiple * readingTotal;
     const target = Math.min(questionStock, wanted);
     const questionDebt = Math.max(0, target - (questionsDoneByRef.get(g.ref) ?? 0));
 
