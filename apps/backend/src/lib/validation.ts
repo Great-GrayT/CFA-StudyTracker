@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TUNING_RANGES } from "../core/tuning";
 
 // A crafted far-future examDate would make pace.ts's remaining-hours math
 // (and anything iterating the plan's day span) churn for an unbounded span;
@@ -92,6 +93,18 @@ const locationSchema = z.object({
   timeZone: timeZoneSchema,
 });
 
+// Built from the engine's own range table rather than retyped, so a constant
+// added to core/tuning.ts cannot be forgotten here and silently rejected as an
+// unknown key. strict() is what turns a typo in a client into a 400 instead of
+// a setting that appears to save and never applies.
+export const tuningSchema = z
+  .object(
+    Object.fromEntries(
+      Object.keys(TUNING_RANGES).map((field) => [field, z.number().finite().optional()]),
+    ) as Record<keyof typeof TUNING_RANGES, z.ZodOptional<z.ZodNumber>>,
+  )
+  .strict();
+
 export const patchPlanSchema = z.object({
   examDate: examDateSchema.optional(),
   weeklyAvailability: weeklyAvailabilitySchema.optional(),
@@ -104,6 +117,24 @@ export const patchPlanSchema = z.object({
   pushCoach: z.enum(["all", "debrief-only", "off"]).optional(),
   // null clears it; omitted leaves it untouched.
   location: locationSchema.nullable().optional(),
+  // Which sequence the first pass follows, and when the review phase starts.
+  // Closed sets, matching core/tuning.ts, which is the only thing that reads
+  // them. An unrecognised value is a 400 rather than a silent fallback: a
+  // candidate who picked a mode from a list is entitled to get that mode or an
+  // error, never a different one.
+  planMode: z.enum(["effort-return", "curriculum-strict", "curriculum-topic"]).optional(),
+  reviewPolicy: z
+    .enum(["decay-triggered", "after-coverage", "weekly-interleave", "fixed-date"])
+    .optional(),
+  // null clears it. Only read under the fixed-date policy.
+  reviewStartDate: z.coerce.date().nullable().optional(),
+  // The planner constants. Shape is checked here, RANGE is not: a number
+  // outside its range is accepted, clamped by parseTuning and reported back,
+  // so one bad field in a settings form does not cost the candidate the good
+  // fields they changed in the same request. A key the engine does not read,
+  // or a value that is not a number, IS a 400, because both mean the client
+  // and the server disagree about what exists.
+  tuning: tuningSchema.optional(),
 });
 
 export const createHolidaySchema = z.object({
