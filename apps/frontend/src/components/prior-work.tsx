@@ -1,209 +1,451 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, ApiError, messageForStatus } from "@/lib/api";
 import { useCurriculum } from "@/lib/hooks";
-import type { Plan } from "@/lib/types";
+import type { Plan, Topic } from "@/lib/types";
+import { ConfidencePicker } from "./confidence";
 import styles from "./prior-work.module.css";
 
 // What the candidate had already studied before the plan took over.
 //
-// This lives in Settings rather than only in onboarding on purpose. A planner
-// that assumes nobody has deviated from it is a planner for a plan nobody has
-// used: people arrive having read three topic areas on their own, and they also
-// disappear for a fortnight in March and come back having ground question banks
-// instead of following the schedule. Both are the same problem, and a form that
-// only exists during sign-up can only solve the first.
+// Lives in Settings as well as onboarding: people arrive having studied on
+// their own, and they also go their own way for a fortnight mid-plan.
 //
-// Declared per topic area, because that is the resolution anyone remembers.
-// Nobody knows how many questions they answered against a particular learning
-// outcome; they know they have been through Quantitative Methods and got about
-// seven in ten right.
-//
-// Reading and questions are asked separately because they lead to opposite
-// plans. Material read but not practised earns question-only days. Material
-// practised but never read earns reading-only days, unless the practice was
-// good enough to prove the reading would teach nothing, in which case it is
-// dropped.
+// Declared per topic, because that is what anyone remembers, with an opening
+// into the topic's modules for the candidate who knows exactly which videos
+// they watched. Each kind of work names its material, because a Kaplan video
+// and a Meldrum video are the same coverage but a question bank is only
+// settled by questions answered in it.
 
-type Row = {
-  read: boolean;
-  questionsAnswered: string;
-  accuracyPercent: string;
+type SourceKind = "notes" | "videos" | "questions";
+type Source = { id: string; name: string };
+type PriorWorkData = { sources: Record<SourceKind, Source[]>; declarations: Declaration[] };
+
+type Declaration = {
+  topicId: string;
+  readingId: string | null;
+  notesFrom: string | null;
+  videosFrom: string | null;
+  questions: { from: string | null; answered: number; accuracyPercent: number | null } | null;
+  confidence: number | null;
 };
 
-const emptyRow: Row = { read: false, questionsAnswered: "", accuracyPercent: "" };
+/** One row of the form, kept as typed text until it is sent. */
+type Row = {
+  notesFrom: string;
+  videosFrom: string;
+  questionsFrom: string;
+  answered: string;
+  accuracy: string;
+  confidence: number;
+};
+
+// Work saved by the original form named no material.
+const UNATTRIBUTED = "unattributed";
+const NONE = "";
+const emptyRow: Row = { notesFrom: NONE, videosFrom: NONE, questionsFrom: NONE, answered: "", accuracy: "", confidence: 0 };
+
+function rowFrom(d: Declaration): Row {
+  return {
+    notesFrom: d.notesFrom ?? NONE,
+    videosFrom: d.videosFrom ?? NONE,
+    questionsFrom: d.questions ? (d.questions.from ?? UNATTRIBUTED) : NONE,
+    answered: d.questions ? String(d.questions.answered) : "",
+    accuracy: d.questions?.accuracyPercent != null ? String(d.questions.accuracyPercent) : "",
+    confidence: d.confidence ?? 0,
+  };
+}
+
+function declares(row: Row): boolean {
+  return row.notesFrom !== NONE || row.videosFrom !== NONE || row.questionsFrom !== NONE || row.confidence > 0;
+}
+
+function toDeclaration(topicId: string, readingId: string | null, row: Row): Declaration {
+  const answered = Number(row.answered) || 0;
+  const source = (v: string) => (v === NONE ? null : v);
+  return {
+    topicId,
+    readingId,
+    notesFrom: source(row.notesFrom),
+    videosFrom: source(row.videosFrom),
+    questions:
+      row.questionsFrom === NONE
+        ? null
+        : {
+            from: row.questionsFrom === UNATTRIBUTED ? null : row.questionsFrom,
+            answered,
+            accuracyPercent: answered > 0 && row.accuracy !== "" ? Number(row.accuracy) : null,
+          },
+    confidence: row.confidence > 0 ? row.confidence : null,
+  };
+}
+
+function SourceSelect({
+  id,
+  label,
+  value,
+  sources,
+  none,
+  disabled,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  sources: Source[];
+  none: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className={styles.field}>
+      <label className={styles.fieldLabel} htmlFor={id}>
+        {label}
+      </label>
+      <select id={id} className={styles.select} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
+        <option value={NONE}>{none}</option>
+        {sources.map((s) => (
+          <option key={s.id} value={s.id}>
+            {s.name}
+          </option>
+        ))}
+        {value === UNATTRIBUTED ? <option value={UNATTRIBUTED}>Source not given</option> : null}
+      </select>
+    </div>
+  );
+}
+
+function RowControls({
+  idBase,
+  row,
+  sources,
+  disabled,
+  onChange,
+}: {
+  idBase: string;
+  row: Row;
+  sources: Record<SourceKind, Source[]>;
+  disabled: boolean;
+  onChange: (patch: Partial<Row>) => void;
+}) {
+  const asking = row.questionsFrom !== NONE;
+  const answered = Number(row.answered) || 0;
+  return (
+    <div className={styles.controls}>
+      <SourceSelect
+        id={`${idBase}-notes`}
+        label="Notes read"
+        value={row.notesFrom}
+        sources={sources.notes}
+        none="Not yet"
+        disabled={disabled}
+        onChange={(notesFrom) => onChange({ notesFrom })}
+      />
+      {sources.videos.length > 0 || row.videosFrom !== NONE ? (
+        <SourceSelect
+          id={`${idBase}-videos`}
+          label="Videos watched"
+          value={row.videosFrom}
+          sources={sources.videos}
+          none="Not yet"
+          disabled={disabled}
+          onChange={(videosFrom) => onChange({ videosFrom })}
+        />
+      ) : null}
+      <SourceSelect
+        id={`${idBase}-questions`}
+        label="Questions from"
+        value={row.questionsFrom}
+        sources={sources.questions}
+        none="None yet"
+        disabled={disabled}
+        onChange={(questionsFrom) => onChange({ questionsFrom })}
+      />
+      {asking ? (
+        <>
+          <div className={styles.field}>
+            <label className={styles.fieldLabel} htmlFor={`${idBase}-answered`}>
+              Answered
+            </label>
+            <input
+              className={styles.number}
+              id={`${idBase}-answered`}
+              type="number"
+              inputMode="numeric"
+              min={0}
+              max={100000}
+              step={1}
+              placeholder="0"
+              value={row.answered}
+              disabled={disabled}
+              onChange={(e) => onChange({ answered: e.target.value })}
+            />
+          </div>
+          <div className={styles.field}>
+            <label className={styles.fieldLabel} htmlFor={`${idBase}-accuracy`}>
+              About how many right
+            </label>
+            <div className={styles.percentWrap}>
+              <input
+                className={styles.number}
+                id={`${idBase}-accuracy`}
+                type="number"
+                inputMode="numeric"
+                min={0}
+                max={100}
+                step={1}
+                placeholder="70"
+                value={row.accuracy}
+                disabled={disabled || answered === 0}
+                onChange={(e) => onChange({ accuracy: e.target.value })}
+              />
+              <span className={styles.percent}>%</span>
+            </div>
+          </div>
+        </>
+      ) : null}
+      <div className={styles.field}>
+        <span className={styles.fieldLabel} id={`${idBase}-confidence`}>
+          Confidence
+        </span>
+        <div className={styles.confidence}>
+          <ConfidencePicker
+            name={`${idBase}-confidence`}
+            legend="Confidence"
+            value={row.confidence}
+            onChange={(confidence) => onChange({ confidence })}
+          />
+          {row.confidence > 0 ? (
+            <button type="button" className={styles.textButton} disabled={disabled} onClick={() => onChange({ confidence: 0 })}>
+              Clear
+            </button>
+          ) : (
+            <span className={styles.hint}>Not rated</span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TopicRow({
+  topic,
+  rows,
+  overrides,
+  sources,
+  disabled,
+  update,
+  setOverride,
+}: {
+  topic: Topic;
+  rows: Record<string, Row>;
+  overrides: Set<string>;
+  sources: Record<SourceKind, Source[]>;
+  disabled: boolean;
+  update: (key: string, patch: Partial<Row>) => void;
+  setOverride: (readingId: string, on: boolean) => void;
+}) {
+  const modules = topic.readings.slice().sort((a, b) => a.order - b.order);
+  const ownCount = modules.filter((m) => overrides.has(m.id)).length;
+  const [open, setOpen] = useState(ownCount > 0);
+  const panelId = `prior-modules-${topic.id}`;
+
+  return (
+    <li className={styles.row}>
+      <fieldset className={styles.fieldset}>
+        <legend className={styles.topic}>{topic.name}</legend>
+        <RowControls
+          idBase={`prior-${topic.id}`}
+          row={rows[topic.id] ?? emptyRow}
+          sources={sources}
+          disabled={disabled}
+          onChange={(patch) => update(topic.id, patch)}
+        />
+      </fieldset>
+
+      {modules.length > 0 ? (
+        <button
+          type="button"
+          className={styles.disclosure}
+          aria-expanded={open}
+          aria-controls={panelId}
+          onClick={() => setOpen((v) => !v)}
+        >
+          {ownCount > 0 ? `Answer per module (${ownCount} set)` : "Answer per module"}
+        </button>
+      ) : null}
+
+      {open ? (
+        <ul id={panelId} className={styles.modules}>
+          {modules.map((m) => {
+            const own = overrides.has(m.id);
+            const toggleId = `prior-own-${m.id}`;
+            return (
+              <li key={m.id} className={styles.module}>
+                <div className={styles.check}>
+                  <input
+                    id={toggleId}
+                    type="checkbox"
+                    checked={own}
+                    disabled={disabled}
+                    aria-describedby={`${toggleId}-what`}
+                    onChange={(e) => setOverride(m.id, e.target.checked)}
+                  />
+                  <label htmlFor={toggleId}>{m.name}</label>
+                  <span id={`${toggleId}-what`} hidden>
+                    Answer for this module separately from its topic
+                  </span>
+                </div>
+                {own ? (
+                  <RowControls
+                    idBase={`prior-${m.id}`}
+                    row={rows[m.id] ?? emptyRow}
+                    sources={sources}
+                    disabled={disabled}
+                    onChange={(patch) => update(m.id, patch)}
+                  />
+                ) : (
+                  <p className={styles.hint}>Same as the topic.</p>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+    </li>
+  );
+}
 
 export function PriorWork({ plan, onSaved }: { plan: Plan; onSaved: () => void }) {
   const curriculum = useCurriculum(plan.levelId);
+  const saved = useQuery({
+    queryKey: ["prior-work", plan.id],
+    queryFn: () => api.get<PriorWorkData>(`plans/${plan.id}/prior-work`),
+  });
+  // Keyed by topic id or module (reading) id.
   const [rows, setRows] = useState<Record<string, Row>>({});
+  const [overrides, setOverrides] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState(false);
   const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!saved.data) return;
+    const next: Record<string, Row> = {};
+    const own = new Set<string>();
+    for (const d of saved.data.declarations) {
+      next[d.readingId ?? d.topicId] = rowFrom(d);
+      if (d.readingId) own.add(d.readingId);
+    }
+    setRows(next);
+    setOverrides(own);
+  }, [saved.data]);
 
   const topics = useMemo(
     () => (curriculum.data?.topics ?? []).slice().sort((a, b) => a.order - b.order),
     [curriculum.data],
   );
+  const sources = saved.data?.sources;
 
-  const declared = topics.filter((topic) => {
-    const row = rows[topic.id];
-    if (!row) return false;
-    return row.read || Number(row.questionsAnswered) > 0;
-  });
+  const declarations = useMemo(() => {
+    const out: Declaration[] = [];
+    for (const topic of topics) {
+      const row = rows[topic.id];
+      if (row && declares(row)) out.push(toDeclaration(topic.id, null, row));
+      // An overridden module is sent even when empty: it means "not this one".
+      for (const m of topic.readings) {
+        if (overrides.has(m.id)) out.push(toDeclaration(topic.id, m.id, rows[m.id] ?? emptyRow));
+      }
+    }
+    return out;
+  }, [topics, rows, overrides]);
+  const filled = new Set(declarations.map((d) => d.topicId)).size;
 
-  function update(topicId: string, patch: Partial<Row>) {
-    setRows((prev) => ({ ...prev, [topicId]: { ...emptyRow, ...prev[topicId], ...patch } }));
+  function update(key: string, patch: Partial<Row>) {
+    setRows((prev) => ({ ...prev, [key]: { ...emptyRow, ...prev[key], ...patch } }));
+  }
+
+  function setOverride(readingId: string, on: boolean) {
+    setOverrides((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(readingId);
+      else next.delete(readingId);
+      return next;
+    });
   }
 
   async function save() {
     setPending(true);
     try {
-      await api.post(`plans/${plan.id}/prior-work`, {
-        declarations: declared.map((topic) => {
-          const row = rows[topic.id] ?? emptyRow;
-          const answered = Number(row.questionsAnswered) || 0;
-          const accuracy = row.accuracyPercent === "" ? null : Number(row.accuracyPercent);
-          return {
-            topicId: topic.id,
-            read: row.read,
-            questionsAnswered: answered,
-            accuracyPercent: answered > 0 ? accuracy : null,
-          };
-        }),
-      });
+      await api.post(`plans/${plan.id}/prior-work`, { declarations });
       toast.success(
-        declared.length === 0
+        declarations.length === 0
           ? "Cleared what you had already studied."
           : "Saved. The days ahead have been replanned around it.",
       );
+      await saved.refetch();
       onSaved();
     } catch (err) {
-      toast.error(
-        err instanceof ApiError ? messageForStatus(err.status) : "Could not save that. Try again.",
-      );
+      toast.error(err instanceof ApiError ? messageForStatus(err.status) : "Could not save that. Try again.");
     } finally {
       setPending(false);
     }
   }
+
+  const loading = curriculum.isLoading || saved.isLoading;
+  const failed = curriculum.isError || saved.isError;
 
   return (
     <section className={styles.section}>
       <h2 className={styles.sectionTitle}>What you have already studied</h2>
       <p className={styles.lede}>
         Tell the planner what you got through before it took over, or during any stretch you went
-        your own way. It stops the plan asking you to read something twice, and it puts your
-        practice where there is already reading behind it.
+        your own way, and in which material. It stops the plan asking you to read or watch
+        something twice, and counts questions you already did in a bank it would otherwise set.
       </p>
 
       <details className={styles.details} open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
         <summary className={styles.summary}>
-          {declared.length === 0
-            ? "Add what you have done"
-            : `${declared.length} of ${topics.length} topic areas filled in`}
+          {filled === 0 ? "Add what you have done" : `${filled} of ${topics.length} topic areas filled in`}
         </summary>
 
-        {curriculum.isLoading && <p className={styles.note}>Loading the curriculum.</p>}
+        {loading && <p className={styles.note}>Loading the curriculum.</p>}
 
-        {curriculum.isError && (
+        {failed && (
           <p className={styles.note}>
-            The curriculum did not load, so there is nothing to declare against yet. Reload the
-            page to try again.
+            The curriculum or your saved answers did not load. Reload the page to try again.
           </p>
         )}
 
-        {!curriculum.isLoading && !curriculum.isError && topics.length === 0 && (
+        {!loading && !failed && topics.length === 0 && (
           <p className={styles.note}>
             The curriculum for your level has not been loaded yet, so there is nothing to declare
             against.
           </p>
         )}
 
-        {topics.length > 0 && (
+        {topics.length > 0 && sources && (
           <>
             <p className={styles.note}>
-              Rough figures are fine and far better than none. Leave a topic area blank if you have
-              not touched it.
+              Rough figures are fine and far better than none. Leave a topic blank if you have not
+              touched it. Open a topic&apos;s modules only if some of it differs.
             </p>
 
             <ul className={styles.list}>
-              {topics.map((topic) => {
-                const row = rows[topic.id] ?? emptyRow;
-                const answered = Number(row.questionsAnswered) || 0;
-                const readId = `prior-read-${topic.id}`;
-                const answeredId = `prior-answered-${topic.id}`;
-                const accuracyId = `prior-accuracy-${topic.id}`;
-
-                return (
-                  <li key={topic.id} className={styles.row}>
-                    <h3 className={styles.topic}>{topic.name}</h3>
-
-                    <div className={styles.controls}>
-                      <div className={styles.check}>
-                        <input
-                          id={readId}
-                          type="checkbox"
-                          checked={row.read}
-                          disabled={pending}
-                          onChange={(event) => update(topic.id, { read: event.target.checked })}
-                        />
-                        <label htmlFor={readId}>I have read it</label>
-                      </div>
-
-                      <div className={styles.field}>
-                        <label className={styles.fieldLabel} htmlFor={answeredId}>
-                          Questions answered
-                        </label>
-                        <input
-                          className={styles.number}
-                          id={answeredId}
-                          type="number"
-                          inputMode="numeric"
-                          min={0}
-                          max={100000}
-                          step={1}
-                          placeholder="0"
-                          value={row.questionsAnswered}
-                          disabled={pending}
-                          onChange={(event) =>
-                            update(topic.id, { questionsAnswered: event.target.value })
-                          }
-                        />
-                      </div>
-
-                      <div className={styles.field}>
-                        <label className={styles.fieldLabel} htmlFor={accuracyId}>
-                          About how many right
-                        </label>
-                        <div className={styles.percentWrap}>
-                          <input
-                            className={styles.number}
-                            id={accuracyId}
-                            type="number"
-                            inputMode="numeric"
-                            min={0}
-                            max={100}
-                            step={1}
-                            placeholder="70"
-                            value={row.accuracyPercent}
-                            disabled={pending || answered === 0}
-                            aria-describedby={answered === 0 ? `${accuracyId}-why` : undefined}
-                            onChange={(event) =>
-                              update(topic.id, { accuracyPercent: event.target.value })
-                            }
-                          />
-                          <span className={styles.percent}>%</span>
-                        </div>
-                        {answered === 0 && (
-                          <p className={styles.why} id={`${accuracyId}-why`}>
-                            Needs a question count first.
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </li>
-                );
-              })}
+              {topics.map((topic) => (
+                <TopicRow
+                  key={topic.id}
+                  topic={topic}
+                  rows={rows}
+                  overrides={overrides}
+                  sources={sources}
+                  disabled={pending}
+                  update={update}
+                  setOverride={setOverride}
+                />
+              ))}
             </ul>
 
             <div className={styles.actions}>

@@ -200,7 +200,106 @@
   color: var(--muted);
 }
 
+/* A topic is a fieldset so its name labels every control in it for
+   assistive tech; the browser's own border and padding are removed. */
+.fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.fieldset > .topic {
+  padding: 0;
+}
+
+.select {
+  min-height: 44px;
+  max-width: 16rem;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-input);
+  background: var(--ground);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.875rem;
+}
+
+.select:disabled {
+  opacity: 0.5;
+}
+
+.select:focus-visible,
+.disclosure:focus-visible,
+.textButton:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.confidence {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 44px;
+}
+
+.hint {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.textButton,
+.disclosure {
+  min-height: 44px;
+  width: fit-content;
+  padding: 0 var(--space-1);
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.8125rem;
+  color: var(--claimed-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.disclosure {
+  font-weight: 600;
+}
+
+.textButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Modules sit indented under their topic, divided by the same hairline as
+   topics, so the nesting reads without a second card. */
+.modules {
+  margin: 0;
+  padding: 0 0 0 var(--space-4);
+  list-style: none;
+}
+
+.module {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--rule);
+}
+
 @media (max-width: 560px) {
+  .select {
+    max-width: none;
+    width: 100%;
+  }
+
+  .modules {
+    padding-left: var(--space-2);
+  }
+
   .controls {
     flex-direction: column;
     align-items: stretch;
