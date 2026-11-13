@@ -112,7 +112,9 @@ async function loadWorkDone(
     // star rating does not matter here; a low one keeps the notes, which are
     // never credited from a log.
     db.studyLogEntry.findMany({
-      where: { planId, selfDeclared: false },
+      // Rows a task record wrote are that task's evidence, already credited
+      // by its own kind; counting them here would read notes as a video.
+      where: { planId, selfDeclared: false, taskId: null },
       select: { losId: true, packageId: true, questionsAnswered: true },
     }),
     db.planPackage.findMany({ where: { planId, roles: { has: "content" } }, select: { packageId: true } }),

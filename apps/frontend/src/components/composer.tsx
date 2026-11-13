@@ -3,14 +3,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Virtuoso } from "react-virtuoso";
 import { toast } from "sonner";
-import { useCreateLog, flattenCurriculum, type FlatLos } from "@/lib/hooks";
+import { useCreateLog, usePrescription, flattenCurriculum, type FlatLos } from "@/lib/hooks";
 import { toISODate, startOfUTCDay } from "@/lib/pace";
 import type { Curriculum, StudyPackage } from "@/lib/types";
 import { ApiError } from "@/lib/api";
 import styles from "./composer.module.css";
 import { ConfidencePicker } from "./confidence";
 
-// Logging a session.
+// Recording study: the same record as a task's Record button. When the
+// outcome chosen belongs to a task on that day's plan, the record settles the
+// task too, so studying something is entered once, wherever it is entered.
 //
 // Outcome search is the FIRST field, always. An earlier design pre-filled from
 // the study-next list and offered no alternative, which left the product's core
@@ -45,6 +47,24 @@ export function Composer({
   const [date, setDate] = useState(toISODate(startOfUTCDay(new Date())));
   const [showExtras, setShowExtras] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // The plan for the record's day, to find the task this outcome belongs to.
+  const dayPlan = usePrescription(planId, date, date);
+  const chosen = useMemo(() => all.find((l) => l.id === losId), [all, losId]);
+  const matchedTask = useMemo(() => {
+    if (!chosen) return undefined;
+    const tasks = dayPlan.data?.days[0]?.tasks ?? [];
+    return tasks.find((t) => t.status === "pending" && t.readingIds.includes(chosen.readingId));
+  }, [chosen, dayPlan.data]);
+  const [attach, setAttach] = useState(true);
+  const [finished, setFinished] = useState(true);
+  const [taskMinutes, setTaskMinutes] = useState("");
+  useEffect(() => {
+    setAttach(true);
+    setFinished(true);
+    setTaskMinutes(matchedTask ? String(matchedTask.estimatedMinutes) : "");
+  }, [matchedTask]);
+  const recordsTask = matchedTask !== undefined && attach;
 
   const dialogRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -97,9 +117,15 @@ export function Composer({
       setError("Correct answers cannot exceed questions answered.");
       return;
     }
+    const minutesNum = Number(taskMinutes);
+    if (recordsTask && (!Number.isInteger(minutesNum) || minutesNum < 1 || minutesNum > 600)) {
+      setError("Enter whole minutes between 1 and 600.");
+      return;
+    }
     setError(null);
     try {
       await createLog.mutateAsync({
+        ...(recordsTask ? { taskId: matchedTask!.id, finished, actualMinutes: minutesNum } : {}),
         losId,
         confidence,
         questionsAnswered: answeredNum,
@@ -108,7 +134,8 @@ export function Composer({
         ...(note.trim() ? { note: note.trim() } : {}),
         date,
       });
-      toast.success(andNext ? "Logged. Next outcome ready." : "Logged.");
+      const what = recordsTask ? "Recorded, and your plan is updated." : "Recorded.";
+      toast.success(andNext ? `${what} Next outcome ready.` : what);
       onLogged?.();
       setAnswered("");
       setCorrect("");
@@ -134,11 +161,11 @@ export function Composer({
         className={styles.sheet}
         role="dialog"
         aria-modal="true"
-        aria-label="Log a session"
+        aria-label="Record study"
         onPointerDown={(e) => e.stopPropagation()}
       >
         <header className={styles.header}>
-          <h2 className={styles.title}>Log a session</h2>
+          <h2 className={styles.title}>Record study</h2>
           <button type="button" className={styles.close} onClick={onClose} aria-label="Close">
             ✕
           </button>
@@ -203,6 +230,46 @@ export function Composer({
               </div>
             </>
           )}
+
+          {matchedTask ? (
+            <fieldset className={styles.fieldset}>
+              <legend className={styles.label}>On your plan</legend>
+              <label className={styles.planMatch}>
+                <input type="checkbox" checked={attach} onChange={(e) => setAttach(e.target.checked)} />
+                <span>
+                  Counts toward {matchedTask.materials[0]?.action ?? "the task"}{" "}
+                  {matchedTask.moduleTitle ?? ""} ({matchedTask.estimatedMinutes} min)
+                </span>
+              </label>
+              {attach ? (
+                <div className={styles.planDetail}>
+                  <label className={styles.label} htmlFor="task-minutes">
+                    Minutes spent
+                  </label>
+                  <input
+                    id="task-minutes"
+                    className={styles.input}
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    max={600}
+                    value={taskMinutes}
+                    onChange={(e) => setTaskMinutes(e.target.value)}
+                  />
+                  <div className={styles.planChoice} role="radiogroup" aria-label="How much of it">
+                    <label>
+                      <input type="radio" name="task-finished" checked={finished} onChange={() => setFinished(true)} />{" "}
+                      Finished
+                    </label>
+                    <label>
+                      <input type="radio" name="task-finished" checked={!finished} onChange={() => setFinished(false)} />{" "}
+                      Got partway
+                    </label>
+                  </div>
+                </div>
+              ) : null}
+            </fieldset>
+          ) : null}
 
           <fieldset className={styles.fieldset}>
             <legend className={styles.label}>Confidence</legend>
@@ -322,7 +389,7 @@ export function Composer({
             onClick={() => submit(true)}
             disabled={createLog.isPending || !losId}
           >
-            Log and next
+            Record and next
           </button>
           <button
             type="button"
@@ -330,7 +397,7 @@ export function Composer({
             onClick={() => submit(false)}
             disabled={createLog.isPending || !losId}
           >
-            Log
+            Record
           </button>
         </footer>
       </div>

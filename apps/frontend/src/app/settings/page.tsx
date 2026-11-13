@@ -323,7 +323,7 @@ export default function SettingsPage() {
                   linked from anywhere in the app. This is their natural home on
                   a phone, where the bottom bar has no room for them. */}
               <p className={styles.hint}>
-                Browse your <Link href="/logs">study log</Link> or your{" "}
+                Browse your <Link href="/logs">study record</Link> or your{" "}
                 <Link href="/mocks">mock exams</Link>.
               </p>
               <div className={styles.buttonGroup}>

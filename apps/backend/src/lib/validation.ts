@@ -211,10 +211,24 @@ export const submitTaskSchema = z
   .object({
     status: z.enum(["done", "partial", "pending"]),
     actualMinutes: z.number().int().min(1).max(600).optional(),
+    // A submission is also the log of the session, so it carries what a log
+    // carries. Confidence is required for done and partial.
+    confidence: z.number().int().min(1).max(5).optional(),
+    questionsAnswered: z.number().int().min(0).max(1000).optional(),
+    questionsCorrect: z.number().int().min(0).max(1000).optional(),
+    note: z.string().max(2000).optional(),
   })
   .refine((b) => b.status !== "partial" || b.actualMinutes !== undefined, {
     message: "A partial submission needs the minutes worked",
     path: ["actualMinutes"],
+  })
+  .refine((b) => b.status === "pending" || b.confidence !== undefined, {
+    message: "Say how confident you are, 1 to 5",
+    path: ["confidence"],
+  })
+  .refine((b) => (b.questionsCorrect ?? 0) <= (b.questionsAnswered ?? 0), {
+    message: "More correct than answered",
+    path: ["questionsCorrect"],
   });
 
 /**
@@ -301,6 +315,11 @@ export const createLogSchema = z
     // route checks this against the plan's startDate/today (needs the DB
     // row), not here.
     date: z.coerce.date().optional(),
+    // Recording against a plan task makes this the same record as the task's
+    // own Record button: the task is settled and owns the rows.
+    taskId: z.string().min(1).optional(),
+    finished: z.boolean().optional(),
+    actualMinutes: z.number().int().min(1).max(600).optional(),
   })
   // The DB default (0) only applies when the column is omitted entirely; a
   // request's explicit value still needs this same-request cross-field check.

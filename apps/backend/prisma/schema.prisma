@@ -294,6 +294,7 @@ model PlanTask {
   // Reason this task was inserted programmatically (e.g., "retry-weak", "mock-review-inserted")
   insertedBecause   String?
   plan              StudyPlan     @relation(fields: [planId], references: [id])
+  logs              StudyLogEntry[]
   @@index([planId, date])
   @@unique([planId, date, order])
 }
@@ -324,12 +325,18 @@ model StudyLogEntry {
   // module's videos. Credits the video only; the notes stay owed unless
   // declaredRead is also set.
   declaredWatched   Boolean       @default(false)
+  // The plan task whose submission wrote this row, if any. Ticking a task and
+  // logging a session are one act, so the task owns its rows: resubmitting
+  // replaces them and undoing deletes them.
+  taskId            String?
+  task              PlanTask?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
   note              String?
   user              User          @relation(fields: [userId], references: [id])
   plan              StudyPlan     @relation(fields: [planId], references: [id])
   los               LOS           @relation(fields: [losId], references: [id])
   package           StudyPackage? @relation(fields: [packageId], references: [id])
   @@index([planId, losId])
+  @@index([taskId])
 }
 
 model MockExam {

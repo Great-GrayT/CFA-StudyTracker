@@ -206,7 +206,7 @@ export function WeekStrip({
         <div className={styles.keyRow}>
           <dt>
             <span className={styles.keyOffPlan} aria-hidden="true" />
-            Logged off plan
+            Recorded off plan
           </dt>
           {/* Outcomes, not minutes: a log entry never records how long it took. */}
           <dd className="tnum">

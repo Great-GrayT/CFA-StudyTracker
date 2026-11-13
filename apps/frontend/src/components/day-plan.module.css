@@ -245,6 +245,12 @@
   border-color: var(--alarm);
 }
 
+.questionFields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;

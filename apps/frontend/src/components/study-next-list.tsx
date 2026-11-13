@@ -99,7 +99,7 @@ export function StudyNextList({
                     type="button"
                     className={styles.log}
                     onClick={() => onLog(item.losId)}
-                    aria-label={`Log a session for ${los?.text ?? "this outcome"}`}
+                    aria-label={`Record study for ${los?.text ?? "this outcome"}`}
                   >
                     Log
                   </button>

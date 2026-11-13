@@ -244,3 +244,42 @@
     animation: none;
   }
 }
+
+/* The plan match reads as one sentence with its checkbox; the 44px row is
+   the tap target, not the 18px box. */
+.planMatch {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 44px;
+  font-size: 15px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.planMatch input {
+  width: 1.125rem;
+  height: 1.125rem;
+  accent-color: var(--claimed);
+}
+
+.planDetail {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.planChoice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.planChoice label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 44px;
+  font-size: 15px;
+  color: var(--text);
+  cursor: pointer;
+}

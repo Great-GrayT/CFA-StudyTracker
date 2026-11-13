@@ -27,7 +27,7 @@ const NAV = [
 // the rail rather than hidden behind a menu, since a utility nobody can find is
 // the problem being fixed, not the pattern to copy.
 const SECONDARY = [
-  { href: "/logs", label: "Study log", icon: "Logged" },
+  { href: "/logs", label: "Study record", icon: "Logged" },
   { href: "/mocks", label: "Mock exams", icon: "Mock" },
   { href: "/watchdogs", label: "Watchdogs", icon: "Health" },
   { href: "/settings", label: "Settings", icon: "Settings" },
@@ -65,7 +65,7 @@ export function AppShell({
         </ul>
         <button type="button" className={styles.railCompose} onClick={onCompose}>
           <Icon name="Compose" size={18} />
-          Log a session
+          Record study
         </button>
         <UtilityStrip className={styles.railUtility} />
         <ul className={styles.railSecondary}>
@@ -111,8 +111,8 @@ export function AppShell({
           type="button"
           className={styles.compose}
           onClick={onCompose}
-          aria-label="Log a session"
-          title="Log a session"
+          aria-label="Record study"
+          title="Record study"
         >
           <span aria-hidden="true" className={styles.composeGlyph} />
         </button>

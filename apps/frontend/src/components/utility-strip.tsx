@@ -104,7 +104,7 @@ const THEME_LABEL = {
  * back there.
  */
 const SECONDARY: ReadonlyArray<{ href: string; label: string; icon: IconName }> = [
-  { href: "/logs", label: "Study log", icon: "Logged" },
+  { href: "/logs", label: "Study record", icon: "Logged" },
   { href: "/mocks", label: "Mock exams", icon: "Mock" },
   { href: "/watchdogs", label: "Watchdogs", icon: "Health" },
   { href: "/settings", label: "Settings", icon: "Settings" },

@@ -1,4 +1,4 @@
-// Submitting one task from the day view: finished, partly done, or undone.
+// Recording one task from the day view: finished, partly done, or undone.
 //
 // Before this route nothing ever moved a task off "pending", so a candidate
 // could study all day and the plan would still owe every minute of it.
@@ -6,6 +6,7 @@ import { db } from "../../../../../../lib/db";
 import { requireUser } from "../../../../../../lib/FUNC-auth";
 import { generateHorizon } from "../../../../../../lib/FUNC-schedule";
 import { submitTaskSchema } from "../../../../../../lib/validation";
+import { recordTask } from "../../../../../../lib/FUNC-record";
 
 function idsFromUrl(req: Request): { planId: string; taskId: string } {
   const segments = new URL(req.url).pathname.split("/");
@@ -45,14 +46,7 @@ export async function PATCH(req: Request): Promise<Response> {
     return Response.json({ error: "A task cannot be submitted before its day" }, { status: 400 });
   }
 
-  const { status, actualMinutes } = parsed.data;
-  const updated = await db.planTask.update({
-    where: { id: taskId },
-    data:
-      status === "pending"
-        ? { status, actualMinutes: null }
-        : { status, actualMinutes: actualMinutes ?? task.estimatedMinutes },
-  });
+  const updated = await db.$transaction((tx) => recordTask(tx, auth.userId, task, parsed.data));
 
   // Rebuild now so a partial's remainder, or work finished early, reshapes the
   // coming days immediately instead of at the coach's next slot. The submission

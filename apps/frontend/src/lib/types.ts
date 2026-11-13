@@ -264,6 +264,9 @@ export type PrescribedTask = {
   estimatedMinutes: number;
   /** Minutes the candidate reported, null until submitted. */
   actualMinutes: number | null;
+  /** Confidence the task was recorded with, null until recorded. */
+  confidence: number | null;
+  readingIds: string[];
   topicName: string | null;
   moduleTitle: string | null;
   materials: PrescribedMaterial[];

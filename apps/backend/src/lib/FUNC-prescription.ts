@@ -38,6 +38,10 @@ export type PrescribedTask = {
   estimatedMinutes: number;
   /** Minutes the candidate reported, null until submitted. */
   actualMinutes: number | null;
+  /** Confidence the task was recorded with, null until recorded. */
+  confidence: number | null;
+  /** Modules (readings) the task covers, so a record can be matched to it. */
+  readingIds: string[];
   topicName: string | null;
   moduleTitle: string | null;
   materials: PrescribedMaterial[];
@@ -153,6 +157,14 @@ export async function getPrescription(
     where: { planId, date: { gte: from, lte: to } },
     orderBy: [{ date: "asc" }, { order: "asc" }],
   });
+
+  // A record writes one row per outcome, all with the same confidence.
+  const recorded = await db.studyLogEntry.findMany({
+    where: { taskId: { in: tasks.map((t) => t.id) } },
+    select: { taskId: true, confidence: true },
+    distinct: ["taskId"],
+  });
+  const confidenceByTask = new Map(recorded.map((r) => [r.taskId!, r.confidence]));
 
   // Which package plays which role for THIS candidate. A plan that tagged
   // UWorld for questions and Mark Meldrum for content must never be told to
@@ -290,6 +302,8 @@ export async function getPrescription(
       status: task.status,
       estimatedMinutes: task.estimatedMinutes,
       actualMinutes: task.actualMinutes,
+      confidence: confidenceByTask.get(task.id) ?? null,
+      readingIds: task.readingIds,
       topicName: reading?.topic.name ?? null,
       moduleTitle: reading?.name ?? null,
       materials,

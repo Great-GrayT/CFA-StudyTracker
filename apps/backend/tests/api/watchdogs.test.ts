@@ -156,10 +156,10 @@ describe("GET /api/push/subscriptions", () => {
     const mine = await registerUser();
     const theirs = await registerUser();
     await db.pushSubscription.create({
-      data: { userId: mine.id, endpoint: "https://push.example/mine", p256dh: "k1", auth: "a1" },
+      data: { userId: mine.id, endpoint: "https://push.example/mine", p256dh: "P256DH-SECRET-MINE", auth: "AUTH-SECRET-MINE" },
     });
     await db.pushSubscription.create({
-      data: { userId: theirs.id, endpoint: "https://push.example/theirs", p256dh: "k2", auth: "a2" },
+      data: { userId: theirs.id, endpoint: "https://push.example/theirs", p256dh: "P256DH-SECRET-THEIRS", auth: "AUTH-SECRET-THEIRS" },
     });
 
     const body = await readJson(await PUSH_SUBS(authed(mine.token, "/api/push/subscriptions")));
@@ -169,7 +169,9 @@ describe("GET /api/push/subscriptions", () => {
     // The keys authorise sending to that device. The list screen never needs
     // them, so they must not be in the response at all.
     const serialized = JSON.stringify(body);
-    expect(serialized).not.toContain("k1");
-    expect(serialized).not.toContain("a1");
+    // Distinctive values: "k1"/"a1" turned up inside random cuid ids and
+    // failed the test about once in a few dozen runs.
+    expect(serialized).not.toContain("P256DH-SECRET");
+    expect(serialized).not.toContain("AUTH-SECRET");
   });
 });

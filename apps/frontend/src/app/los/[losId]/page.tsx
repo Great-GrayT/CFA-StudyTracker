@@ -240,7 +240,7 @@ export default function LosPage({ params }: { params: Promise<{ losId: string }>
         </section>
 
         <button type="button" className={styles.primary} onClick={() => setComposing(true)}>
-          Log a session
+          Record study
         </button>
       </article>
 

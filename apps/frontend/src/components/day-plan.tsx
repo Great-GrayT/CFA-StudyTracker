@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { useSubmitTask, type TaskSubmission } from "@/lib/hooks";
+import { ConfidenceMeter, ConfidencePicker } from "./confidence";
 import type { PrescribedDay, PrescribedTask } from "@/lib/types";
 import styles from "./day-plan.module.css";
 
@@ -30,6 +31,13 @@ function SubmitControl({ task, submit }: { task: PrescribedTask; submit: Submit 
   const partial = task.status === "partial";
   const [open, setOpen] = useState(false);
   const [minutes, setMinutes] = useState(String(task.estimatedMinutes));
+  const [confidence, setConfidence] = useState(task.confidence ?? 0);
+  // Question tasks also record how many were answered, prefilled with the
+  // task's own count since that is what was set.
+  const isPractice = task.kind === "questions";
+  const setCount = task.materials.find((m) => m.questionCount !== null)?.questionCount ?? null;
+  const [answered, setAnswered] = useState(setCount !== null ? String(setCount) : "");
+  const [correct, setCorrect] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -75,7 +83,22 @@ function SubmitControl({ task, submit }: { task: PrescribedTask; submit: Submit 
       inputRef.current?.focus();
       return;
     }
-    void send({ status, actualMinutes: value });
+    if (confidence < 1) {
+      setError("Rate how it went, 1 to 5.");
+      return;
+    }
+    const answeredNum = Number(answered) || 0;
+    const correctNum = Number(correct) || 0;
+    if (isPractice && correctNum > answeredNum) {
+      setError("Correct answers cannot exceed questions answered.");
+      return;
+    }
+    void send({
+      status,
+      actualMinutes: value,
+      confidence,
+      ...(isPractice ? { questionsAnswered: answeredNum, questionsCorrect: correctNum } : {}),
+    });
   }
 
   function close() {
@@ -96,6 +119,7 @@ function SubmitControl({ task, submit }: { task: PrescribedTask; submit: Submit 
             ? `Done, ${minutesLabel(task.actualMinutes ?? task.estimatedMinutes)}`
             : `Partway, ${task.actualMinutes ?? 0} of ${minutesLabel(task.estimatedMinutes)}`}
         </p>
+        {task.confidence !== null ? <ConfidenceMeter value={task.confidence} label="Recorded at" /> : null}
         <button
           ref={undoRef}
           type="button"
@@ -124,7 +148,7 @@ function SubmitControl({ task, submit }: { task: PrescribedTask; submit: Submit 
         aria-controls={panelId}
         onClick={() => (open ? close() : setOpen(true))}
       >
-        Mark done
+        Record
       </button>
       {open ? (
         <div id={panelId} className={styles.panel} onKeyDown={onPanelKey}>
@@ -144,6 +168,45 @@ function SubmitControl({ task, submit }: { task: PrescribedTask; submit: Submit 
               aria-invalid={error ? true : undefined}
             />
           </label>
+          <div className={styles.field}>
+            <span id={`${inputId}-how`}>How it went</span>
+            <ConfidencePicker
+              name={`${inputId}-confidence`}
+              legend="How it went"
+              value={confidence}
+              onChange={setConfidence}
+            />
+          </div>
+          {isPractice ? (
+            <div className={styles.questionFields}>
+              <label className={styles.field} htmlFor={`${inputId}-answered`}>
+                <span>Answered</span>
+                <input
+                  id={`${inputId}-answered`}
+                  className={`${styles.input} tnum`}
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  max={1000}
+                  value={answered}
+                  onChange={(e) => setAnswered(e.target.value)}
+                />
+              </label>
+              <label className={styles.field} htmlFor={`${inputId}-correct`}>
+                <span>Correct</span>
+                <input
+                  id={`${inputId}-correct`}
+                  className={`${styles.input} tnum`}
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  max={1000}
+                  value={correct}
+                  onChange={(e) => setCorrect(e.target.value)}
+                />
+              </label>
+            </div>
+          ) : null}
           <div className={styles.actions}>
             <button
               type="button"
@@ -166,7 +229,8 @@ function SubmitControl({ task, submit }: { task: PrescribedTask; submit: Submit 
             </button>
           </div>
           <p className={styles.hint}>
-            Got partway keeps the rest on your plan for a later day.
+            Recording also updates your study log and scores. Got partway keeps the rest on your
+            plan for a later day.
           </p>
           {error ? (
             <p className={styles.error} role="alert">

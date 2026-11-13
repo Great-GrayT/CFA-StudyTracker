@@ -2,6 +2,8 @@ import { db } from "../../../lib/db";
 import { requireUser } from "../../../lib/FUNC-auth";
 import { createLogSchema } from "../../../lib/validation";
 import { assertUsablePackage } from "../../../lib/FUNC-packages";
+import { recordTask } from "../../../lib/FUNC-record";
+import { generateHorizon } from "../../../lib/FUNC-schedule";
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
@@ -49,6 +51,37 @@ export async function POST(req: Request): Promise<Response> {
       { error: "date must be on or after the plan's startDate and not in the future" },
       { status: 400 },
     );
+  }
+
+  if (parsed.data.taskId) {
+    const task = await db.planTask.findUnique({ where: { id: parsed.data.taskId } });
+    if (!task || task.planId !== planId) {
+      return Response.json({ error: "Task not found on this plan" }, { status: 404 });
+    }
+    const los = await db.lOS.findUnique({ where: { id: losId }, select: { readingId: true } });
+    if (!los || !task.readingIds.includes(los.readingId)) {
+      return Response.json({ error: "That outcome is not part of this task" }, { status: 400 });
+    }
+    if (startOfUTCDay(task.date).getTime() > todayDay.getTime()) {
+      return Response.json({ error: "A task cannot be recorded before its day" }, { status: 400 });
+    }
+    const recorded = await db.$transaction(async (tx) => {
+      await recordTask(tx, auth.userId, task, {
+        status: parsed.data.finished === false ? "partial" : "done",
+        actualMinutes: parsed.data.actualMinutes,
+        confidence,
+        questionsAnswered,
+        questionsCorrect,
+        note,
+      });
+      return tx.studyLogEntry.findFirstOrThrow({ where: { taskId: task.id, losId } });
+    });
+    try {
+      await generateHorizon(planId, new Intl.DateTimeFormat("en-CA", { timeZone: plan.timeZone ?? "UTC" }).format(new Date()));
+    } catch (err) {
+      console.error(`logs: could not regenerate plan ${planId} after a task record`, err);
+    }
+    return Response.json(recorded, { status: 201 });
   }
 
   const log = await db.studyLogEntry.create({

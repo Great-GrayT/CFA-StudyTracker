@@ -226,6 +226,9 @@ export function useInvalidateAfterLog(planId: string | undefined) {
     if (!planId) return;
     qc.invalidateQueries({ queryKey: keys.logs(planId) });
     qc.invalidateQueries({ queryKey: keys.progress(planId) });
+    // A record against a task settles it and replans the days ahead.
+    qc.invalidateQueries({ queryKey: ["prescription", planId] });
+    qc.invalidateQueries({ queryKey: ["campaign", planId] });
   };
 }
 
@@ -240,6 +243,9 @@ export function useCreateLog(planId: string | undefined) {
       packageId?: string;
       note?: string;
       date?: string;
+      taskId?: string;
+      finished?: boolean;
+      actualMinutes?: number;
     }) => api.post<LogEntry>("logs", { planId, ...body }),
     onSuccess: invalidate,
   });
@@ -253,9 +259,11 @@ export function useDeleteLog(planId: string | undefined) {
   });
 }
 
+/** What recording a task sends; a record also writes the study log. */
+type RecordDetail = { confidence: number; questionsAnswered?: number; questionsCorrect?: number };
 export type TaskSubmission =
-  | { status: "done"; actualMinutes?: number }
-  | { status: "partial"; actualMinutes: number }
+  | ({ status: "done"; actualMinutes?: number } & RecordDetail)
+  | ({ status: "partial"; actualMinutes: number } & RecordDetail)
   | { status: "pending" };
 
 /**
@@ -278,6 +286,7 @@ export function useSubmitTask(planId: string | undefined) {
         qc.invalidateQueries({ queryKey: ["prescription", planId] }),
         qc.invalidateQueries({ queryKey: ["campaign", planId] }),
         qc.invalidateQueries({ queryKey: keys.progress(planId) }),
+        qc.invalidateQueries({ queryKey: keys.logs(planId) }),
       ]);
     },
   });

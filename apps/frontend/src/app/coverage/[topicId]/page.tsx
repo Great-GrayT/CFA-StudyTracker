@@ -128,7 +128,7 @@ export default function TopicPage({ params }: { params: Promise<{ topicId: strin
                             setSuggested(los.id);
                             setComposing(true);
                           }}
-                          aria-label={`Log a session for ${los.text}`}
+                          aria-label={`Record study for ${los.text}`}
                         >
                           Log
                         </button>
@@ -144,7 +144,7 @@ export default function TopicPage({ params }: { params: Promise<{ topicId: strin
 
       <ul className={styles.legend}>
         <li><span className={`${styles.swatch} ${styles.confident}`} /> Confident</li>
-        <li><span className={`${styles.swatch} ${styles.logged}`} /> Logged</li>
+        <li><span className={`${styles.swatch} ${styles.logged}`} /> Recorded</li>
         <li><span className={`${styles.swatch} ${styles.flagged}`} /> Flagged</li>
         <li><span className={`${styles.swatch} ${styles.untouched}`} /> Not started</li>
       </ul>
