@@ -17,6 +17,12 @@ export type ReconciledUnit = PackableGroup & {
   readingDebt: number;
   questionDebt: number;
   pairing: PairingTag;
+  /**
+   * Reading credit that is known by kind (a finished video task, a logged
+   * study session). Taken off that kind before the rest is scaled, so a
+   * watched video removes the video and leaves the notes whole.
+   */
+  readingDoneByKind?: Partial<Record<"content-notes" | "content-video" | "seminar", number>>;
 };
 
 export type WriteOff = {
@@ -136,6 +142,7 @@ export function reconcile(
   budgetMultiple: number,
   asOf: Date,
   t: Tuning,
+  readingDoneByKindByRef: Map<string, ReconciledUnit["readingDoneByKind"]> = new Map(),
 ): {
   units: ReconciledUnit[];
   writeOffs: WriteOff[];
@@ -172,11 +179,11 @@ export function reconcile(
         writeOffs.push({ ref: g.ref, mastery: m, readingMinutesDropped: readingDebt });
         continue;
       }
-      units.push({ ...g, readingDebt, questionDebt, pairing: "reading-only" });
+      units.push({ ...g, readingDoneByKind: readingDoneByKindByRef.get(g.ref), readingDebt, questionDebt, pairing: "reading-only" });
     } else if (readingDebt <= 0) {
-      units.push({ ...g, readingDebt, questionDebt, pairing: "questions-only" });
+      units.push({ ...g, readingDoneByKind: readingDoneByKindByRef.get(g.ref), readingDebt, questionDebt, pairing: "questions-only" });
     } else {
-      units.push({ ...g, readingDebt, questionDebt, pairing: "paired" });
+      units.push({ ...g, readingDoneByKind: readingDoneByKindByRef.get(g.ref), readingDebt, questionDebt, pairing: "paired" });
     }
 
     // A thin bank is a real shortfall and gets recorded rather than papered
@@ -236,8 +243,14 @@ function initState(unit: ReconciledUnit): UnitState {
   // The debts are the authority, not the raw per-kind minutes: a reconciled
   // unit may owe less reading than it holds, because the candidate read some of
   // it off plan. Scale the kind remainders to the debt so the two agree.
-  const readingTotal = readingMinutesOf(unit);
-  const readScale = readingTotal > 0 ? unit.readingDebt / readingTotal : 0;
+  const done = unit.readingDoneByKind ?? {};
+  const remaining = (kind: ReadingKind, raw: number) => Math.max(0, raw - (done[kind] ?? 0));
+  const readingKindsLeft =
+    remaining("content-notes", unit.noteMinutes) +
+    remaining("content-video", unit.videoMinutes) +
+    remaining("seminar", unit.seminarMinutes ?? 0);
+  // Pooled credit with no kind attached still shrinks every kind evenly.
+  const readScale = readingKindsLeft > 0 ? unit.readingDebt / readingKindsLeft : 0;
   const questionTotal = questionMinutesOf(unit);
   const questionScale = questionTotal > 0 ? unit.questionDebt / questionTotal : 0;
 
@@ -257,7 +270,7 @@ function initState(unit: ReconciledUnit): UnitState {
     readingLeft: unit.readingDebt,
     questionsLeft: unit.questionDebt,
     readingByKind: readingKinds
-      .map(([kind, raw]) => ({ kind, left: raw * readScale }))
+      .map(([kind, raw]) => ({ kind, left: remaining(kind, raw) * readScale }))
       .filter((k) => k.left > 0),
     questionsByKind: questionKinds
       .map(([kind, raw]) => ({ kind, left: raw * questionScale }))

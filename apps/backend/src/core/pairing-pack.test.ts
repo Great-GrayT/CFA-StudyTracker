@@ -383,3 +383,32 @@ test("a day never holds more reading tasks than the unit has kinds of reading", 
     expect(readingTasks.length).toBeLessThanOrEqual(3);
   }
 });
+
+test("a watched video leaves the notes whole and drops the video", () => {
+  // 30 min of notes, 40 of video; the video is done, so 30 of reading is owed.
+  const unit = recon("u1", { read: 30, questions: 0 }, {
+    noteMinutes: 30,
+    videoMinutes: 40,
+    readingDebt: 30,
+    questionDebt: 0,
+    pairing: "reading-only",
+    readingDoneByKind: { "content-video": 40 },
+  });
+  const days = packFirstPass([unit], calendarOf([120]), 1, T);
+  const tasks = days.flatMap((d) => d.tasks);
+  expect(tasks.some((t) => t.kind === "content-video")).toBe(false);
+  expect(tasks.filter((t) => t.kind === "content-notes").reduce((s, t) => s + t.estimatedMinutes, 0)).toBe(30);
+});
+
+test("pooled credit with no per-kind detail still scales every kind", () => {
+  const unit = recon("u1", { read: 35, questions: 0 }, {
+    noteMinutes: 30,
+    videoMinutes: 40,
+    readingDebt: 35,
+    questionDebt: 0,
+    pairing: "reading-only",
+  });
+  const days = packFirstPass([unit], calendarOf([120]), 1, T);
+  const total = days.flatMap((d) => d.tasks).reduce((s, t) => s + t.estimatedMinutes, 0);
+  expect(total).toBe(35);
+});

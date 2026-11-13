@@ -63,6 +63,7 @@ const KNOWN_EFFORT_KINDS = new Set([
 // phase and settles no first-pass debt.
 const READING_TASK_KINDS = new Set(["content-notes", "content-video", "seminar"]);
 const QUESTION_TASK_KINDS = new Set(["questions", "answer-review", "eocq"]);
+type ReadingTaskKind = "content-notes" | "content-video" | "seminar";
 
 /**
  * Minutes of reading and of questions already completed, per unit.
@@ -85,8 +86,10 @@ async function loadWorkDone(
   readingDoneByRef: Map<string, number>;
   questionsDoneByRef: Map<string, number>;
   declaredReadRefs: Set<string>;
+  readingDoneByKindByRef: Map<string, Partial<Record<ReadingTaskKind, number>>>;
+  watchedRefs: Set<string>;
 }> {
-  const [done, declared] = await Promise.all([
+  const [done, declared, studied, contentPackages] = await Promise.all([
     db.planTask.findMany({
       where: { planId, status: { in: ["done", "partial"] } },
       select: { kind: true, readingIds: true, estimatedMinutes: true, actualMinutes: true, status: true },
@@ -100,6 +103,16 @@ async function loadWorkDone(
       where: { planId, selfDeclared: true, declaredRead: true },
       select: { losId: true },
     }),
+    // Sessions the candidate logged before tasks could be ticked. A session
+    // on the content package, or an untagged one with no questions answered,
+    // was spent on the module's material: count its video as watched. The
+    // star rating does not matter here; a low one keeps the notes, which are
+    // never credited from a log.
+    db.studyLogEntry.findMany({
+      where: { planId, selfDeclared: false },
+      select: { losId: true, packageId: true, questionsAnswered: true },
+    }),
+    db.planPackage.findMany({ where: { planId, roles: { has: "content" } }, select: { packageId: true } }),
   ]);
 
   const readingByLos = new Map<string, string>();
@@ -112,8 +125,17 @@ async function loadWorkDone(
     if (ref) declaredReadRefs.add(ref);
   }
 
+  const contentIds = new Set(contentPackages.map((p) => p.packageId));
+  const watchedRefs = new Set<string>();
+  for (const row of studied) {
+    const onContent = row.packageId ? contentIds.has(row.packageId) : row.questionsAnswered === 0;
+    const ref = readingByLos.get(row.losId);
+    if (onContent && ref) watchedRefs.add(ref);
+  }
+
   const readingDoneByRef = new Map<string, number>();
   const questionsDoneByRef = new Map<string, number>();
+  const readingDoneByKindByRef = new Map<string, Partial<Record<ReadingTaskKind, number>>>();
 
   for (const task of done) {
     const minutes = creditedMinutes(task);
@@ -131,10 +153,16 @@ async function loadWorkDone(
     const share = refs.length > 0 ? minutes / refs.length : 0;
     for (const ref of refs) {
       target.set(ref, (target.get(ref) ?? 0) + share);
+      if (target === readingDoneByRef) {
+        const byKind = readingDoneByKindByRef.get(ref) ?? {};
+        const kind = task.kind as ReadingTaskKind;
+        byKind[kind] = (byKind[kind] ?? 0) + share;
+        readingDoneByKindByRef.set(ref, byKind);
+      }
     }
   }
 
-  return { readingDoneByRef, questionsDoneByRef, declaredReadRefs };
+  return { readingDoneByRef, questionsDoneByRef, declaredReadRefs, readingDoneByKindByRef, watchedRefs };
 }
 
 /**
@@ -898,10 +926,19 @@ export async function generateHorizon(
 
     // What the candidate has actually done, on plan or off it. Reading and
     // question minutes come from completed tasks; mastery comes from the log.
-    const { readingDoneByRef, questionsDoneByRef, declaredReadRefs } = await loadWorkDone(
-      planId,
-      readings,
-    );
+    const { readingDoneByRef, questionsDoneByRef, declaredReadRefs, readingDoneByKindByRef, watchedRefs } =
+      await loadWorkDone(planId, readings);
+    // A watched video settles the video only, topping up whatever its ticked
+    // video tasks already settled, never past the video's length.
+    for (const g of packable) {
+      if (!watchedRefs.has(g.ref) || g.videoMinutes <= 0) continue;
+      const byKind = readingDoneByKindByRef.get(g.ref) ?? {};
+      const already = byKind["content-video"] ?? 0;
+      const extra = Math.max(0, g.videoMinutes - already);
+      byKind["content-video"] = already + extra;
+      readingDoneByKindByRef.set(g.ref, byKind);
+      readingDoneByRef.set(g.ref, (readingDoneByRef.get(g.ref) ?? 0) + extra);
+    }
     // Credit a declared reading in full. The declaration carries no minutes, so
     // the unit's own reading total is the only honest figure to settle it with.
     for (const g of packable) {
@@ -922,6 +959,7 @@ export async function generateHorizon(
       solved.budget,
       asOf,
       tuning,
+      readingDoneByKindByRef,
     );
     writeOffs = reconciled.writeOffs;
     underPractised = reconciled.underPractised;
