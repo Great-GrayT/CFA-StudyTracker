@@ -33,6 +33,7 @@ export default function SettingsPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPasswordForm, setShowPasswordForm] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const [installPrompt, setInstallPrompt] = useState<any>(null);
 
   const dataCounts = useMemo(() => {
@@ -110,6 +111,17 @@ export default function SettingsPage() {
     }
   }
 
+  async function handleSignOut() {
+    setSigningOut(true);
+    try {
+      await signOut();
+    } finally {
+      // A full load, not router.replace: it drops every cached query, so the
+      // next person at this browser never sees this account's plan.
+      window.location.assign("/login");
+    }
+  }
+
   async function handleExport(type: "all" | "log") {
     setExportLoading(true);
     try {
@@ -163,13 +175,23 @@ export default function SettingsPage() {
             <>
               <p className={styles.email}>{user.email}</p>
               {!showPasswordForm ? (
-                <button
-                  type="button"
-                  className={styles.actionButton}
-                  onClick={() => setShowPasswordForm(true)}
-                >
-                  Change password
-                </button>
+                <div className={styles.buttonGroup}>
+                  <button
+                    type="button"
+                    className={styles.actionButton}
+                    onClick={() => setShowPasswordForm(true)}
+                  >
+                    Change password
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.secondaryButton}
+                    disabled={signingOut}
+                    onClick={handleSignOut}
+                  >
+                    {signingOut ? "Signing out" : "Sign out"}
+                  </button>
+                </div>
               ) : (
                 <form onSubmit={handlePasswordChange} className={styles.form}>
                   <p className={styles.warning}>
