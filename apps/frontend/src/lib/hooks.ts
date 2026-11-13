@@ -253,6 +253,36 @@ export function useDeleteLog(planId: string | undefined) {
   });
 }
 
+export type TaskSubmission =
+  | { status: "done"; actualMinutes?: number }
+  | { status: "partial"; actualMinutes: number }
+  | { status: "pending" };
+
+/**
+ * Submits one task from the day view. The server rebuilds the coming days on
+ * success, so every view of the schedule is refetched, not just this day.
+ */
+export function useSubmitTask(planId: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ taskId, ...body }: TaskSubmission & { taskId: string }) =>
+      api.patch<{ task: { id: string; status: string; actualMinutes: number | null } }>(
+        `plans/${planId}/tasks/${taskId}`,
+        body,
+      ),
+    // Returned so mutateAsync resolves only once the day has refetched;
+    // otherwise the row flashes its old state between save and reload.
+    onSuccess: () => {
+      if (!planId) return;
+      return Promise.all([
+        qc.invalidateQueries({ queryKey: ["prescription", planId] }),
+        qc.invalidateQueries({ queryKey: ["campaign", planId] }),
+        qc.invalidateQueries({ queryKey: keys.progress(planId) }),
+      ]);
+    },
+  });
+}
+
 /** Flattens the curriculum tree into a searchable list, with its parents attached. */
 export type FlatLos = Los & {
   topicId: string;

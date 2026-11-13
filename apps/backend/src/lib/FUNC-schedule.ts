@@ -30,6 +30,7 @@ import {
   solveQuestionMultiple,
 } from "../core/pairing";
 import { packReview, projectCoverageDate, reviewPhaseStart, reviewQueue } from "../core/review";
+import { countsForCalibration, creditedMinutes } from "../core/task-credit";
 
 const HORIZON_DAYS = 14;
 
@@ -82,8 +83,8 @@ async function loadWorkDone(
 }> {
   const [done, declared] = await Promise.all([
     db.planTask.findMany({
-      where: { planId, status: "done" },
-      select: { kind: true, readingIds: true, estimatedMinutes: true },
+      where: { planId, status: { in: ["done", "partial"] } },
+      select: { kind: true, readingIds: true, estimatedMinutes: true, actualMinutes: true, status: true },
     }),
     // A candidate who told us at onboarding that they have read a topic area
     // has settled its reading debt as surely as a completed task would, and
@@ -110,7 +111,7 @@ async function loadWorkDone(
   const questionsDoneByRef = new Map<string, number>();
 
   for (const task of done) {
-    const minutes = task.estimatedMinutes;
+    const minutes = creditedMinutes(task);
     if (minutes <= 0) continue;
     const target = READING_TASK_KINDS.has(task.kind)
       ? readingDoneByRef
@@ -270,6 +271,7 @@ function mergeDays(first: PlannedDay[], review: PlannedDay[]): PlannedDay[] {
  * Derive the calibration factor tree from completed PlanTask rows in date order.
  */
 function deriveFactorTree(completedTasks: Array<{
+  status: string;
   estimatedMinutes: number;
   actualMinutes: number | null;
 }>): FactorTree {
@@ -280,10 +282,10 @@ function deriveFactorTree(completedTasks: Array<{
   };
 
   for (const task of completedTasks) {
-    if (task.actualMinutes !== null && task.actualMinutes > 0) {
+    if (countsForCalibration(task) && task.actualMinutes! > 0) {
       tree.global = updateFactor(tree.global, {
         estimated: task.estimatedMinutes,
-        actual: task.actualMinutes,
+        actual: task.actualMinutes!,
       });
     }
   }
@@ -652,7 +654,7 @@ export async function generateHorizon(
   const completedTasks = await db.planTask.findMany({
     where: { planId, status: "done" },
     orderBy: { date: "asc" },
-    select: { date: true, estimatedMinutes: true, actualMinutes: true },
+    select: { date: true, status: true, estimatedMinutes: true, actualMinutes: true },
   });
 
   const factorTree = deriveFactorTree(completedTasks);

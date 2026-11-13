@@ -157,6 +157,21 @@ export const priorWorkSchema = z.object({
 });
 
 /**
+ * Submitting a task from the day view. "partial" must say how long was worked,
+ * because those minutes are the only measure of how much material it covered;
+ * "done" defaults to the estimate; "pending" undoes a submission.
+ */
+export const submitTaskSchema = z
+  .object({
+    status: z.enum(["done", "partial", "pending"]),
+    actualMinutes: z.number().int().min(1).max(600).optional(),
+  })
+  .refine((b) => b.status !== "partial" || b.actualMinutes !== undefined, {
+    message: "A partial submission needs the minutes worked",
+    path: ["actualMinutes"],
+  });
+
+/**
  * Deleting an account.
  *
  * The phrase is checked HERE, with z.literal, so an invalid body and a

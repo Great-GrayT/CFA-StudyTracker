@@ -64,7 +64,9 @@
   border-bottom: 1px solid var(--rule);
 }
 
-.rowDone {
+/* Dim only the material, never the submit column: Undo must keep full contrast. */
+.rowDone .body,
+.rowDone .minutes {
   opacity: 0.55;
 }
 
@@ -148,4 +150,139 @@
   font-size: 14px;
   color: var(--muted);
   white-space: nowrap;
+}
+
+/* Submitting a task. Sits under the material, aligned with the body column,
+   so the minutes figure on the right keeps its place in the row. */
+.submit {
+  grid-column: 2 / -1;
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+}
+
+.markButton,
+.primary,
+.secondary {
+  min-height: 44px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-pill);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color var(--dur-tap) var(--ease-settle);
+}
+
+.markButton,
+.secondary {
+  border: 1px solid var(--rule-strong);
+  background: var(--raised);
+  color: var(--text);
+}
+
+.markButton[aria-expanded="true"] {
+  border-color: var(--claimed);
+  color: var(--claimed-ink);
+}
+
+.primary {
+  border: 1px solid var(--strong);
+  background: var(--strong);
+  color: var(--raised);
+}
+
+.primary:disabled,
+.secondary:disabled,
+.textButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.textButton {
+  min-height: 44px;
+  padding: 0 var(--space-2);
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  color: var(--claimed-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.panel {
+  display: grid;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  background: var(--raised);
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: 14px;
+  color: var(--text);
+}
+
+.input {
+  width: 6ch;
+  min-height: 44px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-input);
+  background: var(--ground);
+  color: var(--text);
+  /* 16px stops iOS zooming the page on focus. */
+  font: inherit;
+  font-size: 16px;
+}
+
+.input[aria-invalid="true"] {
+  border-color: var(--alarm);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.submitted {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--space-2);
+}
+
+.status {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--strong);
+}
+
+.error {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 14px;
+  color: var(--alarm-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .markButton,
+  .primary,
+  .secondary {
+    transition: none;
+  }
 }

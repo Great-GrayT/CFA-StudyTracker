@@ -248,6 +248,8 @@ export default function TodayPage() {
                   })
             }
             budgetMinutes={selectedBudgetMinutes}
+            planId={plan.data?.id}
+            submittable={selectedDate <= todayISO}
           />
         </>
       )}

@@ -14,6 +14,7 @@
 // what a past task meant is not something a catalogue refresh should be able
 // to do.
 import { db } from "./db";
+import { creditedMinutes } from "../core/task-credit";
 
 /** A single thing to do, named the way the provider names it. */
 export type PrescribedMaterial = {
@@ -35,6 +36,8 @@ export type PrescribedTask = {
   kind: string;
   status: string;
   estimatedMinutes: number;
+  /** Minutes the candidate reported, null until submitted. */
+  actualMinutes: number | null;
   topicName: string | null;
   moduleTitle: string | null;
   materials: PrescribedMaterial[];
@@ -44,7 +47,7 @@ export type PrescribedDay = {
   date: string;
   /** Minutes the plan asks for on this day. */
   totalMinutes: number;
-  /** Minutes of that which are finished. */
+  /** Minutes of that which are settled: whole estimates for finished tasks, worked minutes for partials. */
   doneMinutes: number;
   doneTasks: number;
   totalTasks: number;
@@ -284,6 +287,7 @@ export async function getPrescription(
       kind: task.kind,
       status: task.status,
       estimatedMinutes: task.estimatedMinutes,
+      actualMinutes: task.actualMinutes,
       topicName: reading?.topic.name ?? null,
       moduleTitle: reading?.name ?? null,
       materials,
@@ -339,7 +343,10 @@ export async function getPrescription(
     days.push({
       date: dateStr,
       totalMinutes: dayTasks.reduce((sum, t) => sum + t.estimatedMinutes, 0),
-      doneMinutes: done.reduce((sum, t) => sum + t.estimatedMinutes, 0),
+      doneMinutes: dayTasks.reduce(
+        (sum, t) => sum + creditedMinutes({ ...t, status: isDone(t.status) ? "done" : t.status }),
+        0,
+      ),
       doneTasks: done.length,
       totalTasks: dayTasks.length,
       offPlanLogs: offPlanByDate.get(dateStr) ?? 0,
