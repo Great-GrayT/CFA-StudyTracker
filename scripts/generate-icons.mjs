@@ -81,7 +81,31 @@ async function maskableIcon(size, out) {
   return `${out} (${size}x${size}, ${png.length} bytes)`;
 }
 
+// Android draws a notification badge from the alpha channel alone, so a
+// full-colour icon shows as a solid white square. The mono small tier (the
+// only one that survives 24dp) draws its channels as white strokes, which in
+// an alpha mask would fill them in; so bands go white, channels black, and
+// that luminance becomes the alpha of a pure white image.
+async function badgeIcon(size, out) {
+  const svg = (await readFile(join(root, "apps", "frontend", "brand", "icons", "mark-small-mono.svg"), "utf8"))
+    .replaceAll('stroke="#FFFFFF"', 'stroke="#000000"')
+    .replaceAll("currentColor", "#FFFFFF");
+  const mask = await sharp(Buffer.from(svg), { density: 384 })
+    .resize(size, size, { fit: "contain", background: "#000000" })
+    .flatten({ background: "#000000" })
+    .greyscale()
+    .raw()
+    .toBuffer();
+  const png = await sharp({ create: { width: size, height: size, channels: 3, background: "#FFFFFF" } })
+    .joinChannel(mask, { raw: { width: size, height: size, channels: 1 } })
+    .png()
+    .toBuffer();
+  await writeFile(out, png);
+  return `${out} (${size}x${size}, ${png.length} bytes)`;
+}
+
 const written = [
+  await badgeIcon(96, join(PUBLIC, "badge-96.png")),
   await squareIcon(192, join(PUBLIC, "icon-192.png")),
   await squareIcon(512, join(PUBLIC, "icon-512.png")),
   await maskableIcon(512, join(PUBLIC, "icon-maskable-512.png")),

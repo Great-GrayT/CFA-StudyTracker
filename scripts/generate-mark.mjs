@@ -22,6 +22,7 @@ const root = resolve(here, "..");
 const PUBLIC = join(root, "apps", "frontend", "public");
 const BRAND = join(root, "apps", "frontend", "brand", "icons");
 const LIB = join(root, "apps", "frontend", "src", "lib");
+const APP_DIR = join(root, "apps", "frontend", "src", "app");
 
 const C = 32; // centre of the 64 unit canvas
 
@@ -337,6 +338,9 @@ await mkdir(BRAND, { recursive: true });
 
 const files = [
   [join(PUBLIC, "mark.svg"), markSvg("large")],
+  // The browser tab icon. Written here, not by hand, because a hand-kept copy
+  // is exactly how the tab ended up showing a retired mark.
+  [join(APP_DIR, "icon.svg"), markSvg("small")],
   [join(PUBLIC, "mark-maskable.svg"), maskableSvg()],
   [join(BRAND, "mark-large.svg"), markSvg("large")],
   [join(BRAND, "mark-medium.svg"), markSvg("medium")],

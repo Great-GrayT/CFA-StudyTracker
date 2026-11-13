@@ -173,7 +173,8 @@ self.addEventListener("push", (event) => {
     self.registration.showNotification(title, {
       body,
       tag,
-      badge: "/icon-192.png",
+      // Alpha-only silhouette: Android paints a full-colour badge as a white square.
+      badge: "/badge-96.png",
       icon: "/icon-192.png",
       // Carried through to notificationclick, which is the only way the click
       // handler can know where this particular notification should land.
