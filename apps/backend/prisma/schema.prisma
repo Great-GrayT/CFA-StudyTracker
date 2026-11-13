@@ -178,6 +178,9 @@ model StudyPackage {
 
 model StudyPlan {
   id                 String             @id @default(cuid())
+  // The prior-work form exactly as last submitted, so it can be shown again.
+  // The log rows derived from it are what the planner reads.
+  priorWork          Json?
   userId             String
   levelId            String
   examDate           DateTime
@@ -317,6 +320,10 @@ model StudyLogEntry {
   // first earns question-only days, the second earns reading-only days unless
   // the practice already proves the material is known.
   declaredRead      Boolean       @default(false)
+  // Set on a declared row when the candidate said they had WATCHED the
+  // module's videos. Credits the video only; the notes stay owed unless
+  // declaredRead is also set.
+  declaredWatched   Boolean       @default(false)
   note              String?
   user              User          @relation(fields: [userId], references: [id])
   plan              StudyPlan     @relation(fields: [planId], references: [id])

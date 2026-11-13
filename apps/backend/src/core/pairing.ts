@@ -23,6 +23,8 @@ export type ReconciledUnit = PackableGroup & {
    * watched video removes the video and leaves the notes whole.
    */
   readingDoneByKind?: Partial<Record<"content-notes" | "content-video" | "seminar", number>>;
+  /** Same for practice: bank questions apart from end-of-chapter videos. */
+  questionDoneByKind?: Partial<Record<"questions" | "eocq", number>>;
 };
 
 export type WriteOff = {
@@ -143,6 +145,7 @@ export function reconcile(
   asOf: Date,
   t: Tuning,
   readingDoneByKindByRef: Map<string, ReconciledUnit["readingDoneByKind"]> = new Map(),
+  questionDoneByKindByRef: Map<string, ReconciledUnit["questionDoneByKind"]> = new Map(),
 ): {
   units: ReconciledUnit[];
   writeOffs: WriteOff[];
@@ -179,11 +182,11 @@ export function reconcile(
         writeOffs.push({ ref: g.ref, mastery: m, readingMinutesDropped: readingDebt });
         continue;
       }
-      units.push({ ...g, readingDoneByKind: readingDoneByKindByRef.get(g.ref), readingDebt, questionDebt, pairing: "reading-only" });
+      units.push({ ...g, readingDoneByKind: readingDoneByKindByRef.get(g.ref), questionDoneByKind: questionDoneByKindByRef.get(g.ref), readingDebt, questionDebt, pairing: "reading-only" });
     } else if (readingDebt <= 0) {
-      units.push({ ...g, readingDoneByKind: readingDoneByKindByRef.get(g.ref), readingDebt, questionDebt, pairing: "questions-only" });
+      units.push({ ...g, readingDoneByKind: readingDoneByKindByRef.get(g.ref), questionDoneByKind: questionDoneByKindByRef.get(g.ref), readingDebt, questionDebt, pairing: "questions-only" });
     } else {
-      units.push({ ...g, readingDoneByKind: readingDoneByKindByRef.get(g.ref), readingDebt, questionDebt, pairing: "paired" });
+      units.push({ ...g, readingDoneByKind: readingDoneByKindByRef.get(g.ref), questionDoneByKind: questionDoneByKindByRef.get(g.ref), readingDebt, questionDebt, pairing: "paired" });
     }
 
     // A thin bank is a real shortfall and gets recorded rather than papered
@@ -251,8 +254,11 @@ function initState(unit: ReconciledUnit): UnitState {
     remaining("seminar", unit.seminarMinutes ?? 0);
   // Pooled credit with no kind attached still shrinks every kind evenly.
   const readScale = readingKindsLeft > 0 ? unit.readingDebt / readingKindsLeft : 0;
-  const questionTotal = questionMinutesOf(unit);
-  const questionScale = questionTotal > 0 ? unit.questionDebt / questionTotal : 0;
+  const qDone = unit.questionDoneByKind ?? {};
+  const qRemaining = (kind: QuestionKind, raw: number) => Math.max(0, raw - (qDone[kind] ?? 0));
+  const questionKindsLeft =
+    qRemaining("questions", unit.questionMinutes) + qRemaining("eocq", unit.eocqMinutes);
+  const questionScale = questionKindsLeft > 0 ? unit.questionDebt / questionKindsLeft : 0;
 
   const readingKinds: Array<[ReadingKind, number]> = [
     ["content-notes", unit.noteMinutes],
@@ -273,7 +279,7 @@ function initState(unit: ReconciledUnit): UnitState {
       .map(([kind, raw]) => ({ kind, left: remaining(kind, raw) * readScale }))
       .filter((k) => k.left > 0),
     questionsByKind: questionKinds
-      .map(([kind, raw]) => ({ kind, left: raw * questionScale }))
+      .map(([kind, raw]) => ({ kind, left: qRemaining(kind, raw) * questionScale }))
       .filter((k) => k.left > 0),
     questionMinutesDone: 0,
     questionMinutesTotal: unit.questionDebt,

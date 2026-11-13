@@ -145,12 +145,58 @@ export const patchPlanSchema = z.object({
  * real answer, and demanding an accuracy for zero questions would force the
  * candidate to invent one.
  */
-const priorWorkDeclarationSchema = z.object({
-  topicId: z.string().min(1),
-  read: z.boolean(),
-  questionsAnswered: z.number().int().min(0).max(100_000),
-  accuracyPercent: z.number().min(0).max(100).nullable(),
-});
+const sourceId = z.string().min(1).max(100);
+
+/**
+ * One row of the prior-work form: a topic, or one module of it (readingId),
+ * and where each kind of work was done. A source is a package id, or
+ * "cfai-curriculum" for the official curriculum. Null means not done.
+ *
+ * The original form sent { read, questionsAnswered, accuracyPercent } with no
+ * sources; that shape is still accepted and maps to unattributed work, "read"
+ * meaning the whole first pass (notes and videos).
+ */
+const priorWorkDeclarationSchema = z
+  .object({
+    topicId: z.string().min(1),
+    readingId: z.string().min(1).optional(),
+    notesFrom: sourceId.nullable().optional(),
+    videosFrom: sourceId.nullable().optional(),
+    questions: z
+      .object({
+        from: sourceId.nullable(),
+        answered: z.number().int().min(0).max(100_000),
+        accuracyPercent: z.number().min(0).max(100).nullable(),
+      })
+      .nullable()
+      .optional(),
+    confidence: z.number().int().min(1).max(5).nullable().optional(),
+    read: z.boolean().optional(),
+    questionsAnswered: z.number().int().min(0).max(100_000).optional(),
+    accuracyPercent: z.number().min(0).max(100).nullable().optional(),
+  })
+  .transform((d) => {
+    const legacyRead = d.read === true;
+    const legacyQuestions =
+      d.questionsAnswered !== undefined && d.questionsAnswered > 0
+        ? { from: null, answered: d.questionsAnswered, accuracyPercent: d.accuracyPercent ?? null }
+        : null;
+    return {
+      topicId: d.topicId,
+      readingId: d.readingId ?? null,
+      // Legacy "read" has no source; UNATTRIBUTED marks it so storage keeps
+      // packageId null rather than inventing one.
+      notesFrom: d.notesFrom ?? (legacyRead ? UNATTRIBUTED : null),
+      videosFrom: d.videosFrom ?? (legacyRead ? UNATTRIBUTED : null),
+      questions: d.questions ?? legacyQuestions,
+      confidence: d.confidence ?? null,
+    };
+  });
+
+/** A declared kind of work with no named source (the original form's shape). */
+export const UNATTRIBUTED = "unattributed";
+
+export type PriorWorkDeclaration = z.output<typeof priorWorkDeclarationSchema>;
 
 export const priorWorkSchema = z.object({
   declarations: z.array(priorWorkDeclarationSchema).max(50),

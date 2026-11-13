@@ -1,6 +1,13 @@
 import { db } from "../../../../../lib/db";
 import { requireUser } from "../../../../../lib/FUNC-auth";
 import { priorWorkSchema } from "../../../../../lib/validation";
+import {
+  CFAI,
+  declaredRows,
+  ensureCfaiPackage,
+  priorWorkSources,
+  unknownSource,
+} from "../../../../../lib/FUNC-prior-work";
 import { generateHorizon } from "../../../../../lib/FUNC-schedule";
 
 // Same URL-parsing approach as the sibling routes: handlers here are called
@@ -53,20 +60,14 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   const declarations = parsed.data.declarations;
-  if (declarations.length === 0) {
-    return Response.json({ created: 0, replaced: 0 }, { status: 201 });
-  }
 
-  // Every declared topic must exist in this plan's level. An unknown topic is
-  // a 400 rather than a skip: silently dropping it would leave the candidate
-  // believing they had recorded a topic area they had not.
+  // Every declared topic must exist in this plan's level, and a module row
+  // must sit inside its topic. Unknown ids are a 400 rather than a skip:
+  // silently dropping one would leave the candidate believing they had
+  // recorded work they had not.
   const topics = await db.topic.findMany({
     where: { levelId: plan.levelId, id: { in: declarations.map((d) => d.topicId) } },
-    include: {
-      readings: {
-        include: { los: { select: { id: true } } },
-      },
-    },
+    include: { readings: { include: { los: { select: { id: true } } } } },
   });
   if (topics.length !== new Set(declarations.map((d) => d.topicId)).size) {
     return Response.json(
@@ -74,73 +75,34 @@ export async function POST(req: Request): Promise<Response> {
       { status: 400 },
     );
   }
-
   const byTopicId = new Map(topics.map((t) => [t.id, t]));
-  const rows: Array<{
-    userId: string;
-    planId: string;
-    losId: string;
-    confidence: number;
-    questionsAnswered: number;
-    questionsCorrect: number;
-    selfDeclared: boolean;
-    declaredRead: boolean;
-    date: Date;
-  }> = [];
+  const strayModule = declarations.find(
+    (d) => d.readingId && !byTopicId.get(d.topicId)!.readings.some((r) => r.id === d.readingId),
+  );
+  if (strayModule) {
+    return Response.json({ error: "A module does not belong to its topic" }, { status: 400 });
+  }
+
+  const sources = await priorWorkSources(plan.levelId, auth.userId);
+  const unknown = unknownSource(declarations, sources);
+  if (unknown) {
+    return Response.json({ error: `Unknown source: ${unknown}` }, { status: 400 });
+  }
+  if (declarations.some((d) => [d.notesFrom, d.videosFrom, d.questions?.from].includes(CFAI.id))) {
+    await ensureCfaiPackage();
+  }
 
   // Dated now rather than backdated to whenever the study happened, which the
   // candidate was not asked and would not reliably remember. Freshness then
-  // decays from the declaration, which is the conservative direction: it treats
-  // half-remembered study as more recent than it was for a little while, rather
-  // than writing it off before the candidate has had a chance to be tested.
+  // decays from the declaration, the conservative direction.
   const declaredAt = new Date();
-
-  for (const declaration of declarations) {
-    const topic = byTopicId.get(declaration.topicId)!;
-    const losIds = topic.readings.flatMap((r) => r.los.map((l) => l.id));
-    if (losIds.length === 0) continue;
-
-    // Spread the declared counts across the area's outcomes in equal shares,
-    // the same pro-rata rule reconcile uses for question stock, so the two
-    // halves of the engine agree about what a topic-level figure means. The
-    // remainder goes on the first outcomes rather than being lost to rounding,
-    // so the totals the candidate typed are the totals that get stored.
-    const answered = declaration.questionsAnswered;
-    const correct =
-      declaration.accuracyPercent === null
-        ? 0
-        : Math.round((answered * declaration.accuracyPercent) / 100);
-
-    const baseAnswered = Math.floor(answered / losIds.length);
-    const baseCorrect = Math.floor(correct / losIds.length);
-    let answeredRemainder = answered - baseAnswered * losIds.length;
-    let correctRemainder = correct - baseCorrect * losIds.length;
-
-    for (const losId of losIds) {
-      const extraAnswered = answeredRemainder > 0 ? 1 : 0;
-      const extraCorrect = correctRemainder > 0 ? 1 : 0;
-      answeredRemainder -= extraAnswered;
-      correctRemainder -= extraCorrect;
-
-      rows.push({
-        userId: auth.userId,
-        planId,
-        losId,
-        // The midpoint of the 1 to 5 scale. The candidate rated a topic area,
-        // not an outcome, and inventing a confident number from a coarse
-        // answer would feed the mastery formula a precision it does not have.
-        confidence: 3,
-        questionsAnswered: baseAnswered + extraAnswered,
-        questionsCorrect: Math.min(
-          baseAnswered + extraAnswered,
-          baseCorrect + extraCorrect,
-        ),
-        selfDeclared: true,
-        declaredRead: declaration.read,
-        date: declaredAt,
-      });
-    }
-  }
+  const rows = declaredRows(declarations, byTopicId).map((r) => ({
+    ...r,
+    userId: auth.userId,
+    planId,
+    selfDeclared: true,
+    date: declaredAt,
+  }));
 
   // Replace rather than accumulate. This is one statement about the past, not
   // an event log: a candidate who corrects their own answer on the onboarding
@@ -152,6 +114,7 @@ export async function POST(req: Request): Promise<Response> {
     if (rows.length > 0) {
       await tx.studyLogEntry.createMany({ data: rows });
     }
+    await tx.studyPlan.update({ where: { id: planId }, data: { priorWork: declarations } });
     return deleted.count;
   });
 
@@ -169,4 +132,19 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   return Response.json({ created: rows.length, replaced }, { status: 201 });
+}
+
+/** The sources the form may name, by kind, and the form as last submitted. */
+export async function GET(req: Request): Promise<Response> {
+  const auth = await requireUser(req);
+  if (!auth) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const planId = planIdFromUrl(req);
+  const plan = await db.studyPlan.findUnique({ where: { id: planId } });
+  if (!plan || plan.userId !== auth.userId) {
+    return Response.json({ error: "Forbidden" }, { status: 403 });
+  }
+  const sources = await priorWorkSources(plan.levelId, auth.userId);
+  return Response.json({ sources, declarations: plan.priorWork ?? [] });
 }

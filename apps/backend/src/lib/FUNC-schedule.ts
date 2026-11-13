@@ -88,8 +88,11 @@ async function loadWorkDone(
   declaredReadRefs: Set<string>;
   readingDoneByKindByRef: Map<string, Partial<Record<ReadingTaskKind, number>>>;
   watchedRefs: Set<string>;
+  notesReadRefs: Set<string>;
+  declaredQuestionsByRef: Map<string, number>;
+  questionDoneByKindByRef: Map<string, Partial<Record<"questions" | "eocq", number>>>;
 }> {
-  const [done, declared, studied, contentPackages] = await Promise.all([
+  const [done, declared, studied, contentPackages, banks] = await Promise.all([
     db.planTask.findMany({
       where: { planId, status: { in: ["done", "partial"] } },
       select: { kind: true, readingIds: true, estimatedMinutes: true, actualMinutes: true, status: true },
@@ -100,8 +103,8 @@ async function loadWorkDone(
     // the schedule. Minutes are unknown, so the caller credits the unit's whole
     // reading rather than a figure nobody measured.
     db.studyLogEntry.findMany({
-      where: { planId, selfDeclared: true, declaredRead: true },
-      select: { losId: true },
+      where: { planId, selfDeclared: true },
+      select: { losId: true, declaredRead: true, declaredWatched: true, packageId: true, questionsAnswered: true },
     }),
     // Sessions the candidate logged before tasks could be ticked. A session
     // on the content package, or an untagged one with no questions answered,
@@ -113,20 +116,37 @@ async function loadWorkDone(
       select: { losId: true, packageId: true, questionsAnswered: true },
     }),
     db.planPackage.findMany({ where: { planId, roles: { has: "content" } }, select: { packageId: true } }),
+    // Which packages hold a question bank for which reading, so declared
+    // questions settle a bank only when they were answered in it.
+    db.packageUnitReading.findMany({
+      where: { unit: { resources: { some: { kind: "question_set" } } } },
+      select: { readingId: true, unit: { select: { edition: { select: { packageId: true } } } } },
+    }),
   ]);
 
   const readingByLos = new Map<string, string>();
   for (const reading of readings) {
     for (const los of reading.los) readingByLos.set(los.id, reading.id);
   }
-  const declaredReadRefs = new Set<string>();
+  // Notes and videos are declared apart. Both together is the whole first
+  // pass, seminar included, which is what the original "I have read it" meant.
+  const bankPackages = new Set(banks.map((b) => `${b.readingId}|${b.unit.edition.packageId}`));
+  const notesReadRefs = new Set<string>();
+  const watchedDeclared = new Set<string>();
+  const declaredQuestionsByRef = new Map<string, number>();
   for (const row of declared) {
     const ref = readingByLos.get(row.losId);
-    if (ref) declaredReadRefs.add(ref);
+    if (!ref) continue;
+    if (row.declaredRead) notesReadRefs.add(ref);
+    if (row.declaredWatched) watchedDeclared.add(ref);
+    if (row.questionsAnswered > 0 && row.packageId && bankPackages.has(`${ref}|${row.packageId}`)) {
+      declaredQuestionsByRef.set(ref, (declaredQuestionsByRef.get(ref) ?? 0) + row.questionsAnswered);
+    }
   }
+  const declaredReadRefs = new Set([...notesReadRefs].filter((ref) => watchedDeclared.has(ref)));
 
   const contentIds = new Set(contentPackages.map((p) => p.packageId));
-  const watchedRefs = new Set<string>();
+  const watchedRefs = new Set<string>(watchedDeclared);
   for (const row of studied) {
     const onContent = row.packageId ? contentIds.has(row.packageId) : row.questionsAnswered === 0;
     const ref = readingByLos.get(row.losId);
@@ -136,6 +156,7 @@ async function loadWorkDone(
   const readingDoneByRef = new Map<string, number>();
   const questionsDoneByRef = new Map<string, number>();
   const readingDoneByKindByRef = new Map<string, Partial<Record<ReadingTaskKind, number>>>();
+  const questionDoneByKindByRef = new Map<string, Partial<Record<"questions" | "eocq", number>>>();
 
   for (const task of done) {
     const minutes = creditedMinutes(task);
@@ -158,11 +179,26 @@ async function loadWorkDone(
         const kind = task.kind as ReadingTaskKind;
         byKind[kind] = (byKind[kind] ?? 0) + share;
         readingDoneByKindByRef.set(ref, byKind);
+      } else {
+        // Answer review is part of the bank's practice block.
+        const kind = task.kind === "eocq" ? "eocq" : "questions";
+        const byKind = questionDoneByKindByRef.get(ref) ?? {};
+        byKind[kind] = (byKind[kind] ?? 0) + share;
+        questionDoneByKindByRef.set(ref, byKind);
       }
     }
   }
 
-  return { readingDoneByRef, questionsDoneByRef, declaredReadRefs, readingDoneByKindByRef, watchedRefs };
+  return {
+    readingDoneByRef,
+    questionsDoneByRef,
+    declaredReadRefs,
+    readingDoneByKindByRef,
+    watchedRefs,
+    notesReadRefs,
+    declaredQuestionsByRef,
+    questionDoneByKindByRef,
+  };
 }
 
 /**
@@ -926,8 +962,37 @@ export async function generateHorizon(
 
     // What the candidate has actually done, on plan or off it. Reading and
     // question minutes come from completed tasks; mastery comes from the log.
-    const { readingDoneByRef, questionsDoneByRef, declaredReadRefs, readingDoneByKindByRef, watchedRefs } =
-      await loadWorkDone(planId, readings);
+    const {
+      readingDoneByRef,
+      questionsDoneByRef,
+      declaredReadRefs,
+      readingDoneByKindByRef,
+      watchedRefs,
+      notesReadRefs,
+      declaredQuestionsByRef,
+      questionDoneByKindByRef,
+    } = await loadWorkDone(planId, readings);
+    // Declared notes settle the notes, as watched videos settle the video.
+    for (const g of packable) {
+      if (!notesReadRefs.has(g.ref) || g.noteMinutes <= 0) continue;
+      const byKind = readingDoneByKindByRef.get(g.ref) ?? {};
+      const extra = Math.max(0, g.noteMinutes - (byKind["content-notes"] ?? 0));
+      byKind["content-notes"] = (byKind["content-notes"] ?? 0) + extra;
+      readingDoneByKindByRef.set(g.ref, byKind);
+      readingDoneByRef.set(g.ref, (readingDoneByRef.get(g.ref) ?? 0) + extra);
+    }
+    // Questions answered in this bank before the plan settle that share of it,
+    // answer review included, since the two are one block of practice.
+    for (const g of packable) {
+      const answered = declaredQuestionsByRef.get(g.ref) ?? 0;
+      const count = g.questionCount ?? 0;
+      if (answered <= 0 || count <= 0) continue;
+      const share = Math.min(1, answered / count) * g.questionMinutes;
+      questionsDoneByRef.set(g.ref, (questionsDoneByRef.get(g.ref) ?? 0) + share);
+      const byKind = questionDoneByKindByRef.get(g.ref) ?? {};
+      byKind.questions = (byKind.questions ?? 0) + share;
+      questionDoneByKindByRef.set(g.ref, byKind);
+    }
     // A watched video settles the video only, topping up whatever its ticked
     // video tasks already settled, never past the video's length.
     for (const g of packable) {
@@ -960,6 +1025,7 @@ export async function generateHorizon(
       asOf,
       tuning,
       readingDoneByKindByRef,
+      questionDoneByKindByRef,
     );
     writeOffs = reconciled.writeOffs;
     underPractised = reconciled.underPractised;
