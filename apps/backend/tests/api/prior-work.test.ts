@@ -219,6 +219,7 @@ describe("prior work declared at onboarding", () => {
     const forDeclared = tasks.filter((t) => declaredIds.has(t.readingIds[0] ?? ""));
 
     expect(forDeclared.length).toBeGreaterThan(0);
-    expect(forDeclared.every((t) => t.kind === "questions" || t.kind === "eocq")).toBe(true);
+    const practice = new Set(["questions", "answer-review", "eocq"]);
+    expect(forDeclared.every((t) => practice.has(t.kind))).toBe(true);
   });
 });

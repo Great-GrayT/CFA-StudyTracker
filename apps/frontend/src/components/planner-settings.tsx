@@ -113,6 +113,15 @@ const GROUPS: { title: string; note?: string; fields: Field[] }[] = [
         step: 1,
       },
       {
+        key: "answerReviewWordsPerMinute",
+        label: "How fast you read worked answers",
+        detail:
+          "Sizes the answer review after each question set. At 200, eight questions get about 12 minutes of review. Lower it if you rework the calculations.",
+        kind: "count",
+        unit: "words a minute",
+        step: 10,
+      },
+      {
         key: "questionMultipleFloor",
         label: "Lowest ratio worth planning",
         detail: "Below this your calendar is too short, and the plan says so rather than pretending.",

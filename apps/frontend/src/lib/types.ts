@@ -84,6 +84,7 @@ export type Tuning = {
   coverageDeadlineWeeks: number;
   reviewQuestionMultiple: number;
   minNewUnitReadMinutes: number;
+  answerReviewWordsPerMinute: number;
   weeklyInterleaveShare: number;
   reviewInjectionCapShare: number;
   masteryWeightAccuracy: number;

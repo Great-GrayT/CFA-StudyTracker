@@ -9,6 +9,7 @@ import { masteryOfUnit } from "./mastery";
 import type { Calendar, PackableGroup, PlannedDay, PlannedTask } from "./packing";
 import { MIN_TASK_MINUTES } from "./packing";
 import type { Tuning } from "./tuning";
+import { questionsIn, splitPractice } from "./question-pace";
 
 export type PairingTag = "paired" | "questions-only" | "reading-only";
 
@@ -497,15 +498,47 @@ export function packFirstPass(
         const isLast = questionSlice >= s.questionsLeft;
 
         for (const chunk of drawChunks(s.questionsByKind, questionSlice)) {
+          const mode = s.unit.calculationShare >= 0.35 ? "timed-drill" : "untimed-review";
+          if (chunk.kind !== "questions") {
+            tasks.push({
+              kind: chunk.kind,
+              readingIds: s.unit.readingRefs,
+              estimatedMinutes: chunk.minutes,
+              requiresConfidence: isLast,
+              mode,
+              vignetteFrom: from,
+              vignetteTo: to,
+            });
+            continue;
+          }
+          // Budgeted as one block so both land today; shown as two tasks.
+          const split = splitPractice(chunk.minutes, s.unit.answeringShare ?? 1);
+          const questionTarget = questionsIn(
+            chunk.minutes,
+            s.unit.questionCount ?? 0,
+            s.unit.questionMinutes,
+          );
           tasks.push({
-            kind: chunk.kind,
+            kind: "questions",
             readingIds: s.unit.readingRefs,
-            estimatedMinutes: chunk.minutes,
-            requiresConfidence: isLast,
-            mode: s.unit.calculationShare >= 0.35 ? "timed-drill" : "untimed-review",
+            estimatedMinutes: split.answering,
+            questionTarget,
+            requiresConfidence: isLast && split.review === 0,
+            mode,
             vignetteFrom: from,
             vignetteTo: to,
           });
+          if (split.review > 0) {
+            tasks.push({
+              kind: "answer-review",
+              readingIds: s.unit.readingRefs,
+              estimatedMinutes: split.review,
+              questionTarget,
+              requiresConfidence: isLast,
+              vignetteFrom: from,
+              vignetteTo: to,
+            });
+          }
         }
         s.questionMinutesDone += questionSlice;
       }

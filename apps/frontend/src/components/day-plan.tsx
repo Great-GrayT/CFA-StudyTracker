@@ -214,7 +214,9 @@ function TaskRow({ task, onSubmit }: { task: PrescribedTask; onSubmit?: SubmitFo
               )}
               <span className={styles.meta}>
                 {material.questionCount !== null
-                  ? `${material.questionCount} questions`
+                  ? material.action === "Review answers"
+                    ? `answers to ${material.questionCount} questions`
+                    : `${material.questionCount} questions`
                   : null}
                 {material.questionCount !== null && material.packageName ? ", " : null}
                 {material.packageName}

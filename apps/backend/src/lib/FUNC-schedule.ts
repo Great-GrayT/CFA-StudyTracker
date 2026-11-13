@@ -31,6 +31,11 @@ import {
 } from "../core/pairing";
 import { packReview, projectCoverageDate, reviewPhaseStart, reviewQueue } from "../core/review";
 import { countsForCalibration, creditedMinutes } from "../core/task-credit";
+import {
+  answerReviewMinutes,
+  questionPaceAnchor,
+  reviewQuestionMinutes,
+} from "../core/question-pace";
 
 const HORIZON_DAYS = 14;
 
@@ -57,7 +62,7 @@ const KNOWN_EFFORT_KINDS = new Set([
 // prices. "review" is absent from both on purpose: it belongs to the review
 // phase and settles no first-pass debt.
 const READING_TASK_KINDS = new Set(["content-notes", "content-video", "seminar"]);
-const QUESTION_TASK_KINDS = new Set(["questions", "eocq"]);
+const QUESTION_TASK_KINDS = new Set(["questions", "answer-review", "eocq"]);
 
 /**
  * Minutes of reading and of questions already completed, per unit.
@@ -184,11 +189,14 @@ async function loadMasteryObservations(
     const losIds = losByReading.get(g.ref) ?? [];
     if (losIds.length === 0) continue;
 
+    // The bank's count is known now; inverting minutes through the rate
+    // stopped being exact once the rate was anchored to exam pace.
     const questionMinutes = questionMinutesOf(g);
     const perQuestion =
       effortConstants.Q_BASE +
       (effortConstants.Q_CALC - effortConstants.Q_BASE) * g.calculationShare;
-    const unitQuestions = perQuestion > 0 ? questionMinutes / perQuestion : 0;
+    const unitQuestions =
+      g.questionCount ?? (perQuestion > 0 ? questionMinutes / perQuestion : 0);
 
     result.set(
       g.ref,
@@ -298,6 +306,12 @@ function deriveFactorTree(completedTasks: Array<{
 type ReadingQuestionProfile = {
   vignetteCount: number;
   calculationShare: number;
+  /** Questions in this reading's own banks. */
+  questionCount: number;
+  /** This reading's own practice, pre-trim: answering at anchored exam pace plus reviewing the answers. */
+  questionMinutes: number;
+  /** Share of questionMinutes that is answering; the rest is answer review. */
+  answeringShare: number;
 };
 
 /** Raw (pre-trim) eocq/seminar minutes for a topic, carried separately from
@@ -326,6 +340,7 @@ async function buildTopicEstimates(
   levelId: string,
   totalPlanMinutes: number,
   tree: FactorTree,
+  answerReviewWordsPerMinute: number,
   constants: EffortConstants = DEFAULT_EFFORT_CONSTANTS,
 ): Promise<{
   estimates: TopicEstimate[];
@@ -334,6 +349,23 @@ async function buildTopicEstimates(
   topicReviewRaw: Map<string, TopicReviewRaw>;
 }> {
   const topics = await db.topic.findMany({ where: { levelId } });
+
+  // Anchor the calc-share question rate to exam pace across this level's
+  // banks, so topics differ by calculation load but average 3.0 min/q.
+  const banks = await db.packageResource.findMany({
+    where: { kind: "question_set", unit: { readings: { some: { reading: { topic: { levelId } } } } } },
+    select: { questionCount: true, calcCount: true },
+  });
+  const anchor = questionPaceAnchor(
+    banks.map((b) => ({ questionCount: b.questionCount ?? 0, calcCount: b.calcCount ?? 0 })),
+    constants,
+  );
+  const pacedConstants: EffortConstants = {
+    ...constants,
+    Q_BASE: constants.Q_BASE * anchor,
+    Q_CALC: constants.Q_CALC * anchor,
+  };
+
   const estimates: TopicEstimate[] = [];
   const readingProfiles = new Map<string, ReadingQuestionProfile>();
   const topicOtherRaw = new Map<string, TopicOtherRaw>();
@@ -377,6 +409,10 @@ async function buildTopicEstimates(
       let readingQuestionCount = 0;
       let readingCalcCount = 0;
       let readingVignetteCount = 0;
+      // Null until a file reports a count, so one unmeasured file sends the
+      // whole reading to the one-third fallback rather than a wrong subtraction.
+      let questionWords: number | null = 0;
+      let answerWords: number | null = 0;
 
       for (const ur of unitReadings) {
         const provider = ur.unit.edition.package.slug ?? ur.unit.edition.package.id;
@@ -429,6 +465,16 @@ async function buildTopicEstimates(
 
         for (const res of ur.unit.resources) {
           if (!KNOWN_EFFORT_KINDS.has(res.kind)) continue;
+          // Answering runs at exam pace; the explanations become their own
+          // answer-review task (they turned 8 questions into 85 minutes when
+          // priced as practice), so only their size is taken here.
+          if (res.kind === "answer_set") {
+            answerWords = answerWords === null || !res.wordCount ? null : answerWords + res.wordCount;
+            continue;
+          }
+          if (res.kind === "question_set") {
+            questionWords = questionWords === null || !res.wordCount ? null : questionWords + res.wordCount;
+          }
 
           const input: ResourceInput = { kind: res.kind };
 
@@ -480,6 +526,9 @@ async function buildTopicEstimates(
         vignetteCount: readingVignetteCount,
         calculationShare:
           readingQuestionCount > 0 ? readingCalcCount / readingQuestionCount : 0.5,
+        questionCount: readingQuestionCount,
+        questionMinutes: 0,
+        answeringShare: 1,
       });
 
       // Weight-implied cap for this reading is its share of the topic cap
@@ -491,7 +540,7 @@ async function buildTopicEstimates(
           resources: resourceInputs,
           weightImpliedMinutes: readingCap,
         },
-        constants,
+        pacedConstants,
         (_r, i) => factorFor(tree, resourceKeys[i]),
       );
 
@@ -503,8 +552,23 @@ async function buildTopicEstimates(
       lectureRaw += est.byKind["lecture"] ?? 0;
       reviewRaw += est.byKind["review"] ?? 0;
       reviewMinutes += (est.byKind["lecture"] ?? 0) + (est.byKind["review"] ?? 0);
-      questionMinutes += est.byKind["question_set"] ?? 0;
-      questionMinutes += est.byKind["answer_set"] ?? 0;
+      // Answer review rides with answering in every budget, so the week is
+      // planned for both; packers split the two only when emitting tasks.
+      const answering = est.byKind["question_set"] ?? 0;
+      const reviewing =
+        answering > 0
+          ? answerReviewMinutes(
+              { answerWords: answerWords || null, questionWords: questionWords || null },
+              answering,
+              answerReviewWordsPerMinute,
+            )
+          : 0;
+      questionMinutes += answering + reviewing;
+      const profile = readingProfiles.get(reading.id);
+      if (profile) {
+        profile.questionMinutes = answering + reviewing;
+        profile.answeringShare = answering + reviewing > 0 ? answering / (answering + reviewing) : 1;
+      }
       eocqRaw += est.byKind["eocq"] ?? 0;
       seminarRaw += est.byKind["seminar"] ?? 0;
       otherMinutes += (est.byKind["eocq"] ?? 0) + (est.byKind["seminar"] ?? 0);
@@ -679,7 +743,12 @@ export async function generateHorizon(
 
   // Build effort estimates and allocate by topic
   const { estimates: topicEstimates, readingProfiles, topicOtherRaw, topicReviewRaw } =
-    await buildTopicEstimates(plan.levelId, totalPlanMinutes, factorTree);
+    await buildTopicEstimates(
+      plan.levelId,
+      totalPlanMinutes,
+      factorTree,
+      tuning.answerReviewWordsPerMinute,
+    );
   const allocationResult = allocate(topicEstimates, totalPlanMinutes);
 
   // Get all readings and build SchedulableGroup objects
@@ -765,7 +834,19 @@ export async function generateHorizon(
     const profile = readingProfiles.get(reading.id) ?? {
       vignetteCount: 0,
       calculationShare: 0.5,
+      questionCount: 0,
+      questionMinutes: 0,
+      answeringShare: 1,
     };
+
+    // A module's practice is its OWN bank, never its topic's average: the
+    // even split gave an 8-question module the minutes of its 28-question
+    // neighbours. Only allocation's trim (a tight calendar) may shrink it,
+    // and nothing may grow it, since the engine does not invent questions.
+    const topicQuestionRaw =
+      topicEstimates.find((e) => e.key === reading.topicId)?.questionMinutes ?? 0;
+    const questionTrim =
+      topicQuestionRaw > 0 ? Math.min(1, budget.questionMinutes / topicQuestionRaw) : 0;
 
     packable.push({
       ...group,
@@ -774,7 +855,9 @@ export async function generateHorizon(
       eocqMinutes: Math.max(0, eocqShare / readingCountForTopic),
       seminarMinutes: Math.max(0, seminarShare / readingCountForTopic),
       reviewMinutes: Math.max(0, reviewShare / readingCountForTopic),
-      questionMinutes: Math.max(0, budget.questionMinutes / readingCountForTopic),
+      questionMinutes: Math.max(0, profile.questionMinutes * questionTrim),
+      questionCount: profile.questionCount,
+      answeringShare: profile.answeringShare,
       vignetteCount: profile.vignetteCount,
       calculationShare: profile.calculationShare,
     });
@@ -883,7 +966,17 @@ export async function generateHorizon(
             topicOrder: g.topicOrder,
             moduleOrder: g.moduleOrder,
             reviewReadMinutes: g.reviewMinutes ?? 0,
-            questionMinutes: questionMinutesOf(g),
+            // Review answers questions already seen, so it runs faster
+            // than first-pass practice; eocq videos keep their length.
+            questionMinutes: reviewQuestionMinutes(g.questionMinutes) + g.eocqMinutes,
+            questionCount: g.questionCount,
+            // eocq videos ride in the same review block and count as
+            // answering, not as reading worked solutions.
+            answeringShare: (() => {
+              const practice = reviewQuestionMinutes(g.questionMinutes);
+              const total = practice + g.eocqMinutes;
+              return total > 0 ? (practice * (g.answeringShare ?? 1) + g.eocqMinutes) / total : 1;
+            })(),
             mastery: masteryOfUnit(obs, asOf, tuning),
             eligible: isEligibleToJump(obs, asOf, tuning),
             vignetteCount: g.vignetteCount,

@@ -37,6 +37,8 @@ export type Tuning = {
   firstPassQuestionMultiple: number;
   questionMultipleFloor: number;
   minNewUnitReadMinutes: number;
+  /** Words a minute when reading worked solutions; sizes answer review. */
+  answerReviewWordsPerMinute: number;
 
   // Review phase
   reviewQuestionMultiple: number;
@@ -73,6 +75,9 @@ export const DEFAULT_TUNING: Tuning = {
   firstPassQuestionMultiple: 2.0,
   questionMultipleFloor: 0.5,
   minNewUnitReadMinutes: 15,
+  // Measured on the UWorld L2 banks (about 273 explanation words per
+  // question), 200 makes review about 46% of answering time.
+  answerReviewWordsPerMinute: 200,
 
   reviewQuestionMultiple: 4.0,
   coverageDeadlineWeeks: 6,
@@ -95,6 +100,7 @@ export const TUNING_RANGES: Record<string, { min: number; max: number }> = {
   firstPassQuestionMultiple: { min: 0.5, max: 6.0 },
   questionMultipleFloor: { min: 0.2, max: 2.0 },
   minNewUnitReadMinutes: { min: 5, max: 60 },
+  answerReviewWordsPerMinute: { min: 100, max: 400 },
 
   reviewQuestionMultiple: { min: 1.0, max: 10.0 },
   coverageDeadlineWeeks: { min: 1, max: 20 },

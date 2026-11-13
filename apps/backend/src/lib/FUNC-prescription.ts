@@ -87,11 +87,12 @@ const RESOURCE_KINDS: Record<string, string[]> = {
   seminar: ["seminar"],
   review: ["review"],
   questions: ["question_set"],
+  "answer-review": ["answer_set"],
 };
 
 /** Whether a task wants the package the candidate tagged for questions. */
 function roleFor(taskKind: string): "questions" | "content" {
-  return taskKind === "questions" ? "questions" : "content";
+  return taskKind === "questions" || taskKind === "answer-review" ? "questions" : "content";
 }
 
 /**
@@ -129,6 +130,7 @@ const ACTIONS: Record<string, string> = {
   seminar: "Watch",
   review: "Watch",
   questions: "Questions",
+  "answer-review": "Review answers",
   mock: "Sit",
   "mock-review": "Review",
 };

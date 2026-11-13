@@ -49,7 +49,7 @@ export type Campaign = {
 // and nothing else for its reading, which is what makes the two separable from
 // the task rows alone.
 const FIRST_PASS_READING = new Set(["content-notes", "content-video", "seminar"]);
-const QUESTION_KINDS = new Set(["questions", "eocq"]);
+const QUESTION_KINDS = new Set(["questions", "answer-review", "eocq"]);
 
 function toISODate(d: Date): string {
   return d.toISOString().slice(0, 10);

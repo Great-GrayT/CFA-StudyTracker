@@ -254,7 +254,7 @@ model PlanTask {
   date              DateTime
   // Position in this day's ordered task list (0-indexed within the day)
   order             Int
-  // Closed vocabulary: content-notes, content-video, eocq, questions, seminar, review, mock, mock-review
+  // Closed vocabulary: content-notes, content-video, eocq, questions, answer-review, seminar, review, mock, mock-review
   kind              String
   // Optional reference to a provider resource (PackageResource)
   resourceId        String?

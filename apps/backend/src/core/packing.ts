@@ -2,6 +2,7 @@
 // Takes ordered modules and a calendar, produces dated days of tasks.
 
 import type { SchedulableGroup } from "./ordering";
+import { questionsIn, splitPractice } from "./question-pace";
 
 export type PlannedTask = {
   kind: string;
@@ -46,6 +47,10 @@ export type PackableGroup = SchedulableGroup & {
   videoMinutes: number;
   eocqMinutes: number;
   questionMinutes: number;
+  /** Questions in the bank behind questionMinutes, so tasks can name their count. */
+  questionCount?: number;
+  /** Share of questionMinutes spent answering; the rest is answer review. Default 1. */
+  answeringShare?: number;
   seminarMinutes?: number;
   reviewMinutes?: number;
   vignetteCount: number;
@@ -202,13 +207,28 @@ function generateModuleTasks(
       const groupMinutes = Math.round((vigTo - vigFrom + 1) * minutesPerVignette);
       const isLastOfModule = i === groupCount - 1;
 
+      const split = splitPractice(groupMinutes, group.answeringShare ?? 1);
+      const questionTarget = questionsIn(groupMinutes, group.questionCount ?? 0, questionMinutes);
       tasks.push({
         kind: "questions",
         resourceId: undefined,
         readingIds: group.readingRefs,
-        estimatedMinutes: groupMinutes,
-        requiresConfidence: isLastOfModule,
+        estimatedMinutes: split.answering,
+        questionTarget,
+        requiresConfidence: isLastOfModule && split.review === 0,
         mode: calculationShare >= 0.35 ? "timed-drill" : "untimed-review",
+        vignetteFrom: vigFrom,
+        vignetteTo: vigTo,
+        moduleRef: group.ref,
+        isLastInModule: isLastOfModule && split.review === 0,
+      });
+      if (split.review > 0) tasks.push({
+        kind: "answer-review",
+        resourceId: undefined,
+        readingIds: group.readingRefs,
+        estimatedMinutes: split.review,
+        questionTarget,
+        requiresConfidence: isLastOfModule,
         vignetteFrom: vigFrom,
         vignetteTo: vigTo,
         moduleRef: group.ref,

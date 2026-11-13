@@ -12,6 +12,7 @@
 import type { Calendar, PlannedDay, PlannedTask } from "./packing";
 import { MIN_TASK_MINUTES } from "./packing";
 import type { PlanMode, Tuning } from "./tuning";
+import { questionsIn, splitPractice } from "./question-pace";
 
 export type ReviewUnit = {
   ref: string;
@@ -25,6 +26,10 @@ export type ReviewUnit = {
    */
   reviewReadMinutes: number;
   questionMinutes: number;
+  /** Questions in the bank behind questionMinutes, so tasks can name their count. */
+  questionCount?: number;
+  /** Share of questionMinutes spent answering; the rest is answer review. Default 1. */
+  answeringShare?: number;
   mastery: number;
   /** Whether the evidence lets this unit depart from curriculum order. */
   eligible: boolean;
@@ -383,15 +388,30 @@ export function packReview(
           )
         : count - 1;
 
+      const split = splitPractice(minutes, unit.answeringShare ?? 1);
+      const questionTarget = questionsIn(minutes, unit.questionCount ?? 0, unit.questionMinutes);
+      const closes = take >= questionCursor.questionsLeft;
       tasks.push({
         kind: "questions",
         readingIds: unit.readingRefs,
-        estimatedMinutes: minutes,
-        requiresConfidence: take >= questionCursor.questionsLeft,
+        estimatedMinutes: split.answering,
+        questionTarget,
+        requiresConfidence: closes && split.review === 0,
         mode: unit.calculationShare >= 0.35 ? "timed-drill" : "untimed-review",
         vignetteFrom: from,
         vignetteTo: to,
       });
+      if (split.review > 0) {
+        tasks.push({
+          kind: "answer-review",
+          readingIds: unit.readingRefs,
+          estimatedMinutes: split.review,
+          questionTarget,
+          requiresConfidence: closes,
+          vignetteFrom: from,
+          vignetteTo: to,
+        });
+      }
       questionCursor.questionsDone += take;
       questionCursor.questionsLeft -= take;
       left -= take;
