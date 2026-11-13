@@ -297,3 +297,114 @@
   font-size: 13px;
   color: var(--muted);
 }
+
+/* ------------------------------------------------------- schedule and tryout */
+
+.times {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.time {
+  display: grid;
+  gap: var(--space-1);
+  font-size: 14px;
+  color: var(--text);
+}
+
+/* 16px stops iOS zooming the page when the field takes focus. */
+.timeInput,
+.select {
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-input);
+  background: var(--ground);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+}
+
+.select {
+  max-width: 100%;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.button {
+  min-height: 44px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--claimed);
+  border-radius: var(--radius-pill);
+  background: var(--claimed);
+  color: var(--ground);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.textButton {
+  min-height: 44px;
+  padding: 0 var(--space-2);
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  color: var(--claimed-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.button:disabled,
+.textButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.timeInput:focus-visible,
+.select:focus-visible,
+.button:focus-visible,
+.textButton:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.error {
+  margin: 0;
+  font-size: 14px;
+  color: var(--alarm-ink);
+}
+
+/* The message as it would arrive: subject, then the body with its own line
+   breaks kept. */
+.preview {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--ground);
+  border: 1px solid var(--rule);
+}
+
+.previewSubject {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.previewBody {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

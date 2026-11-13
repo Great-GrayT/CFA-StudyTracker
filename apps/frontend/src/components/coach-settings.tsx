@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, ApiError, messageForStatus } from "@/lib/api";
 import type { CoachPreference, GeocodeMatch, Plan } from "@/lib/types";
@@ -156,9 +157,210 @@ export function CoachSettings({ plan, onSaved }: { plan: Plan; onSaved: () => vo
 
       <p className={styles.hint}>
         Both channels say the same thing. Turning one off never affects the other, and neither
-        touches your plan or anything you have logged.
+        touches your plan or anything you have recorded.
       </p>
+
+      <CoachSchedule plan={plan} />
+      <CoachTryout />
     </section>
+  );
+}
+
+type Slot = "prescription" | "nudge" | "debrief";
+type CoachInfo = { schedule: Record<Slot, string>; timeZone: string; events: Record<Slot, string[]> };
+type Preview = {
+  key: string | null;
+  state: { horizon: string; phase: string; streakDays: number; tasksDone: number; taskCount: number };
+  message: { subject: string; text: string } | null;
+  delivered?: boolean;
+  reason?: string;
+};
+
+const SLOT_LABELS: Record<Slot, string> = {
+  prescription: "Morning plan",
+  nudge: "Evening nudge",
+  debrief: "Night summary",
+};
+const DEFAULT_TIMES: Record<Slot, string> = { prescription: "06:30", nudge: "20:00", debrief: "22:30" };
+const SLOTS: Slot[] = ["prescription", "nudge", "debrief"];
+
+/** "P_REST_BEHIND" reads as "rest behind" under its slot's heading. */
+function eventLabel(key: string): string {
+  return key.slice(2).toLowerCase().replace(/_/g, " ");
+}
+
+function useCoachInfo() {
+  return useQuery({ queryKey: ["coach-info"], queryFn: () => api.get<CoachInfo>("coach/preview") });
+}
+
+/** The three daily times, in the plan's own zone, saved together. */
+function CoachSchedule({ plan }: { plan: Plan }) {
+  const info = useCoachInfo();
+  const [times, setTimes] = useState<Record<Slot, string>>(DEFAULT_TIMES);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (info.data) setTimes(info.data.schedule);
+  }, [info.data]);
+
+  async function save(next: Record<Slot, string> | null) {
+    const check = next ?? DEFAULT_TIMES;
+    // HH:MM strings compare correctly as text.
+    if (!(check.prescription < check.nudge && check.nudge < check.debrief)) {
+      setError("Keep them in order: morning, then evening, then night.");
+      return;
+    }
+    setError(null);
+    setSaving(true);
+    try {
+      await api.patch(`plans/${plan.id}`, { coachSchedule: next });
+      await info.refetch();
+      toast.success(next ? "Coach times saved." : "Coach times reset.");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? messageForStatus(err.status) : "Could not save that. Try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const zone = info.data?.timeZone;
+  return (
+    <fieldset className={styles.channel}>
+      <legend className={styles.channelLabel}>When it writes</legend>
+      <div className={styles.times}>
+        {SLOTS.map((slot) => (
+          <label key={slot} className={styles.time}>
+            <span>{SLOT_LABELS[slot]}</span>
+            <input
+              type="time"
+              className={styles.timeInput}
+              value={times[slot]}
+              disabled={saving || !info.data}
+              aria-invalid={error ? true : undefined}
+              onChange={(e) => setTimes((prev) => ({ ...prev, [slot]: e.target.value }))}
+            />
+          </label>
+        ))}
+      </div>
+      {zone ? (
+        <p className={styles.hint}>
+          {zone === "UTC"
+            ? "These times are in UTC, because no city is set. Choose your city below and they follow your own clock."
+            : `These times are in ${zone}.`}
+        </p>
+      ) : null}
+      {error ? (
+        <p className={styles.error} role="alert">
+          {error}
+        </p>
+      ) : null}
+      <div className={styles.row}>
+        <button type="button" className={styles.button} disabled={saving || !info.data} onClick={() => save(times)}>
+          {saving ? "Saving" : "Save times"}
+        </button>
+        <button type="button" className={styles.textButton} disabled={saving} onClick={() => save(null)}>
+          Reset to defaults
+        </button>
+      </div>
+    </fieldset>
+  );
+}
+
+/** Read any message the coach can send, with your real numbers, and optionally receive it. */
+function CoachTryout() {
+  const info = useCoachInfo();
+  const [target, setTarget] = useState("slot:prescription");
+  const [preview, setPreview] = useState<Preview | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function run(deliver?: "email" | "push") {
+    const [kind, value] = target.split(":") as ["slot" | "key", string];
+    setBusy(true);
+    try {
+      const body = await api.post<Preview>("coach/preview", {
+        [kind]: value,
+        ...(deliver ? { deliver } : {}),
+      });
+      setPreview(body);
+      if (deliver && body.delivered) {
+        toast.success(deliver === "email" ? "Sent to your email." : "Sent to your phone.");
+      }
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Could not reach the coach. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <fieldset className={styles.channel}>
+      <legend className={styles.channelLabel}>Try a message</legend>
+      <p className={styles.hint}>
+        Shows what the coach would say, worked out from your plan right now. Nothing is recorded as
+        sent, so the real message later today still goes out.
+      </p>
+      <label className={styles.time} htmlFor="coach-tryout">
+        <span>Message</span>
+        <select
+          id="coach-tryout"
+          className={styles.select}
+          value={target}
+          onChange={(e) => setTarget(e.target.value)}
+        >
+          <optgroup label="What it would send now">
+            {SLOTS.map((slot) => (
+              <option key={slot} value={`slot:${slot}`}>
+                {SLOT_LABELS[slot]}
+              </option>
+            ))}
+          </optgroup>
+          {info.data
+            ? SLOTS.map((slot) => (
+                <optgroup key={slot} label={`${SLOT_LABELS[slot]}, any event`}>
+                  {info.data.events[slot].map((key) => (
+                    <option key={key} value={`key:${key}`}>
+                      {eventLabel(key)}
+                    </option>
+                  ))}
+                </optgroup>
+              ))
+            : null}
+        </select>
+      </label>
+      <div className={styles.row}>
+        <button type="button" className={styles.button} disabled={busy} onClick={() => run()}>
+          Show message
+        </button>
+        <button type="button" className={styles.textButton} disabled={busy} onClick={() => run("email")}>
+          Email it to me
+        </button>
+        <button type="button" className={styles.textButton} disabled={busy} onClick={() => run("push")}>
+          Send to my phone
+        </button>
+      </div>
+      <div aria-live="polite">
+        {preview ? (
+          <div className={styles.preview}>
+            <p className={styles.hint}>
+              {preview.key ? `Event: ${eventLabel(preview.key)}. ` : ""}
+              {`Streak ${preview.state.streakDays}, ${preview.state.tasksDone} of ${preview.state.taskCount} tasks recorded today.`}
+            </p>
+            {preview.message ? (
+              <>
+                <p className={styles.previewSubject}>{preview.message.subject}</p>
+                <p className={styles.previewBody}>{preview.message.text}</p>
+              </>
+            ) : (
+              <p className={styles.lede}>
+                The coach would send nothing for this right now. The evening nudge, for one, stays
+                quiet once you have recorded study today.
+              </p>
+            )}
+          </div>
+        ) : null}
+      </div>
+    </fieldset>
   );
 }
 

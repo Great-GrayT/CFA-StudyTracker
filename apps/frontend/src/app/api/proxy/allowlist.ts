@@ -46,6 +46,7 @@ export const ALLOWED = [
   // silent one without waiting for 06:30. Anchored: nothing else the backend
   // may later mount under coach/ is admitted by this.
   /^coach\/test$/,
+  /^coach\/preview$/,
 ];
 
 /**

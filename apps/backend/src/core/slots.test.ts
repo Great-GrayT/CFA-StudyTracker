@@ -1,6 +1,6 @@
 import { describe, test, expect } from "vitest";
 import type { Slot } from "./slots";
-import { localDateFor, dueSlots } from "./slots";
+import { localDateFor, dueSlots, parseSchedule, formatSchedule, SLOT_LOCAL_TIMES } from "./slots";
 
 describe("Email coach time slots", () => {
   test("the local date is the candidate's date, not the server's", () => {
@@ -51,5 +51,24 @@ describe("Email coach time slots", () => {
 
   test("an unknown timezone is rejected rather than silently treated as UTC", () => {
     expect(() => localDateFor(new Date(), "Mars/Olympus")).toThrow(/time zone|timezone/i);
+  });
+});
+
+describe("a candidate's own coach schedule", () => {
+  test("slots fire at the candidate's times, not the defaults", () => {
+    const schedule = parseSchedule({ prescription: "05:00", nudge: "18:15", debrief: "21:00" });
+    // 18:20 in UTC: past the custom nudge, before the default 20:00.
+    expect(dueSlots(new Date("2027-01-04T18:20:00Z"), "UTC", [], schedule)).toEqual(["prescription", "nudge"]);
+  });
+
+  test("a missing, malformed or out-of-order schedule falls back to the defaults", () => {
+    expect(parseSchedule(null)).toEqual(SLOT_LOCAL_TIMES);
+    expect(parseSchedule({ prescription: "25:00", nudge: "20:00", debrief: "22:30" })).toEqual(SLOT_LOCAL_TIMES);
+    expect(parseSchedule({ prescription: "21:00", nudge: "20:00", debrief: "22:30" })).toEqual(SLOT_LOCAL_TIMES);
+  });
+
+  test("formatSchedule round-trips through parseSchedule", () => {
+    const times = { prescription: "07:05", nudge: "19:30", debrief: "23:45" };
+    expect(formatSchedule(parseSchedule(times))).toEqual(times);
   });
 });

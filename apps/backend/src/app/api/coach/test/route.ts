@@ -54,8 +54,8 @@ export async function POST(req: Request): Promise<Response> {
       await sendMail({
         to: user.email,
         subject: "Study Tracker: test message",
-        text: "Your email notifications are working. The coach writes at 06:30, 20:00 and 22:30 in your own time zone.",
-        html: "<p>Your email notifications are working.</p><p>The coach writes at 06:30, 20:00 and 22:30 in your own time zone.</p>",
+        text: "Your email notifications are working. The coach writes at the three times set in Settings, in your own time zone.",
+        html: "<p>Your email notifications are working.</p><p>The coach writes at the three times set in Settings, in your own time zone.</p>",
       });
     } catch (err) {
       console.error("coach/test: email send failed", err);

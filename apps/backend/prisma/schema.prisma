@@ -178,6 +178,9 @@ model StudyPackage {
 
 model StudyPlan {
   id                 String             @id @default(cuid())
+  // Local "HH:MM" per coach slot ({ prescription, nudge, debrief }); null
+  // means the defaults in core/slots.ts.
+  coachSchedule      Json?
   // The prior-work form exactly as last submitted, so it can be shown again.
   // The log rows derived from it are what the planner reads.
   priorWork          Json?

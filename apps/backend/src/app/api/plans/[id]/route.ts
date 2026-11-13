@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { db } from "../../../../lib/db";
 import { requireUser } from "../../../../lib/FUNC-auth";
 import { patchPlanSchema } from "../../../../lib/validation";
@@ -42,6 +42,9 @@ export async function PATCH(req: Request): Promise<Response> {
   if (parsed.data.timeZone !== undefined) data.timeZone = parsed.data.timeZone;
   if (parsed.data.emailCoach !== undefined) data.emailCoach = parsed.data.emailCoach;
   if (parsed.data.pushCoach !== undefined) data.pushCoach = parsed.data.pushCoach;
+  if (parsed.data.coachSchedule !== undefined) {
+    data.coachSchedule = parsed.data.coachSchedule ?? Prisma.DbNull;
+  }
 
   // The four location columns move as one unit: a half-set location (a city
   // with no coordinates, or coordinates with no city) is not a state the coach

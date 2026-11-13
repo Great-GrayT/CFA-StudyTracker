@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { TUNING_RANGES } from "../core/tuning";
+import { formatSchedule, parseSchedule } from "../core/slots";
 
 // A crafted far-future examDate would make pace.ts's remaining-hours math
 // (and anything iterating the plan's day span) churn for an unbounded span;
@@ -114,6 +115,16 @@ export const patchPlanSchema = z.object({
   // evening prod on your phone is a normal preference that a single setting
   // could not express.
   emailCoach: z.enum(["all", "debrief-only", "off"]).optional(),
+  // Must survive parseSchedule unchanged, so a time the coach would ignore is
+  // a 400 here rather than a setting that saves and silently never applies.
+  coachSchedule: z
+    .object({ prescription: z.string(), nudge: z.string(), debrief: z.string() })
+    .strict()
+    .refine((t) => JSON.stringify(formatSchedule(parseSchedule(t))) === JSON.stringify({
+      prescription: t.prescription, nudge: t.nudge, debrief: t.debrief,
+    }), { message: "Times must be HH:MM, morning before evening before night" })
+    .nullable()
+    .optional(),
   pushCoach: z.enum(["all", "debrief-only", "off"]).optional(),
   // null clears it; omitted leaves it untouched.
   location: locationSchema.nullable().optional(),

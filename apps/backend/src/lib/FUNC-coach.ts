@@ -17,9 +17,9 @@ import { db } from "./db";
 import { sendMail, type Mail } from "./FUNC-mail";
 import { generateHorizon } from "./FUNC-schedule";
 import { renderCoachMail, type MailData, type MailTask } from "./FUNC-mail-render";
-import { dueSlots, localDateFor, type Slot } from "../core/slots";
+import { dueSlots, localDateFor, parseSchedule, type Slot } from "../core/slots";
 import { classify, type CoachInput } from "../core/coach-state";
-import { dialogueFor, type DialogueVars, type LineContext } from "../core/coach-dialogue";
+import { dialogueFor, type DialogueKey, type DialogueVars, type LineContext } from "../core/coach-dialogue";
 import { missedStudyDays, type WeeklyAvailability } from "../core/pace";
 import { holidayFacts } from "../core/holiday";
 import { unsubscribeUrl } from "./FUNC-unsubscribe";
@@ -31,6 +31,7 @@ import { observationFor } from "./FUNC-weather";
 // binds the function at import time, before any spy is installed, so a test
 // spying on pushModule.sendPushToUser would never intercept the call made here.
 import * as pushModule from "./FUNC-push";
+import type { PushPayload } from "./FUNC-push";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 // Date.UTC's getDay() ordering (0 = Sunday); same convention core/pace.ts and
@@ -220,7 +221,7 @@ export async function runCoachForPlan(
   // Deliberately not pre-filtered by what has already gone out, because what
   // counts as sent now differs per channel. Each channel filters its own list
   // below, and the atomic claim stays the real guard either way.
-  const due = dueSlots(now, plan.timeZone, []);
+  const due = dueSlots(now, plan.timeZone, [], parseSchedule(plan.coachSchedule));
 
   const sent: Slot[] = [];
   const skipped: Slot[] = [];
@@ -259,6 +260,152 @@ export async function runCoachForPlan(
       return { sent: [], skipped: candidateSlots, failed: [], pushSent: [], pushFailed: [] };
     }
   }
+
+  // No placeholder fallback for the app URL: a deployment missing it would
+  // send mail in which every link, unsubscribe included, is dead.
+  const appUrl = process.env.FRONTEND_BASE_URL;
+  if (!appUrl) {
+    console.error(
+      `FUNC-coach: FRONTEND_BASE_URL is not set, refusing to send for plan ${planId}. ` +
+        `Every link in the email, unsubscribe included, would be dead.`,
+    );
+    return { sent: [], skipped: candidateSlots, failed: [], pushSent: [], pushFailed: [] };
+  }
+
+  const { state, vars, mailData, context, user, emailUnsubscribe } = await buildCoachContext(
+    plan,
+    now,
+    localDate,
+    streakDays,
+    droppedCount,
+    appUrl,
+  );
+
+  // Once the exam has passed the coach signs off, exactly once, and then stops.
+  // The uniqueness guard is per local DATE, so without this the sign-off, whose
+  // own copy says there will be no further emails, would be sent every single
+  // morning for the rest of the plan's life.
+  let signedOff = false;
+  if (state.horizon === "past") {
+    signedOff =
+      (await db.emailSend.count({ where: { planId, dialogueKey: "P_PAST" } })) > 0;
+  }
+
+  for (const slot of candidateSlots) {
+    const key = dialogueFor(slot, state);
+    if (key === null) {
+      skipped.push(slot);
+      continue;
+    }
+    if (key === "P_PAST" && signedOff) {
+      skipped.push(slot);
+      continue;
+    }
+
+    // Rendered ONCE for both channels. Two render calls could legitimately pick
+    // different variants, since the picker rotates by date, and the candidate
+    // would then get a notification contradicting their inbox.
+    //
+    // localDate is what rotates the variant, and the context is what lets the
+    // horizon, phase and weather tags narrow the pool. Omitting either would
+    // collapse every pool to one fixed line for the life of the plan.
+    const { subject, html, text, push } = renderCoachMail(
+      key,
+      vars,
+      mailData,
+      localDate,
+      context,
+      // Tagged per slot so the three daily notifications coexist instead of
+      // replacing one another, while a retry of the same slot still collapses
+      // into one.
+      `coach-${slot}`,
+    );
+
+    let claimedEither = false;
+
+    if (emailSlots.includes(slot)) {
+      const claimed = await claimSend(planId, localDate, slot, "email", key);
+      if (claimed) {
+        claimedEither = true;
+        try {
+          await sender({
+            to: user.email,
+            subject,
+            html,
+            text,
+            headers: {
+              // RFC 8058 one-click. The Post header is what turns the
+              // List-Unsubscribe URL into Gmail's and Outlook's own native
+              // control, and it POSTs, which is why the route separates a GET
+              // that confirms from a POST that acts.
+              "List-Unsubscribe": `<${emailUnsubscribe}>`,
+              "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+            },
+          });
+          await db.emailSend.update({ where: { id: claimed.id }, data: { sentAt: now } });
+          sent.push(slot);
+        } catch (err) {
+          await recordFailure(claimed.id, err);
+          failed.push(slot);
+        }
+      }
+    }
+
+    // An independent delivery with its own claim. A candidate with email off
+    // and push on must still receive exactly one notification per slot per day,
+    // and a bounced email must not suppress the phone: same message, different
+    // send.
+    if (pushSlots.includes(slot)) {
+      const claimed = await claimSend(planId, localDate, slot, "push", key);
+      if (claimed) {
+        claimedEither = true;
+        try {
+          await pushModule.sendPushToUser(plan.userId, push);
+          await db.emailSend.update({ where: { id: claimed.id }, data: { sentAt: now } });
+          pushSent.push(slot);
+        } catch (err) {
+          await recordFailure(claimed.id, err);
+          pushFailed.push(slot);
+        }
+      }
+    }
+
+    // Neither channel claimed: both lost the race to a concurrent or earlier
+    // run of this exact slot.
+    if (!claimedEither) {
+      skipped.push(slot);
+    }
+  }
+
+  return { sent, skipped, failed, pushSent, pushFailed };
+}
+
+export type CoachContext = {
+  state: ReturnType<typeof classify>;
+  vars: DialogueVars;
+  mailData: MailData;
+  context: LineContext;
+  user: { id: string; email: string };
+  emailUnsubscribe: string;
+};
+
+/**
+ * Everything the coach knows about a plan's day: its state and the variables
+ * its copy needs. Shared by the real run and the preview, so a preview shows
+ * exactly what a send would. Reads only; regeneration is the caller's call.
+ */
+export async function buildCoachContext(
+  plan: Awaited<ReturnType<typeof db.studyPlan.findUniqueOrThrow>>,
+  now: Date,
+  localDate: string,
+  streakDays: number,
+  droppedCount: number,
+  appUrl: string,
+): Promise<CoachContext> {
+  const planId = plan.id;
+  const todayDate = new Date(localDate + "T00:00:00Z");
+  const weeklyAvailability = plan.weeklyAvailability as Record<string, number>;
+  void now;
 
   const todayTasks: TodayTask[] = await db.planTask.findMany({
     where: { planId, date: todayDate },
@@ -360,22 +507,6 @@ export async function runCoachForPlan(
   const user = await db.user.findUniqueOrThrow({ where: { id: plan.userId } });
   const coveragePercent = await coveragePercentFor(planId, plan.levelId);
   const firstTask = todayTasks[0] ? titleForTask(todayTasks[0], readingNames) : "today's plan";
-  // No placeholder fallback. It used to default to an example domain, which
-  // meant a deployment that forgot this variable sent perfectly deliverable
-  // emails in which every link was dead, the unsubscribe link included. A
-  // candidate who cannot unsubscribe reports the message as spam, and that
-  // costs the sending domain every other email the app sends. Refusing to send
-  // is strictly better than sending something broken, and loud enough that an
-  // operator can find it.
-  const appUrl = process.env.FRONTEND_BASE_URL;
-  if (!appUrl) {
-    console.error(
-      `FUNC-coach: FRONTEND_BASE_URL is not set, refusing to send for plan ${planId}. ` +
-        `Every link in the email, unsubscribe included, would be dead.`,
-    );
-    return { sent: [], skipped: candidateSlots, failed: [], pushSent: [], pushFailed: [] };
-  }
-
   const vars: DialogueVars = {
     name: user.email,
     daysToExam,
@@ -433,101 +564,51 @@ export async function runCoachForPlan(
   }
   const context: LineContext = { horizon: state.horizon, phase: state.phase, weather };
 
-  // Once the exam has passed the coach signs off, exactly once, and then stops.
-  // The uniqueness guard is per local DATE, so without this the sign-off, whose
-  // own copy says there will be no further emails, would be sent every single
-  // morning for the rest of the plan's life.
-  let signedOff = false;
-  if (state.horizon === "past") {
-    signedOff =
-      (await db.emailSend.count({ where: { planId, dialogueKey: "P_PAST" } })) > 0;
-  }
+  return { state, vars, mailData, context, user, emailUnsubscribe };
+}
 
-  for (const slot of candidateSlots) {
-    const key = dialogueFor(slot, state);
-    if (key === null) {
-      skipped.push(slot);
-      continue;
-    }
-    if (key === "P_PAST" && signedOff) {
-      skipped.push(slot);
-      continue;
-    }
+export type CoachPreview = {
+  slot: Slot | null;
+  /** The event the coach chose, or null when it would stay quiet. */
+  key: DialogueKey | null;
+  state: { horizon: string; phase: string; streakDays: number; tasksDone: number; taskCount: number };
+  message: { subject: string; text: string; html: string; push: PushPayload } | null;
+};
 
-    // Rendered ONCE for both channels. Two render calls could legitimately pick
-    // different variants, since the picker rotates by date, and the candidate
-    // would then get a notification contradicting their inbox.
-    //
-    // localDate is what rotates the variant, and the context is what lets the
-    // horizon, phase and weather tags narrow the pool. Omitting either would
-    // collapse every pool to one fixed line for the life of the plan.
-    const { subject, html, text, push } = renderCoachMail(
-      key,
-      vars,
-      mailData,
-      localDate,
-      context,
-      // Tagged per slot so the three daily notifications coexist instead of
-      // replacing one another, while a retry of the same slot still collapses
-      // into one.
-      `coach-${slot}`,
-    );
+/**
+ * What the coach would send, without sending, claiming the day's slot or
+ * rebuilding the plan. Either the slot (the coach picks the event from the
+ * candidate's real state, as at send time) or a specific event (rendered with
+ * the same real numbers, to read any message the coach can write).
+ */
+export async function previewCoach(
+  planId: string,
+  now: Date,
+  target: { slot: Slot } | { key: DialogueKey },
+): Promise<CoachPreview> {
+  const plan = await db.studyPlan.findUniqueOrThrow({ where: { id: planId } });
+  const localDate = localDateFor(now, plan.timeZone);
+  const yesterday = addUTCDays(new Date(localDate + "T00:00:00Z"), -1);
+  const streakDays = await computeStreakDays(
+    planId,
+    plan.weeklyAvailability as Record<string, number>,
+    plan.startDate,
+    yesterday,
+  );
+  const appUrl = process.env.FRONTEND_BASE_URL ?? "";
+  const built = await buildCoachContext(plan, now, localDate, streakDays, 0, appUrl);
 
-    let claimedEither = false;
+  const slot = "slot" in target ? target.slot : null;
+  const key = "slot" in target ? dialogueFor(target.slot, built.state) : target.key;
+  const state = {
+    horizon: built.state.horizon,
+    phase: built.state.phase,
+    streakDays,
+    tasksDone: built.vars.n,
+    taskCount: built.vars.taskCount,
+  };
+  if (key === null) return { slot, key, state, message: null };
 
-    if (emailSlots.includes(slot)) {
-      const claimed = await claimSend(planId, localDate, slot, "email", key);
-      if (claimed) {
-        claimedEither = true;
-        try {
-          await sender({
-            to: user.email,
-            subject,
-            html,
-            text,
-            headers: {
-              // RFC 8058 one-click. The Post header is what turns the
-              // List-Unsubscribe URL into Gmail's and Outlook's own native
-              // control, and it POSTs, which is why the route separates a GET
-              // that confirms from a POST that acts.
-              "List-Unsubscribe": `<${emailUnsubscribe}>`,
-              "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-            },
-          });
-          await db.emailSend.update({ where: { id: claimed.id }, data: { sentAt: now } });
-          sent.push(slot);
-        } catch (err) {
-          await recordFailure(claimed.id, err);
-          failed.push(slot);
-        }
-      }
-    }
-
-    // An independent delivery with its own claim. A candidate with email off
-    // and push on must still receive exactly one notification per slot per day,
-    // and a bounced email must not suppress the phone: same message, different
-    // send.
-    if (pushSlots.includes(slot)) {
-      const claimed = await claimSend(planId, localDate, slot, "push", key);
-      if (claimed) {
-        claimedEither = true;
-        try {
-          await pushModule.sendPushToUser(plan.userId, push);
-          await db.emailSend.update({ where: { id: claimed.id }, data: { sentAt: now } });
-          pushSent.push(slot);
-        } catch (err) {
-          await recordFailure(claimed.id, err);
-          pushFailed.push(slot);
-        }
-      }
-    }
-
-    // Neither channel claimed: both lost the race to a concurrent or earlier
-    // run of this exact slot.
-    if (!claimedEither) {
-      skipped.push(slot);
-    }
-  }
-
-  return { sent, skipped, failed, pushSent, pushFailed };
+  const rendered = renderCoachMail(key, built.vars, built.mailData, localDate, built.context, "coach-preview");
+  return { slot, key, state, message: rendered };
 }
