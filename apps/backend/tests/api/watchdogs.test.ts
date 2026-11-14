@@ -54,6 +54,20 @@ describe("GET /api/cron/runs", () => {
     expect(times).toEqual([...times].sort((a: number, b: number) => b - a));
   });
 
+  // Pressing "Run now" used to reset the stall clock, so the screen reported a
+  // healthy scheduler while the scheduled sweep had been dead for days.
+  test("a manual run does not hide a stalled scheduler", async () => {
+    const user = await registerUser();
+    const old = new Date(Date.now() - 6 * 3_600_000);
+    await db.cronRun.create({ data: { startedAt: old, finishedAt: old, ok: true } });
+    await db.cronRun.create({
+      data: { finishedAt: new Date(), ok: true, triggeredByUserId: user.id },
+    });
+    const body = await readJson(await CRON_RUNS(authed(user.token, "/api/cron/runs")));
+    expect(body.stalled).toBe(true);
+    expect(new Date(body.lastRunAt).getTime()).toBe(old.getTime());
+  });
+
   test("clamps an absurd limit rather than letting a caller read the whole table", async () => {
     const user = await registerUser();
     const res = await CRON_RUNS(authed(user.token, "/api/cron/runs?limit=100000"));

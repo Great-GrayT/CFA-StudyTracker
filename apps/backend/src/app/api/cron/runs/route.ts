@@ -24,7 +24,14 @@ export async function GET(req: Request): Promise<Response> {
   const limit = Number.isFinite(raw) && raw > 0 ? Math.min(Math.floor(raw), MAX_LIMIT) : DEFAULT_LIMIT;
 
   const runs = await db.cronRun.findMany({ orderBy: { startedAt: "desc" }, take: limit });
-  const lastRunAt = runs[0]?.startedAt ?? null;
+  // The stall clock reads scheduled sweeps only. A manual run used to reset
+  // it, so the screen showed a healthy scheduler that had been dead for days.
+  const lastSweep = await db.cronRun.findFirst({
+    where: { triggeredByUserId: null },
+    orderBy: { startedAt: "desc" },
+    select: { startedAt: true },
+  });
+  const lastRunAt = lastSweep?.startedAt ?? null;
 
   return Response.json(
     {

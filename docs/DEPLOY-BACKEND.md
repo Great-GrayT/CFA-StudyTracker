@@ -2,7 +2,7 @@
 title: Backend deployment runbook
 type: spec
 module: apps/backend
-updated: 2026-11-11
+updated: 2026-11-14
 status: active
 ---
 
@@ -49,7 +49,7 @@ when it is wrong. Four cannot be skipped:
 | `DATABASE_URL` | nothing works |
 | `JWT_SECRET` | nothing works; it also signs unsubscribe links |
 | `FRONTEND_BASE_URL` | the coach refuses to send, because every link would be dead |
-| `CRON_SECRET` | the batch rejects every call, silently, forever |
+| `CRON_SECRET` | the on-demand `/api/cron/tick` rejects every call |
 
 Generate the push keypair once:
 
@@ -63,36 +63,26 @@ than merely disabling notifications.
 
 ### Schedule the batch
 
-```
-GET /api/cron/tick
-Authorization: Bearer $CRON_SECRET
-```
+**Nothing to do.** The app runs the coach sweep itself, every 15 minutes on
+the quarter hour, from `src/instrumentation.ts`. If the container is up, the
+coach runs.
 
-**Not a manual step.** The deploy workflow installs
-`apps/backend/deploy/cfa-cron-tick.sh` onto the server and rewrites the deploy
-user's crontab from `apps/backend/deploy/cron-schedule` on every push to main,
-so the schedule is changed by editing that file and pushing, never by SSHing
-in. It needs the `SSH_HOST`, `SSH_USER`, `SSH_KEY` and `APP_DIR` repository
-secrets, which is the only part that is yours.
+It used to be a host crontab line under the `deploy` user. That user is
+shared with other projects, another project's deploy rewrote its crontab, the
+line vanished, and no email or push went out for days while every check said
+healthy. The deploy workflow now removes any leftover line instead of
+installing one.
 
-**Every 15 minutes, not nightly.** The progress-snapshot half of the tick is a
-once-a-day job, which makes nightly look sufficient, but the study coach has
-three delivery slots in each candidate's own local time (06:30, 20:00, 22:30)
-and candidates are in different zones. A nightly tick misses almost all of
-them, which is what `0 3 * * *` did until it was corrected.
+`GET /api/cron/tick` with `Authorization: Bearer $CRON_SECRET` still runs one
+sweep on demand. Calling it alongside the timer is safe: each coach slot is
+claimed by a unique row before anything is sent, so firing twice sends once.
 
-Running it often is cheap and safe. A slot stays due until it is actually sent,
-and the per-channel unique key on `EmailSend` makes a repeat attempt a no-op
-rather than a duplicate, so being late costs nothing and firing twice sends
-once.
+Set `COACH_SCHEDULER=off` on any second replica, or on a dev server pointed at
+a shared database.
 
-**Leave `CRON_SECRET` unquoted in the server's `.env`.** Two different readers
-parse that file: the app, which strips surrounding quotes, and the cron
-wrapper, which is shell. A quoted value is sent to the API with its quotes,
-fails a length-guarded comparison, and every tick is answered 401. That is a
-correct response to a caller without the secret, so nothing logs a fault and
-nothing is ever sent. The wrapper now strips quotes defensively and exits
-non-zero on a non-2xx, so cron mails the operator instead of going quiet.
+`/api/health` returns 503 when no scheduled sweep has run for two hours. A
+manual "Run now" from Watchdogs does not count, so it cannot mask a dead
+timer.
 
 ### Load the curriculum **(you)**
 
@@ -218,7 +208,7 @@ health endpoint reports it rather than relying on anybody remembering.
 Operator -> scp seed-data -> one-off container -> db:seed then db:seed:packages
 -> curriculum, outcomes, provider units and resources.
 
-Scheduler (every 15 min) -> GET /api/cron/tick -> per active plan: write snapshot -> run coach
+In-app timer (every 15 min) -> runSweep -> per active plan: write snapshot -> run coach
 -> claim EmailSend row per channel -> SMTP and Web Push -> mark sent.
 
 Candidate -> unsubscribe link or mail client control -> POST

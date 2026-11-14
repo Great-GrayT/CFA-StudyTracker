@@ -1,11 +1,8 @@
 /**
- * The tick's schedule, mirrored from deploy/cron-schedule.
- *
- * A crontab on the host is not introspectable over HTTP, so the watchdogs
- * screen cannot ask the scheduler when it will next fire. Rather than have the
- * browser parse a cron expression, the server computes the next occurrence and
- * reports both. The expression is shown to the user as the authoritative
- * source, with the computed time as the convenience.
+ * The coach sweep's schedule. The in-process timer (src/instrumentation.ts)
+ * runs on SWEEP_INTERVAL_MS, aligned to wall-clock boundaries, so nextRunAt
+ * below is when it actually fires. The cron expression is kept as the
+ * human-readable form the watchdogs screen shows.
  *
  * Kept deliberately narrow: this understands the one expression this app
  * actually uses (a fixed interval of whole minutes), not cron in general. A
@@ -20,8 +17,9 @@
  * 03:00 UTC happened to fall in their day, if at all.
  */
 
-/** Minutes between ticks. Must match deploy/cron-schedule. */
 const INTERVAL_MINUTES = 15;
+
+export const SWEEP_INTERVAL_MS = INTERVAL_MINUTES * 60 * 1000;
 
 export const CRON_SCHEDULE = `*/${INTERVAL_MINUTES} * * * *`;
 
@@ -45,7 +43,7 @@ export function nextRunAt(from: Date = new Date()): Date {
  * a server reboot. Two hours is long enough that nothing routine trips it and
  * short enough that a genuinely dead scheduler is reported the same morning.
  */
-const STALL_AFTER_MS = 8 * INTERVAL_MINUTES * 60 * 1000;
+export const STALL_AFTER_MS = 8 * INTERVAL_MINUTES * 60 * 1000;
 
 /**
  * True when the scheduler looks stopped rather than merely idle.

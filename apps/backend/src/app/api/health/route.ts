@@ -1,5 +1,6 @@
 import { db } from "../../../lib/db";
 import { checkConfig } from "../../../lib/FUNC-config";
+import { STALL_AFTER_MS, isScheduleStalled } from "../../../core/cron-schedule";
 
 /**
  * Liveness and readiness for an operator and for a platform health check.
@@ -71,7 +72,34 @@ export async function GET(): Promise<Response> {
   // easy to forget, which is precisely what happened in production.
   const seeded = curriculumReadings > 0 && catalogueResources > 0;
 
-  const ok = config.ok && database && seeded;
+  /**
+   * Whether the coach sweep is actually running.
+   *
+   * The sweep once depended on a host crontab that another project's deploy
+   * overwrote; every check here stayed green while no email or push went out
+   * for days. A sweep is a CronRun with no triggeredByUserId, so a candidate
+   * pressing "Run now" cannot mask a dead scheduler. A process younger than
+   * the threshold that has not swept yet is just starting up, not broken.
+   */
+  let lastSweepAt: Date | null = null;
+  if (database) {
+    try {
+      const last = await db.cronRun.findFirst({
+        where: { triggeredByUserId: null },
+        orderBy: { startedAt: "desc" },
+        select: { startedAt: true },
+      });
+      lastSweepAt = last?.startedAt ?? null;
+    } catch {
+      // Same reasoning as the curriculum counts above.
+    }
+  }
+  // Same threshold as the watchdogs screen, so the two never disagree.
+  const schedulerOk = lastSweepAt
+    ? !isScheduleStalled(lastSweepAt)
+    : process.uptime() * 1000 <= STALL_AFTER_MS;
+
+  const ok = config.ok && database && seeded && schedulerOk;
 
   return Response.json(
     {
@@ -81,6 +109,7 @@ export async function GET(): Promise<Response> {
       // task, so it counts toward `ok` rather than being advisory.
       seeded,
       curriculum: { readings: curriculumReadings, catalogueResources },
+      scheduler: { ok: schedulerOk, lastSweepAt: lastSweepAt?.toISOString() ?? null },
       configuration: {
         ok: config.ok,
         errors: config.errors,

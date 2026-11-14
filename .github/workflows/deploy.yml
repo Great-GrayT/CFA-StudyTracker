@@ -127,21 +127,6 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Host cron lives outside the web container (12-factor), but its
-      # schedule and wrapper script are committed here so changing the
-      # schedule means editing this repo and pushing, not SSHing in by
-      # hand. Copies the two files to a staging path; the SSH step below
-      # installs them for real and (re-)writes deploy's crontab entry.
-      - name: Copy cron files to server
-        uses: appleboy/scp-action@v1
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          source: "apps/backend/deploy/cfa-cron-tick.sh,apps/backend/deploy/cron-schedule"
-          target: "/srv/scripts/.cfa-cron-staging"
-          strip_components: 3
-
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1
         with:
@@ -157,12 +142,9 @@ jobs:
             docker compose up -d
             docker image prune -f
 
-            # Install the cron wrapper + (re-)write deploy's crontab entry
-            # from whatever's currently committed - idempotent, so a
-            # schedule change in the repo takes effect on the next push
-            # with no manual server step.
-            mv /srv/scripts/.cfa-cron-staging/cfa-cron-tick.sh /srv/scripts/cfa-cron-tick.sh
-            chmod 700 /srv/scripts/cfa-cron-tick.sh
-            SCHEDULE=$(cat /srv/scripts/.cfa-cron-staging/cron-schedule)
-            rm -rf /srv/scripts/.cfa-cron-staging
-            (crontab -l 2>/dev/null | grep -v cfa-cron-tick.sh; echo "$SCHEDULE /srv/scripts/cfa-cron-tick.sh >> /srv/scripts/cfa-cron-tick.log 2>&1") | crontab -
+            # The coach sweep runs inside the app now (src/instrumentation.ts).
+            # Remove the old host cron line and wrapper so there is one
+            # schedule, not two. The crontab is shared with other projects,
+            # so only our line is dropped.
+            (crontab -l 2>/dev/null | grep -v cfa-cron-tick.sh || true) | crontab -
+            rm -f /srv/scripts/cfa-cron-tick.sh

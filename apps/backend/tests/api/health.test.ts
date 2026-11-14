@@ -1,9 +1,10 @@
-import { afterEach, test, expect } from "vitest";
+import { afterEach, test, expect, vi } from "vitest";
 import { resetDb } from "../helpers/test-db";
 import { anyLosIdForLevel, ensureLevel, setupPlanWithCatalogue } from "../helpers/fixtures";
 import { GET } from "../../src/app/api/health/route";
 import { readJson } from "../helpers/request";
 import { checkConfig } from "../../src/lib/FUNC-config";
+import { db } from "../../src/lib/db";
 
 const SAVED = { ...process.env };
 
@@ -11,6 +12,7 @@ afterEach(() => {
   // Restore wholesale: these tests delete variables, and a leaked deletion
   // would fail an unrelated file in a way that looks like a real regression.
   process.env = { ...SAVED };
+  vi.restoreAllMocks();
 });
 
 test("a correctly configured and seeded deployment reports healthy", async () => {
@@ -196,4 +198,45 @@ test("a Level row with no readings still counts as unseeded", async () => {
 
   expect(body.seeded).toBe(false);
   expect(body.curriculum.readings).toBe(0);
+});
+
+// The coach's scheduler was dead for days while this endpoint said 200: a
+// host crontab shared with other projects was overwritten and nothing noticed.
+// A sweep is a CronRun with no triggeredByUserId; a manual run does not count.
+test("a recent scheduled sweep reports the scheduler healthy", async () => {
+  await resetDb();
+  await setupPlanWithCatalogue();
+  await db.cronRun.create({ data: { ok: true, finishedAt: new Date() } });
+
+  const res = await GET();
+  const body = await readJson(res);
+  expect(body.scheduler.ok).toBe(true);
+  expect(body.scheduler.lastSweepAt).not.toBeNull();
+  expect(res.status).toBe(200);
+});
+
+test("no sweep for over two hours is an error, and a manual run does not hide it", async () => {
+  await resetDb();
+  const { planId } = await setupPlanWithCatalogue();
+  const { userId } = await db.studyPlan.findUniqueOrThrow({ where: { id: planId } });
+  const old = new Date(Date.now() - 3 * 60 * 60 * 1000);
+  await db.cronRun.create({ data: { ok: true, startedAt: old, finishedAt: old } });
+  await db.cronRun.create({ data: { ok: true, finishedAt: new Date(), triggeredByUserId: userId } });
+
+  const res = await GET();
+  const body = await readJson(res);
+  expect(body.scheduler.ok).toBe(false);
+  expect(res.status).toBe(503);
+});
+
+test("a fresh process with no sweep yet is not yet a fault", async () => {
+  await resetDb();
+  await setupPlanWithCatalogue();
+  vi.spyOn(process, "uptime").mockReturnValue(60);
+
+  const res = await GET();
+  const body = await readJson(res);
+  expect(body.scheduler.lastSweepAt).toBeNull();
+  expect(body.scheduler.ok).toBe(true);
+  expect(res.status).toBe(200);
 });

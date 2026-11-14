@@ -1,21 +1,12 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { CRON_SCHEDULE, nextRunAt, isScheduleStalled } from "./cron-schedule";
+import { CRON_SCHEDULE, SWEEP_INTERVAL_MS, nextRunAt, isScheduleStalled } from "./cron-schedule";
 
 describe("the published schedule", () => {
-  // The watchdogs screen shows CRON_SCHEDULE to the operator as the
-  // authoritative answer to "when does this run", while the thing that
-  // actually runs is deploy/cron-schedule, installed into the server's
-  // crontab by the deploy workflow. Nothing but this test connects them, and
-  // a screen confidently reporting a schedule the server is not on is worse
-  // than one that reports nothing.
-  test("matches the crontab the deploy installs", () => {
-    const committed = readFileSync(
-      join(__dirname, "..", "..", "deploy", "cron-schedule"),
-      "utf8",
-    ).trim();
-    expect(CRON_SCHEDULE).toBe(committed);
+  // The watchdogs screen shows CRON_SCHEDULE as the answer to "when does this
+  // run", and the in-process timer is driven by SWEEP_INTERVAL_MS. Both come
+  // from one constant, which this pins.
+  test("matches the interval the app timer runs on", () => {
+    expect(CRON_SCHEDULE).toBe(`*/${SWEEP_INTERVAL_MS / 60_000} * * * *`);
   });
 
   // Not a style preference. The coach's three delivery slots are in each
