@@ -1,9 +1,9 @@
 "use client";
 
-import { usePrescription, useSubmitTask } from "@/lib/hooks";
-import { missedTasks, missedWindow } from "@/lib/day-end";
+import { useSubmitTask } from "@/lib/hooks";
+import { missedTasks } from "@/lib/day-end";
 import { minutesLabel, TaskRow, type SubmitFor } from "./day-plan";
-import type { PrescribedTask } from "@/lib/types";
+import type { PrescribedDay, PrescribedTask } from "@/lib/types";
 import styles from "./missed-tasks.module.css";
 
 /**
@@ -13,20 +13,42 @@ import styles from "./missed-tasks.module.css";
  */
 export function MissedTasks({
   planId,
+  days,
+  failed,
+  onRetry,
   todayISO,
   closed,
 }: {
   planId: string | undefined;
+  /** From the page's own range query, which covers the missed window. */
+  days: PrescribedDay[] | undefined;
+  failed: boolean;
+  onRetry: () => void;
   todayISO: string;
   /** Today's debrief has passed, so today's unstarted work is owed too. */
   closed: boolean;
 }) {
-  const { from, to } = missedWindow(todayISO, closed);
-  const prescription = usePrescription(planId, from, to);
   const submitTask = useSubmitTask(planId);
   const onSubmit: SubmitFor = (taskId, submission) => submitTask.mutateAsync({ taskId, ...submission });
 
-  const missed = missedTasks(prescription.data?.days ?? [], todayISO, closed);
+  // A failed load must not read as "nothing owed".
+  if (failed) {
+    return (
+      <section className={styles.section} aria-labelledby="missed-heading">
+        <h2 id="missed-heading" className={styles.heading}>
+          Not done
+        </h2>
+        <p className={styles.note} role="alert">
+          Could not load your past tasks.{" "}
+          <button type="button" className={styles.retry} onClick={onRetry}>
+            Try again
+          </button>
+        </p>
+      </section>
+    );
+  }
+
+  const missed = missedTasks(days ?? [], todayISO, closed);
   if (missed.length === 0) return null;
 
   const owed = missed.reduce((sum, m) => sum + m.task.estimatedMinutes, 0);

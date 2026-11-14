@@ -41,17 +41,39 @@ export function missedTasks(
     );
 }
 
-/** Milliseconds until the debrief today, in `timeZone`. Negative once passed. */
-export function msUntilDayEnd(nowMs: number, timeZone: string, debrief: string): number {
+/** One request for both the week strip and the missed window, so the page
+ * loads them together instead of one section arriving after the other. */
+export function fetchRange(
+  todayISO: string,
+  weekStart: string,
+  weekEnd: string,
+): { from: string; to: string } {
+  const missedFrom = missedWindow(todayISO, true).from;
+  return { from: missedFrom < weekStart ? missedFrom : weekStart, to: weekEnd };
+}
+
+/** Milliseconds since local midnight of `ms` in `timeZone`. */
+function wallMs(ms: number, timeZone: string): number {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone,
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
     hourCycle: "h23",
-  }).formatToParts(new Date(nowMs));
+  }).formatToParts(new Date(ms));
   const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
+  return ((get("hour") * 60 + get("minute")) * 60 + get("second")) * 1000 + (ms % 1000);
+}
+
+/** Milliseconds until the debrief today, in `timeZone`. Negative once passed.
+ * Exact on clock-change days: the wall-clock difference is a first guess,
+ * corrected by however far the zone's offset moved before the target. */
+export function msUntilDayEnd(nowMs: number, timeZone: string, debrief: string): number {
   const [dh, dm] = debrief.split(":").map(Number);
-  const nowInDay = ((get("hour") * 60 + get("minute")) * 60 + get("second")) * 1000 + (nowMs % 1000);
-  return (dh! * 60 + dm!) * 60 * 1000 - nowInDay;
+  const target = (dh! * 60 + dm!) * 60 * 1000;
+  const guess = target - wallMs(nowMs, timeZone);
+  const drift = target - wallMs(nowMs + guess, timeZone);
+  // A real offset change moves the target by an hour at most; anything larger
+  // means the guess wrapped past midnight, so the guess stands.
+  return Math.abs(drift) <= 2 * 60 * 60 * 1000 ? guess + drift : guess;
 }

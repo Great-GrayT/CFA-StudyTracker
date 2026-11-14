@@ -54,3 +54,17 @@
   display: grid;
   border-top: 1px solid var(--rule);
 }
+
+/* Inline with the sentence it recovers from, at the app's link weight. */
+.retry {
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: var(--claimed-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}

@@ -21,7 +21,7 @@ import {
   flattenCurriculum,
 } from "@/lib/hooks";
 import { readPace, remainingWeekSplit, startOfUTCDay, addUTCDays } from "@/lib/pace";
-import { debriefTime, msUntilDayEnd } from "@/lib/day-end";
+import { debriefTime, fetchRange, msUntilDayEnd } from "@/lib/day-end";
 import styles from "./today.module.css";
 import dynamic from "next/dynamic";
 
@@ -52,7 +52,10 @@ export default function TodayPage() {
   // day's total, and seven days of tasks is a smaller payload than the
   // curriculum tree this screen already holds.
   const week = useMemo(() => weekOf(todayISO), [todayISO]);
-  const prescription = usePrescription(planId, week[0], week[6]);
+  // One range for the week strip and the Not done window, so both arrive
+  // together and neither pushes the other down after the page has drawn.
+  const range = useMemo(() => fetchRange(todayISO, week[0]!, week[6]!), [todayISO, week]);
+  const prescription = usePrescription(planId, range.from, range.to);
   const [selectedDate, setSelectedDate] = useState(todayISO);
 
   // The study day ends at the plan's debrief. Once it has, today's unstarted
@@ -212,7 +215,14 @@ export default function TodayPage() {
             </section>
           )}
 
-          <MissedTasks planId={planId} todayISO={todayISO} closed={dayClosed} />
+          <MissedTasks
+            planId={planId}
+            days={prescription.data?.days}
+            failed={prescription.isError}
+            onRetry={() => void prescription.refetch()}
+            todayISO={todayISO}
+            closed={dayClosed}
+          />
 
 
           {split && split.totalHours > 0 && (
