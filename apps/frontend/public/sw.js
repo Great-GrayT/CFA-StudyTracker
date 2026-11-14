@@ -155,6 +155,7 @@ self.addEventListener("push", (event) => {
   // A single shared tag meant the debrief overwrote an unread prescription.
   let tag = "study-tracker-notification";
   let url = "/";
+  let urgent = false;
 
   if (event.data) {
     try {
@@ -163,6 +164,7 @@ self.addEventListener("push", (event) => {
       body = data.body || body;
       tag = data.tag || tag;
       url = data.url || url;
+      urgent = data.urgent === true;
     } catch {
       // If the push event data is not valid JSON, use the text as the body.
       body = event.data.text() || body;
@@ -179,6 +181,17 @@ self.addEventListener("push", (event) => {
       // Carried through to notificationclick, which is the only way the click
       // handler can know where this particular notification should land.
       data: { url },
+      // Coach messages are meant to be noticed. requireInteraction keeps it
+      // on screen until acted on, renotify re-alerts even when replacing a
+      // same-tag notification, and the vibration is long enough to feel in a
+      // pocket. Android lets the user raise it further per site (sound, pop
+      // on screen); a web page cannot set an alarm sound or pass Do Not Disturb.
+      ...(urgent && {
+        requireInteraction: true,
+        renotify: true,
+        silent: false,
+        vibrate: [600, 200, 600, 200, 1200],
+      }),
     }),
   );
 });

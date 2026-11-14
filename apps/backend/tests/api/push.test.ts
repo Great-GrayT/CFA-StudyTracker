@@ -84,3 +84,24 @@ test("sendPushToUser keeps the subscription row when the push service fails for 
   expect(await db.pushSubscription.count({ where: { userId: user.id } })).toBe(1);
   sendSpy.mockRestore();
 });
+
+// High urgency is what makes Android deliver at once instead of batching the
+// push until the phone next wakes from Doze. The TTL drops a morning message
+// the push service could not deliver for hours rather than showing it at night.
+test("sendPushToUser sends at high urgency with a bounded TTL, and counts deliveries", async () => {
+  const user = await registerUser();
+  await db.pushSubscription.create({
+    data: { userId: user.id, endpoint: "https://push.example/ok", p256dh: "k1", auth: "k2" },
+  });
+  const sendSpy = vi.spyOn(webpush, "sendNotification").mockResolvedValue({} as never);
+
+  const result = await sendPushToUser(user.id, { title: "t", body: "b" });
+
+  expect(result).toEqual({ delivered: 1, failed: 0 });
+  expect(sendSpy).toHaveBeenCalledWith(
+    expect.anything(),
+    expect.any(String),
+    expect.objectContaining({ urgency: "high", TTL: 4 * 60 * 60 }),
+  );
+  sendSpy.mockRestore();
+});

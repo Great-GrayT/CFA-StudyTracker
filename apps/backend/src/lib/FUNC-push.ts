@@ -52,7 +52,18 @@ export type PushPayload = {
    * of the SAME kind replacing each other is the desired behaviour.
    */
   tag?: string;
+  /**
+   * Ask the service worker to alert rather than update quietly: stay on screen
+   * until acted on, vibrate hard, and re-alert even when replacing a tag.
+   */
+  urgent?: boolean;
 };
+
+// High urgency makes Android deliver at once instead of holding the push until
+// the phone leaves Doze. The TTL bounds how late a message may arrive: a
+// morning prescription the service could not deliver for hours is dropped
+// rather than shown at night.
+const SEND_OPTIONS = { urgency: "high" as const, TTL: 4 * 60 * 60 };
 
 /**
  * Sends `payload` to every PushSubscription row the given user has. Each
@@ -85,6 +96,7 @@ export async function sendPushToUser(
       await webpush.sendNotification(
         { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
         JSON.stringify(payload),
+        SEND_OPTIONS,
       );
       delivered += 1;
     } catch (err) {

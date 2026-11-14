@@ -26,6 +26,9 @@ export type Mail = {
    * costs every other email the app sends, password resets included.
    */
   headers?: Record<string, string>;
+  /** Sets X-Priority, X-MSMail-Priority and Importance. Outlook and Apple Mail
+   * flag it; Gmail ignores it and decides "important" itself. */
+  priority?: "high" | "normal" | "low";
 };
 
 let cached: Transporter | null = null;
@@ -72,5 +75,6 @@ export async function sendMail(mail: Mail): Promise<void> {
     text: mail.text,
     html: mail.html,
     headers: mail.headers,
+    priority: mail.priority,
   });
 }

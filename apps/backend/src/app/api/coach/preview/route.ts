@@ -60,6 +60,7 @@ export async function POST(req: Request): Promise<Response> {
     try {
       await sendMail({
         to: user.email,
+        priority: "high",
         subject: `Preview: ${preview.message.subject}`,
         text: preview.message.text,
         html: preview.message.html,
@@ -75,6 +76,6 @@ export async function POST(req: Request): Promise<Response> {
   if (devices === 0) {
     return Response.json({ ...preview, delivered: false, reason: "No device is registered for notifications yet.", error: "No device is registered for notifications yet." }, { status: 409 });
   }
-  await sendPushToUser(auth.userId, { ...preview.message.push, tag: "coach-preview" });
+  await sendPushToUser(auth.userId, { ...preview.message.push, tag: "coach-preview", urgent: true });
   return Response.json({ ...preview, delivered: true });
 }

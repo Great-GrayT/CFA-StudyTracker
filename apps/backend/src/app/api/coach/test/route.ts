@@ -53,6 +53,7 @@ export async function POST(req: Request): Promise<Response> {
     try {
       await sendMail({
         to: user.email,
+        priority: "high",
         subject: "Study Tracker: test message",
         text: "Your email notifications are working. The coach writes at the three times set in Settings, in your own time zone.",
         html: "<p>Your email notifications are working.</p><p>The coach writes at the three times set in Settings, in your own time zone.</p>",
@@ -80,6 +81,7 @@ export async function POST(req: Request): Promise<Response> {
     title: "Study Tracker",
     body: "Your notifications are working.",
     tag: "coach-test",
+    urgent: true,
     url: "/today",
   });
 

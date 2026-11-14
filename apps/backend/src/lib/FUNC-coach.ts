@@ -364,6 +364,7 @@ export async function runCoachForPlan(
             subject,
             html,
             text,
+            priority: "high",
             headers: {
               // RFC 8058 one-click. The Post header is what turns the
               // List-Unsubscribe URL into Gmail's and Outlook's own native
@@ -391,7 +392,7 @@ export async function runCoachForPlan(
       if (claimed) {
         claimedEither = true;
         try {
-          const result = await pushModule.sendPushToUser(plan.userId, push);
+          const result = await pushModule.sendPushToUser(plan.userId, { ...push, urgent: true });
           if (result.delivered === 0) {
             throw new Error(`no device accepted the push (${result.failed} failed)`);
           }

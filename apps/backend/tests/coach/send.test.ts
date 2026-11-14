@@ -524,6 +524,8 @@ describe("unsubscribe reaches the recipient", () => {
     const headers = captured[0]!.headers ?? {};
     expect(headers["List-Unsubscribe"]).toMatch(/^<https?:\/\/.+\/api\/coach\/unsubscribe\?token=.+>$/);
     expect(headers["List-Unsubscribe-Post"]).toBe("List-Unsubscribe=One-Click");
+    // Flagged in Outlook and Apple Mail. Gmail ignores sender priority.
+    expect(captured[0]!.priority).toBe("high");
   });
 
   test("the link is visible in both the html and the plain text", async () => {
@@ -634,6 +636,15 @@ describe("push is only counted when a device received it", () => {
     await subscribe(planId);
     const after = await runCoachForPlan(planId, new Date("2027-01-04T09:00:00Z"), async () => {});
     expect(after.pushSent).toEqual(["prescription"]);
+  });
+
+  test("a coach push asks the phone to alert, not to update quietly", async () => {
+    const { planId } = await setupPlanWithTasks({ timeZone: "UTC" });
+    await subscribe(planId);
+    const send = vi.spyOn(pushModule, "sendPushToUser").mockResolvedValue({ delivered: 1, failed: 0 });
+
+    await runCoachForPlan(planId, MORNING, async () => {});
+    expect(send).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ urgent: true }));
   });
 
   test("when every device rejects the push it is a failure, not a send", async () => {
