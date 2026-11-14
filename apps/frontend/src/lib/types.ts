@@ -242,7 +242,7 @@ export type CronStatus = {
   runs: CronRun[];
 };
 
-export type PushDevice = { id: string; endpoint: string; createdAt: string };
+export type PushDevice = { id: string; endpoint: string; label: string | null; createdAt: string };
 
 /**
  * One thing to open and do, named the way the provider names it rather than

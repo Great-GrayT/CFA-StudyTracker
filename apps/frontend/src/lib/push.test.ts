@@ -41,6 +41,12 @@ describe("toSubscribePayload", () => {
     expect(body).not.toHaveProperty("auth");
   });
 
+  // The server names the device from it; the proxy replaces the header.
+  test("carries the browser's user agent so the device can be named", () => {
+    const body = toSubscribePayload(fakeSubscription());
+    expect(body.userAgent).toBe(navigator.userAgent);
+  });
+
   test("encodes the keys as base64url, not standard base64", () => {
     const body = toSubscribePayload(fakeSubscription());
 

@@ -1,3 +1,4 @@
+import { deviceLabel } from "../../../../core/device-label";
 import { db } from "../../../../lib/db";
 import { requireUser } from "../../../../lib/FUNC-auth";
 import { subscribePushSchema, unsubscribePushSchema } from "../../../../lib/validation";
@@ -13,7 +14,8 @@ export async function POST(req: Request): Promise<Response> {
   if (!parsed.success) {
     return Response.json({ error: "Invalid request body" }, { status: 400 });
   }
-  const { endpoint, keys } = parsed.data;
+  const { endpoint, keys, userAgent } = parsed.data;
+  const label = deviceLabel(userAgent);
 
   // Upsert by endpoint: a browser re-registering the same push subscription
   // (e.g. after a service-worker update) must update the existing row, not
@@ -21,8 +23,8 @@ export async function POST(req: Request): Promise<Response> {
   // if the endpoint moved to a different account, the new owner wins.
   const subscription = await db.pushSubscription.upsert({
     where: { endpoint },
-    create: { userId: auth.userId, endpoint, p256dh: keys.p256dh, auth: keys.auth },
-    update: { userId: auth.userId, p256dh: keys.p256dh, auth: keys.auth },
+    create: { userId: auth.userId, endpoint, p256dh: keys.p256dh, auth: keys.auth, label },
+    update: { userId: auth.userId, p256dh: keys.p256dh, auth: keys.auth, label },
   });
 
   return Response.json(subscription, { status: 201 });

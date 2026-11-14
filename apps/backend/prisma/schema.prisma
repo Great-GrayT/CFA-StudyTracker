@@ -389,6 +389,9 @@ model PushSubscription {
   endpoint  String   @unique
   p256dh    String
   auth      String
+  // "Android · Chrome", from the registering browser's user agent, so the
+  // device list can say which entry is the phone. Null for older rows.
+  label     String?
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id])
 }

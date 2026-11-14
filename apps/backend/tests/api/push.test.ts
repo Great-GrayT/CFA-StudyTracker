@@ -4,6 +4,7 @@ import { resetDb } from "../helpers/test-db";
 import { registerUser, authedRequest } from "../helpers/fixtures";
 import { db } from "../../src/lib/db";
 import { POST, DELETE } from "../../src/app/api/push/subscribe/route";
+import { GET as LIST } from "../../src/app/api/push/subscriptions/route";
 import { sendPushToUser } from "../../src/lib/FUNC-push";
 
 beforeEach(async () => {
@@ -20,6 +21,23 @@ test("POST /api/push/subscribe stores a subscription for the caller", async () =
   );
   expect(res.status).toBe(201);
   expect(await db.pushSubscription.count({ where: { userId: user.id } })).toBe(1);
+});
+
+// The device list showed only "Added <date>", so nobody could tell which
+// entry was the phone.
+test("a subscription is named after the device that registered it", async () => {
+  const user = await registerUser();
+  await POST(
+    authedRequest(user, "/api/push/subscribe", {
+      endpoint: "https://push.example/phone",
+      keys: { p256dh: "k1", auth: "k2" },
+      userAgent:
+        "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36",
+    }),
+  );
+  const res = await LIST(authedRequest(user, "/api/push/subscriptions", undefined, "GET"));
+  const body = await res.json();
+  expect(body.subscriptions[0].label).toBe("Android · Chrome");
 });
 
 test("DELETE /api/push/subscribe removes a subscription by endpoint", async () => {

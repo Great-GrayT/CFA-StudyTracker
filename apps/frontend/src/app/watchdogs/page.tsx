@@ -237,12 +237,12 @@ export default function WatchdogsPage() {
                   <div className={styles.deviceList}>
                     {pushDevices.data.subscriptions.map((device) => {
                       const isThisDevice = currentSubscription?.endpoint === device.endpoint;
+                      const name = device.label ?? "Unnamed device";
                       return (
                         <div key={device.id} className={styles.device}>
                           <div className={styles.deviceInfo}>
-                            <span className={styles.deviceName}>
-                              {isThisDevice && <span className={styles.badge}>This device</span>}
-                            </span>
+                            <span className={styles.deviceName}>{name}</span>
+                            {isThisDevice && <span className={styles.badge}>This device</span>}
                             <span className={styles.deviceDate}>
                               Added {new Date(device.createdAt).toLocaleDateString()}
                             </span>
@@ -252,7 +252,7 @@ export default function WatchdogsPage() {
                             className={styles.removeButton}
                             onClick={() => handleRemoveDevice(device.endpoint)}
                             disabled={unsubscribing === device.endpoint}
-                            aria-label={`Remove device ${isThisDevice ? "this device" : ""}`}
+                            aria-label={`Remove ${isThisDevice ? "this device" : name}`}
                           >
                             Remove
                           </button>

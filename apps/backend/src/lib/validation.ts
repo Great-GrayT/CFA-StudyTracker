@@ -306,6 +306,9 @@ export const subscribePushSchema = z.object({
     p256dh: z.string().min(1),
     auth: z.string().min(1),
   }),
+  // Sent by the browser itself: the proxy in front of this API replaces the
+  // User-Agent header with its own.
+  userAgent: z.string().max(512).optional(),
 });
 
 export const unsubscribePushSchema = z.object({

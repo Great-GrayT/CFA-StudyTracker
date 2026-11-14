@@ -63,6 +63,9 @@ export interface SubscribeRequest {
    * browser and no candidate ever had a working subscription.
    */
   keys: { p256dh: string; auth: string };
+  /** Names the device in the list ("Android · Chrome"). Sent in the body
+   * because the proxy replaces the User-Agent header with its own. */
+  userAgent?: string;
 }
 
 /**
@@ -101,6 +104,7 @@ export function toSubscribePayload(subscription: PushSubscription): SubscribeReq
   return {
     endpoint: subscription.endpoint,
     keys: { p256dh: base64Url(p256dh), auth: base64Url(auth) },
+    userAgent: typeof navigator === "undefined" ? undefined : navigator.userAgent,
   };
 }
 

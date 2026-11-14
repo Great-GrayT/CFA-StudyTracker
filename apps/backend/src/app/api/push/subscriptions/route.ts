@@ -19,7 +19,7 @@ export async function GET(req: Request): Promise<Response> {
   const subscriptions = await db.pushSubscription.findMany({
     where: { userId: auth.userId },
     orderBy: { createdAt: "desc" },
-    select: { id: true, endpoint: true, createdAt: true },
+    select: { id: true, endpoint: true, label: true, createdAt: true },
   });
 
   return Response.json(
@@ -27,6 +27,7 @@ export async function GET(req: Request): Promise<Response> {
       subscriptions: subscriptions.map((s) => ({
         id: s.id,
         endpoint: s.endpoint,
+        label: s.label,
         createdAt: s.createdAt.toISOString(),
       })),
     },
