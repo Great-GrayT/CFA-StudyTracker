@@ -181,6 +181,9 @@ model StudyPlan {
   // Local "HH:MM" per coach slot ({ prescription, nudge, debrief }); null
   // means the defaults in core/slots.ts.
   coachSchedule      Json?
+  // Local YYYY-MM-DD the horizon was last built for. The sweep rebuilds a plan
+  // once its local day moves past this, so the day ends without the app open.
+  horizonGeneratedFor String?
   // The prior-work form exactly as last submitted, so it can be shown again.
   // The log rows derived from it are what the planner reads.
   priorWork          Json?

@@ -10,6 +10,29 @@ import { writeSnapshotForPlan, startOfUTCDay } from "./snapshot";
 // FUNC-push.ts: a destructured value import binds at import time, before any
 // spy is installed, so a test could not intercept the call made here.
 import * as coachModule from "./FUNC-coach";
+import * as scheduleModule from "./FUNC-schedule";
+import { parseSchedule, planningDate } from "../core/slots";
+import type { StudyPlan } from "@prisma/client";
+
+/**
+ * The day-end replan. The study day ends at the plan's debrief time; from then
+ * on the plan is built from tomorrow (planningDate). This rebuilds once each
+ * time that day moves past the one the horizon was built for, so today's
+ * tasks are frozen as they stand and skipped work goes back into the plan even
+ * if the candidate never opens the app. Returns whether it rebuilt. A failure is logged and left for
+ * the next sweep, never thrown, so one plan cannot cost the others theirs.
+ */
+export async function rebuildIfNewDay(plan: StudyPlan, now: Date): Promise<boolean> {
+  const from = planningDate(now, plan.timeZone, parseSchedule(plan.coachSchedule));
+  if (plan.horizonGeneratedFor && plan.horizonGeneratedFor >= from) return false;
+  try {
+    await scheduleModule.generateHorizon(plan.id, from);
+    return true;
+  } catch (err) {
+    console.error(`sweep: day-end rebuild failed for plan ${plan.id}`, err);
+    return false;
+  }
+}
 
 export type SweepResult = {
   plansProcessed: number;
@@ -64,6 +87,10 @@ export async function runSweep(): Promise<SweepResult> {
     } catch (err) {
       console.error(`cron/tick: coach failed for plan ${plan.id}`, err);
     }
+
+    // Last, in the order the day ends: the snapshot has judged the day, the
+    // debrief has reported it, and only now is the plan rebuilt from tomorrow.
+    await rebuildIfNewDay(plan, now);
   }
 
   // The ad-hoc "You missed a study day" push that used to live here is gone.

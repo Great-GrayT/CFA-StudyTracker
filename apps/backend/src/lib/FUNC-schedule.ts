@@ -758,6 +758,14 @@ export async function generateHorizon(
 }> {
   const plan = await db.studyPlan.findUniqueOrThrow({ where: { id: planId } });
 
+  // Never plan earlier than the day the horizon was last built for. Once the
+  // day has closed at the debrief the sweep builds from tomorrow, and a later
+  // rebuild "from today" (recording a forgotten task, say) must not put fresh
+  // work back onto the closed day.
+  if (plan.horizonGeneratedFor && plan.horizonGeneratedFor > today) {
+    today = plan.horizonGeneratedFor;
+  }
+
   // Every constant the engine reads, with the candidate's overrides clamped
   // into range. The columns hold the two choices; the json column holds the
   // numbers. Nothing below reads plan.tuning directly.
@@ -1160,6 +1168,10 @@ export async function generateHorizon(
   }
 
   const result = await db.$transaction(async (tx) => {
+    // Marks the day this horizon was built for, which is what the sweep's
+    // day-end rebuild compares against.
+    await tx.studyPlan.update({ where: { id: planId }, data: { horizonGeneratedFor: today } });
+
     // Freeze tasks before today.
     let frozenCount = 0;
     const tasksBeforeToday = await tx.planTask.findMany({

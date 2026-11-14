@@ -119,3 +119,19 @@ export function dueSlots(
 
   return result;
 }
+
+/**
+ * The day a plan should be built from right now: today until the debrief,
+ * tomorrow from the debrief on. The debrief is the end of the study day, when
+ * it is judged, reported and replanned, so work after it belongs to tomorrow.
+ */
+export function planningDate(
+  instant: Date,
+  timeZone: string,
+  schedule: CoachSchedule = SLOT_LOCAL_TIMES,
+): string {
+  const today = localDateFor(instant, timeZone);
+  if (!dueSlots(instant, timeZone, [], schedule).includes("debrief")) return today;
+  const [y, m, d] = today.split("-").map(Number);
+  return new Date(Date.UTC(y!, m! - 1, d! + 1)).toISOString().slice(0, 10);
+}

@@ -1,6 +1,6 @@
 import { describe, test, expect } from "vitest";
 import type { Slot } from "./slots";
-import { localDateFor, dueSlots, parseSchedule, formatSchedule, SLOT_LOCAL_TIMES } from "./slots";
+import { localDateFor, dueSlots, parseSchedule, formatSchedule, planningDate, SLOT_LOCAL_TIMES } from "./slots";
 
 describe("Email coach time slots", () => {
   test("the local date is the candidate's date, not the server's", () => {
@@ -70,5 +70,29 @@ describe("a candidate's own coach schedule", () => {
   test("formatSchedule round-trips through parseSchedule", () => {
     const times = { prescription: "07:05", nudge: "19:30", debrief: "23:45" };
     expect(formatSchedule(parseSchedule(times))).toEqual(times);
+  });
+});
+
+describe("planningDate", () => {
+  // The day ends at the debrief: that is when it is judged, reported and
+  // replanned, so from then on the plan is built from tomorrow.
+  test("is today before the debrief", () => {
+    expect(planningDate(new Date("2027-01-04T22:29:00Z"), "UTC", SLOT_LOCAL_TIMES)).toBe("2027-01-04");
+  });
+
+  test("is tomorrow from the debrief on", () => {
+    expect(planningDate(new Date("2027-01-04T22:30:00Z"), "UTC", SLOT_LOCAL_TIMES)).toBe("2027-01-05");
+  });
+
+  test("follows the plan's own debrief time and zone", () => {
+    const schedule = parseSchedule({ prescription: "06:00", nudge: "18:00", debrief: "21:00" });
+    // 21:30 in London in winter is 21:30 UTC.
+    expect(planningDate(new Date("2027-01-04T21:30:00Z"), "Europe/London", schedule)).toBe("2027-01-05");
+    // 21:30 UTC is 08:30 the next day in Sydney, before that day's debrief.
+    expect(planningDate(new Date("2027-01-04T21:30:00Z"), "Australia/Sydney", schedule)).toBe("2027-01-05");
+  });
+
+  test("crosses a month end", () => {
+    expect(planningDate(new Date("2027-01-31T23:00:00Z"), "UTC", SLOT_LOCAL_TIMES)).toBe("2027-02-01");
   });
 });
