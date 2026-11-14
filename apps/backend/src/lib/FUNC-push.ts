@@ -65,14 +65,20 @@ export type PushPayload = {
  * other failure (5xx, network error, ...) is logged and the row is left in
  * place, since it may be transient.
  */
-export async function sendPushToUser(userId: string, payload: PushPayload): Promise<void> {
+export async function sendPushToUser(
+  userId: string,
+  payload: PushPayload,
+): Promise<{ delivered: number; failed: number }> {
   // Without this, a bad VAPID config would make every send throw inside the
   // loop below and be swallowed as a per-subscription failure, which reads in
   // the logs as "the push service rejected us" rather than "this server is
   // misconfigured".
-  if (!pushReady) return;
+  if (!pushReady) return { delivered: 0, failed: 0 };
 
   const subscriptions = await db.pushSubscription.findMany({ where: { userId } });
+  // Counted so a caller can tell "a device got it" from "the call returned".
+  let delivered = 0;
+  let failed = 0;
 
   for (const sub of subscriptions) {
     try {
@@ -80,7 +86,9 @@ export async function sendPushToUser(userId: string, payload: PushPayload): Prom
         { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
         JSON.stringify(payload),
       );
+      delivered += 1;
     } catch (err) {
+      failed += 1;
       const statusCode = (err as { statusCode?: number } | null)?.statusCode;
       if (statusCode === 404 || statusCode === 410) {
         await db.pushSubscription.delete({ where: { id: sub.id } }).catch(() => {
@@ -91,4 +99,5 @@ export async function sendPushToUser(userId: string, payload: PushPayload): Prom
       }
     }
   }
+  return { delivered, failed };
 }

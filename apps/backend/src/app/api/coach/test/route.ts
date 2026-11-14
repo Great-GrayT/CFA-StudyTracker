@@ -75,17 +75,19 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
-  // sendPushToUser never throws: a dead endpoint is deleted and anything else
-  // is logged, because the coach must not lose a whole run to one bad device.
-  // That makes "it returned" a weaker signal than it looks, so the count of
-  // devices still registered afterwards is what gets reported.
-  await sendPushToUser(auth.userId, {
+  // sendPushToUser never throws, so its counts are the only honest answer.
+  const result = await sendPushToUser(auth.userId, {
     title: "Study Tracker",
     body: "Your notifications are working.",
     tag: "coach-test",
     url: "/today",
   });
 
-  const remaining = await db.pushSubscription.count({ where: { userId: auth.userId } });
-  return Response.json({ ok: true, channel: "push", devices: remaining });
+  if (result.delivered === 0) {
+    return Response.json(
+      { ok: false, reason: "No registered device accepted the notification. Add this device again." },
+      { status: 502 },
+    );
+  }
+  return Response.json({ ok: true, channel: "push", devices: result.delivered });
 }

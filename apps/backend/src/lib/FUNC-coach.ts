@@ -151,10 +151,19 @@ async function recordFailure(id: string, err: unknown): Promise<void> {
   });
 }
 
+/** A failed delivery is retried on later runs up to this many attempts. */
+const MAX_SEND_ATTEMPTS = 3;
+
 /** Claims the (planId, localDate, slot, channel) row before anything is sent. The
  * unique index is the actual guard: a concurrent or retried run loses the
  * race here, inside the DB, rather than by any application-level check that
- * could itself race. */
+ * could itself race.
+ *
+ * An existing row is re-claimed only when its last attempt recorded a failure.
+ * Clearing lastError is the claim: a second run racing for the same retry finds
+ * it already null and gets nothing. A row with no recorded failure is an
+ * attempt still in flight (or one that crashed mid-send) and is never touched,
+ * since sending it again could deliver twice. */
 async function claimSend(
   planId: string,
   localDate: string,
@@ -167,9 +176,25 @@ async function claimSend(
       tx.emailSend.create({ data: { planId, localDate, slot, channel, dialogueKey } }),
     );
   } catch (err) {
-    if (isUniqueConstraintViolation(err)) return null;
-    throw err;
+    if (!isUniqueConstraintViolation(err)) throw err;
   }
+  const retry = await db.emailSend.updateMany({
+    where: {
+      planId,
+      localDate,
+      slot,
+      channel,
+      sentAt: null,
+      lastError: { not: null },
+      failedAttempts: { lt: MAX_SEND_ATTEMPTS },
+    },
+    data: { lastError: null, dialogueKey },
+  });
+  if (retry.count === 0) return null;
+  return db.emailSend.findFirstOrThrow({
+    where: { planId, localDate, slot, channel },
+    select: { id: true },
+  });
 }
 
 /**
@@ -253,10 +278,12 @@ export async function runCoachForPlan(
     try {
       const result = await generateHorizon(planId, localDate);
       droppedCount = result.deleted;
-    } catch {
+    } catch (err) {
       // The whole point of the email is that the list is current. A coach
       // emailing yesterday's list is worse than silence: abort entirely,
-      // not just the prescription slot.
+      // not just the prescription slot. Nothing is claimed, so the next sweep
+      // tries again; logged because otherwise this reads as a mute coach.
+      console.error(`FUNC-coach: regenerating plan ${planId} failed, sending nothing`, err);
       return { sent: [], skipped: candidateSlots, failed: [], pushSent: [], pushFailed: [] };
     }
   }
@@ -290,6 +317,10 @@ export async function runCoachForPlan(
     signedOff =
       (await db.emailSend.count({ where: { planId, dialogueKey: "P_PAST" } })) > 0;
   }
+
+  // Push is not claimed without a device, so a phone registered later the
+  // same day still receives the slot instead of finding it already "sent".
+  const hasDevice = (await db.pushSubscription.count({ where: { userId: plan.userId } })) > 0;
 
   for (const slot of candidateSlots) {
     const key = dialogueFor(slot, state);
@@ -355,12 +386,15 @@ export async function runCoachForPlan(
     // and push on must still receive exactly one notification per slot per day,
     // and a bounced email must not suppress the phone: same message, different
     // send.
-    if (pushSlots.includes(slot)) {
+    if (pushSlots.includes(slot) && hasDevice) {
       const claimed = await claimSend(planId, localDate, slot, "push", key);
       if (claimed) {
         claimedEither = true;
         try {
-          await pushModule.sendPushToUser(plan.userId, push);
+          const result = await pushModule.sendPushToUser(plan.userId, push);
+          if (result.delivered === 0) {
+            throw new Error(`no device accepted the push (${result.failed} failed)`);
+          }
           await db.emailSend.update({ where: { id: claimed.id }, data: { sentAt: now } });
           pushSent.push(slot);
         } catch (err) {

@@ -1,4 +1,5 @@
-import { describe, test, expect, beforeEach, afterEach } from "vitest";
+import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
+import * as pushModule from "../../src/lib/FUNC-push";
 import { db } from "../../src/lib/db";
 import { resetDb } from "../helpers/test-db";
 import { setupPlanWithTasks } from "../helpers/fixtures";
@@ -46,31 +47,51 @@ describe("runCoachForPlan", () => {
   });
 
   // Deterministic version of the race the two-concurrent-runs test above
-  // exercises non-deterministically: an EmailSend row for this slot already
-  // sits unsent (sentAt null) - e.g. a crashed or still in-flight earlier
-  // attempt. dueSlots still reports the slot as due (its alreadySent filter
-  // only excludes sentAt-is-not-null rows), so the only thing standing
-  // between this run and a second send attempt is the claim itself
-  // refusing to treat an existing row as freshly won.
-  test("a slot with an existing unsent EmailSend row is never claimed again", async () => {
+  // exercises non-deterministically: a row for this slot sits unsent with no
+  // recorded failure, which is what an attempt still in flight looks like.
+  // The claim must refuse it, or two runs would both send.
+  test("a slot whose attempt is still in flight is never claimed again", async () => {
     const { planId } = await setupPlanWithTasks({ timeZone: "UTC" });
     await db.emailSend.create({
-      data: {
-        planId,
-        localDate: "2027-01-04",
-        slot: "prescription",
-        channel: "email",
-        failedAttempts: 1,
-        lastError: "prior attempt",
-      },
+      data: { planId, localDate: "2027-01-04", slot: "prescription", channel: "email" },
     });
     const out = await runCoachForPlan(planId, new Date("2027-01-04T07:00:00Z"));
     expect(out.sent).not.toContain("prescription");
-    // Scoped to the email channel: push claims its own row for the same slot,
-    // so an unscoped count is 2 by design now.
     expect(
       await db.emailSend.count({ where: { planId, slot: "prescription", channel: "email" } }),
     ).toBe(1);
+  });
+
+  // A bounced send used to keep its claim forever, so one SMTP hiccup cost
+  // the candidate that message for the whole day.
+  test("a failed send is retried on the next run", async () => {
+    const { planId } = await setupPlanWithTasks({ timeZone: "UTC" });
+    const first = await runCoachForPlan(planId, new Date("2027-01-04T07:00:00Z"), async () => {
+      throw new Error("smtp refused");
+    });
+    expect(first.failed).toEqual(["prescription"]);
+
+    const second = await runCoachForPlan(planId, new Date("2027-01-04T07:15:00Z"), async () => {});
+    expect(second.sent).toEqual(["prescription"]);
+    const row = await db.emailSend.findFirstOrThrow({
+      where: { planId, slot: "prescription", channel: "email" },
+    });
+    expect(row.sentAt).not.toBeNull();
+    expect(row.failedAttempts).toBe(1);
+  });
+
+  test("a send that keeps failing stops after three attempts", async () => {
+    const { planId } = await setupPlanWithTasks({ timeZone: "UTC" });
+    const failing = async () => {
+      throw new Error("smtp refused");
+    };
+    for (let i = 0; i < 5; i++) {
+      await runCoachForPlan(planId, new Date(`2027-01-04T07:${10 + i}:00Z`), failing);
+    }
+    const row = await db.emailSend.findFirstOrThrow({
+      where: { planId, slot: "prescription", channel: "email" },
+    });
+    expect(row.failedAttempts).toBe(3);
   });
 
   // Review Focus 2
@@ -82,10 +103,14 @@ describe("runCoachForPlan", () => {
     expect(await db.planTask.count({ where: { planId } })).not.toBe(before);
   });
 
-  test("a regeneration failure sends nothing at all", async () => {
+  test("a regeneration failure sends nothing at all, and says so", async () => {
     const { planId } = await setupPlanWithTasks({ missedDays: 3, breakRegeneration: true });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const out = await runCoachForPlan(planId, new Date("2027-01-04T07:00:00Z"));
     expect(out.sent).toEqual([]);
+    // It used to abort without a word, so a broken plan looked like a mute coach.
+    expect(error).toHaveBeenCalledWith(expect.stringContaining(planId), expect.anything());
+    error.mockRestore();
     expect(await db.emailSend.count({ where: { planId, sentAt: { not: null } } })).toBe(0);
   });
 
@@ -127,6 +152,10 @@ describe("after the exam", () => {
     await resetDb();
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   /** Moves a plan's exam date so that `runAt` falls after it. */
   async function setExamDate(planId: string, iso: string): Promise<void> {
     await db.studyPlan.update({ where: { id: planId }, data: { examDate: new Date(iso) } });
@@ -139,6 +168,12 @@ describe("after the exam", () => {
     // the rest of the plan's life, which is the exact opposite of what it says.
     const { planId } = await setupPlanWithTasks({ timeZone: "UTC" });
     await setExamDate(planId, "2027-01-01T00:00:00Z");
+    // A device, so the push channel has somewhere to sign off to.
+    const { userId } = await db.studyPlan.findUniqueOrThrow({ where: { id: planId } });
+    await db.pushSubscription.create({
+      data: { userId, endpoint: `https://push.example/${planId}`, p256dh: "k1", auth: "k2" },
+    });
+    vi.spyOn(pushModule, "sendPushToUser").mockResolvedValue({ delivered: 1, failed: 0 });
 
     const dayOne = await runCoachForPlan(planId, new Date("2027-01-04T07:00:00Z"));
     expect(dayOne.sent).toEqual(["prescription"]);
@@ -309,6 +344,13 @@ describe("studying something other than the plan", () => {
 describe("the two channels are independent", () => {
   beforeEach(async () => {
     await resetDb();
+    // The fixtures' endpoints are fake, so a real send would fail. Each test
+    // here is about routing between channels, not about the push service.
+    vi.spyOn(pushModule, "sendPushToUser").mockResolvedValue({ delivered: 1, failed: 0 });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   async function subscribe(planId: string): Promise<void> {
@@ -557,5 +599,53 @@ describe("misconfiguration", () => {
     const out = await runCoachForPlan(planId, new Date("2027-01-04T07:10:00Z"));
 
     expect(out.sent).toEqual(["prescription"]);
+  });
+});
+
+describe("push is only counted when a device received it", () => {
+  beforeEach(async () => {
+    await resetDb();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const MORNING = new Date("2027-01-04T07:00:00Z");
+
+  async function subscribe(planId: string): Promise<void> {
+    const plan = await db.studyPlan.findUniqueOrThrow({ where: { id: planId } });
+    await db.pushSubscription.create({
+      data: { userId: plan.userId, endpoint: `https://push.example/${planId}`, p256dh: "k1", auth: "k2" },
+    });
+  }
+
+  // With no device the slot used to be marked sent anyway, so registering a
+  // phone later that day got nothing until tomorrow.
+  test("with no device registered, push is not claimed and goes out once one is", async () => {
+    const { planId } = await setupPlanWithTasks({ timeZone: "UTC" });
+    const send = vi.spyOn(pushModule, "sendPushToUser").mockResolvedValue({ delivered: 1, failed: 0 });
+
+    const before = await runCoachForPlan(planId, MORNING, async () => {});
+    expect(before.pushSent).toEqual([]);
+    expect(send).not.toHaveBeenCalled();
+    expect(await db.emailSend.count({ where: { planId, channel: "push" } })).toBe(0);
+
+    await subscribe(planId);
+    const after = await runCoachForPlan(planId, new Date("2027-01-04T09:00:00Z"), async () => {});
+    expect(after.pushSent).toEqual(["prescription"]);
+  });
+
+  test("when every device rejects the push it is a failure, not a send", async () => {
+    const { planId } = await setupPlanWithTasks({ timeZone: "UTC" });
+    await subscribe(planId);
+    vi.spyOn(pushModule, "sendPushToUser").mockResolvedValue({ delivered: 0, failed: 1 });
+
+    const out = await runCoachForPlan(planId, MORNING, async () => {});
+    expect(out.pushSent).toEqual([]);
+    expect(out.pushFailed).toEqual(["prescription"]);
+    const row = await db.emailSend.findFirstOrThrow({ where: { planId, channel: "push" } });
+    expect(row.sentAt).toBeNull();
+    expect(row.failedAttempts).toBe(1);
   });
 });

@@ -90,7 +90,7 @@ test("a missed day sends a push once a slot is due", async () => {
   await db.pushSubscription.create({
     data: { userId: user.id, endpoint: "https://push.example/abc", p256dh: "k1", auth: "k2" },
   });
-  const sendSpy = vi.spyOn(pushModule, "sendPushToUser").mockResolvedValue(undefined);
+  const sendSpy = vi.spyOn(pushModule, "sendPushToUser").mockResolvedValue({ delivered: 1, failed: 0 });
 
   // 23:00 in the plan's zone, past all three slot times, so a slot is due
   // whatever hour the suite happens to run at. The DATE stays today, so
@@ -115,7 +115,7 @@ test("nothing is pushed before the first slot of the day has passed", async () =
   await db.pushSubscription.create({
     data: { userId: user.id, endpoint: "https://push.example/def", p256dh: "k1", auth: "k2" },
   });
-  const sendSpy = vi.spyOn(pushModule, "sendPushToUser").mockResolvedValue(undefined);
+  const sendSpy = vi.spyOn(pushModule, "sendPushToUser").mockResolvedValue({ delivered: 1, failed: 0 });
 
   const beforeFirstSlot = new Date(`${isoDate(new Date())}T02:00:00Z`);
   const result = await coachModule.runCoachForPlan(plan.id, beforeFirstSlot, async () => {});
