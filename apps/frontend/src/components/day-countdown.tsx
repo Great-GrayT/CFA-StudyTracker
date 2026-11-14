@@ -1,30 +1,22 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { msUntilDayEnd } from "@/lib/day-end";
 import styles from "./day-countdown.module.css";
 
 /**
  * How long is left to finish today. The first thing on the screen, and the
  * biggest.
  *
- * It counts to 22:30 local, the coach's night debrief, because that is the
- * moment the day is judged: it is the message that says what was and was not
- * done. Counting to midnight would be counting to nothing.
+ * It counts to the plan's debrief, in the plan's own time zone, because that
+ * is when the day ends: the server checks what was and was not done, sends the
+ * debrief, and replans from tomorrow. Counting to midnight would be counting
+ * to nothing.
  *
  * Hundredths, not seconds. A clock that ticks once a second reads as a
  * status line; one that never stops moving reads as time running out, which
  * is the entire point of putting it here.
  */
-
-// 22:30, the night debrief. Mirrored from the coach's slots.
-const DEADLINE_HOUR = 22;
-const DEADLINE_MINUTE = 30;
-
-function msUntilDeadline(now: number): number {
-  const deadline = new Date(now);
-  deadline.setHours(DEADLINE_HOUR, DEADLINE_MINUTE, 0, 0);
-  return deadline.getTime() - now;
-}
 
 function minutesLabel(minutes: number): string {
   if (minutes < 60) return `${minutes} min`;
@@ -36,10 +28,18 @@ function minutesLabel(minutes: number): string {
 export function DayCountdown({
   remainingMinutes,
   totalMinutes,
+  timeZone,
+  debrief,
+  onDayEnd,
 }: {
   /** Planned minutes not yet finished today. */
   remainingMinutes: number;
   totalMinutes: number;
+  /** The plan's zone and its debrief "HH:MM": the end of the study day. */
+  timeZone: string;
+  debrief: string;
+  /** Called once when the day closes, so the page can treat today as owed. */
+  onDayEnd?: () => void;
 }) {
   const [left, setLeft] = useState<number | null>(null);
   const frame = useRef<number | undefined>(undefined);
@@ -49,14 +49,19 @@ export function DayCountdown({
     // 60fps to look continuous, and rAF stops when the tab is hidden instead
     // of burning a timer in the background.
     const tick = () => {
-      setLeft(msUntilDeadline(Date.now()));
+      setLeft(msUntilDayEnd(Date.now(), timeZone, debrief));
       frame.current = requestAnimationFrame(tick);
     };
     frame.current = requestAnimationFrame(tick);
     return () => {
       if (frame.current !== undefined) cancelAnimationFrame(frame.current);
     };
-  }, []);
+  }, [timeZone, debrief]);
+
+  const closed = left !== null && left <= 0;
+  useEffect(() => {
+    if (closed) onDayEnd?.();
+  }, [closed, onDayEnd]);
 
   // Nothing planned, nothing to count down to.
   if (totalMinutes === 0) return null;
@@ -82,9 +87,9 @@ export function DayCountdown({
 
   if (expired) {
     return (
-      <section className={styles.wrap} aria-label="Past the coach's deadline">
+      <section className={styles.wrap} aria-label="Today has closed">
         <p className={`${styles.clock} ${styles.clockLate} tnum`}>00:00:00</p>
-        <p className={styles.note}>{minutesLabel(remainingMinutes)} unfinished</p>
+        <p className={styles.note}>Day closed, {minutesLabel(remainingMinutes)} not done</p>
       </section>
     );
   }
@@ -97,7 +102,7 @@ export function DayCountdown({
   const pad = (n: number) => String(n).padStart(2, "0");
 
   return (
-    <section className={styles.wrap} aria-label={`${minutesLeft} minutes until the coach writes`}>
+    <section className={styles.wrap} aria-label={`${minutesLeft} minutes until the day closes`}>
       {/* aria-hidden: a figure changing sixty times a second must never reach
           a screen reader. The section's own label carries the meaning. */}
       <p

@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 
 import { DeviationSparkline, buildSeries } from "@/components/pace-field";
 import { DayPlan } from "@/components/day-plan";
 import { DayCountdown } from "@/components/day-countdown";
+import { MissedTasks } from "@/components/missed-tasks";
 import { WeekStrip, weekOf, buildWeek } from "@/components/week-strip";
 import { Countdown } from "@/components/countdown";
 import {
@@ -19,7 +20,8 @@ import {
   usePrescription,
   flattenCurriculum,
 } from "@/lib/hooks";
-import { readPace, missedDays, remainingWeekSplit, startOfUTCDay, addUTCDays } from "@/lib/pace";
+import { readPace, remainingWeekSplit, startOfUTCDay, addUTCDays } from "@/lib/pace";
+import { debriefTime, msUntilDayEnd } from "@/lib/day-end";
 import styles from "./today.module.css";
 import dynamic from "next/dynamic";
 
@@ -52,6 +54,15 @@ export default function TodayPage() {
   const week = useMemo(() => weekOf(todayISO), [todayISO]);
   const prescription = usePrescription(planId, week[0], week[6]);
   const [selectedDate, setSelectedDate] = useState(todayISO);
+
+  // The study day ends at the plan's debrief. Once it has, today's unstarted
+  // tasks are owed and listed under Not done.
+  const planZone = plan.data?.timeZone ?? "UTC";
+  const debrief = debriefTime(plan.data?.coachSchedule);
+  const [closedNow, setClosedNow] = useState(false);
+  const dayClosed =
+    closedNow || (plan.data ? msUntilDayEnd(Date.now(), planZone, debrief) <= 0 : false);
+  const handleDayEnd = useCallback(() => setClosedNow(true), []);
   const selectedDay = prescription.data?.days.find((d) => d.date === selectedDate);
   const todayDay = prescription.data?.days.find((d) => d.date === todayISO);
 
@@ -97,17 +108,6 @@ export default function TodayPage() {
     });
   }, [ready, plan.data, logs.data, totalOutcomes, holidays.data]);
 
-  const missed = useMemo(() => {
-    if (!ready) return [];
-    const today = startOfUTCDay(new Date());
-    return missedDays({
-      plan: plan.data!,
-      logs: logs.data!,
-      holidays: holidays.data!,
-      from: addUTCDays(today, -6),
-      to: today,
-    });
-  }, [ready, plan.data, logs.data, holidays.data]);
 
   const split = plan.data ? remainingWeekSplit(plan.data.weeklyAvailability) : null;
 
@@ -141,6 +141,9 @@ export default function TodayPage() {
           (todayDay?.totalMinutes ?? 0) - (todayDay?.doneMinutes ?? 0),
         )}
         totalMinutes={todayDay?.totalMinutes ?? 0}
+        timeZone={planZone}
+        debrief={debrief}
+        onDayEnd={handleDayEnd}
       />
 
       {plan.data && <Countdown examDate={plan.data.examDate} startDate={plan.data.startDate} />}
@@ -209,17 +212,8 @@ export default function TodayPage() {
             </section>
           )}
 
-          {missed.length > 0 && (
-            <p className={styles.missed} role="status">
-              You planned to study on{" "}
-              {missed
-                .map((d) =>
-                  new Date(d).toLocaleDateString(undefined, { weekday: "long" }),
-                )
-                .join(", ")}{" "}
-              and logged nothing.
-            </p>
-          )}
+          <MissedTasks planId={planId} todayISO={todayISO} closed={dayClosed} />
+
 
           {split && split.totalHours > 0 && (
             <section className={styles.plan} aria-labelledby="next-heading">

@@ -1,0 +1,56 @@
+.section {
+  display: grid;
+  gap: var(--space-3);
+  margin: var(--space-6) 0;
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.heading {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+/* The one loud thing here: what the skipped work adds up to. */
+.owed {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--alarm-ink);
+}
+
+.note {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--muted);
+  max-width: 60ch;
+}
+
+.day {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.dayName {
+  margin: var(--space-2) 0 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  border-top: 1px solid var(--rule);
+}

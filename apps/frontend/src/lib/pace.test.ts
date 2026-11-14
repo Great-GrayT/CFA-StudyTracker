@@ -42,6 +42,8 @@ const plan = (p: Partial<Plan> = {}): Plan => ({
   reviewStartDate: null,
   emailCoach: "all",
   pushCoach: "all",
+  coachSchedule: null,
+  horizonGeneratedFor: null,
   city: null,
   countryCode: null,
   latitude: null,

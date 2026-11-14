@@ -53,6 +53,11 @@ export type Plan = {
   // night summary on a phone is an ordinary preference.
   emailCoach: CoachPreference;
   pushCoach: CoachPreference;
+  // The coach's three local times; null means the defaults. The debrief is the
+  // end of the study day.
+  coachSchedule: { prescription: string; nudge: string; debrief: string } | null;
+  // Local day the plan was last built from. Ahead of today once today closed.
+  horizonGeneratedFor: string | null;
   // City-level only, user-entered, and all null until they say.
   city: string | null;
   countryCode: string | null;

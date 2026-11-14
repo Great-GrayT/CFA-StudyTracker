@@ -23,19 +23,6 @@
 }
 
 .unrealistic,
-.missed {
-  margin: 0 0 var(--space-4);
-  padding: var(--space-3);
-  background: var(--raised);
-  border-left: 3px solid var(--alarm);
-  color: var(--text);
-  font-size: 15px;
-}
-
-.missed {
-  border-left-color: var(--rule-strong);
-}
-
 .split {
   margin-bottom: var(--space-5);
 }

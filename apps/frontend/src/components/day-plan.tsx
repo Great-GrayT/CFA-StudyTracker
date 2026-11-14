@@ -16,7 +16,7 @@ import styles from "./day-plan.module.css";
  * read pages 6 to 10, do eight questions, and links to each.
  */
 
-function minutesLabel(minutes: number): string {
+export function minutesLabel(minutes: number): string {
   if (minutes < 60) return `${minutes} min`;
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
@@ -24,7 +24,7 @@ function minutesLabel(minutes: number): string {
 }
 
 type Submit = (submission: TaskSubmission) => Promise<unknown>;
-type SubmitFor = (taskId: string, submission: TaskSubmission) => Promise<unknown>;
+export type SubmitFor = (taskId: string, submission: TaskSubmission) => Promise<unknown>;
 
 function SubmitControl({ task, submit }: { task: PrescribedTask; submit: Submit }) {
   const done = task.status === "done" || task.status === "completed";
@@ -243,12 +243,21 @@ function SubmitControl({ task, submit }: { task: PrescribedTask; submit: Submit 
   );
 }
 
-function TaskRow({ task, onSubmit }: { task: PrescribedTask; onSubmit?: SubmitFor }) {
+export function TaskRow({
+  task,
+  onSubmit,
+  missed = false,
+}: {
+  task: PrescribedTask;
+  onSubmit?: SubmitFor;
+  /** A past task never started: drawn as work owed, not as work to do. */
+  missed?: boolean;
+}) {
   const submit: Submit | undefined = onSubmit ? (s) => onSubmit(task.id, s) : undefined;
   const done = task.status === "done" || task.status === "completed";
 
   return (
-    <li className={done ? styles.rowDone : styles.row}>
+    <li className={done ? styles.rowDone : missed ? styles.rowMissed : styles.row}>
       <span className={styles.spine} aria-hidden="true" />
       <div className={styles.body}>
         <p className={styles.module}>
