@@ -33,6 +33,7 @@ test.each([
   "auth/me",
   "auth/password",
   "auth/passkeys",
+  "auth/account/delete",
   // The two the settings screen needs.
   "settings",
   "geocode",

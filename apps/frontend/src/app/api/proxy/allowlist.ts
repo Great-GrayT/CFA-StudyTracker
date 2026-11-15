@@ -38,6 +38,8 @@ export const ALLOWED = [
   /^auth\/2fa\/(setup|enable|disable)$/,
   /^auth\/passkey\/register-(options|verify)$/,
   /^auth\/passkeys(\/|$)/,
+  // Settings "delete account"; exact match so no sibling under account/ is admitted.
+  /^auth\/account\/delete$/,
   // The settings screen's one-shot read of everything the user can manage.
   /^settings$/,
   // City lookup for the study-location picker.
