@@ -8,8 +8,10 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
-import { Mark } from "@/components/mark";
-import styles from "../login/login.module.css";
+import { AuthPanel } from "@/components/auth/auth-panel";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 const schema = z
   .object({
@@ -21,6 +23,9 @@ const schema = z
     path: ["confirm"],
   });
 type Values = z.infer<typeof schema>;
+
+const noteClass = "text-muted-foreground text-[13px] leading-5";
+const errorClass = "text-alarm-ink text-[13px] leading-5";
 
 function ResetForm() {
   const router = useRouter();
@@ -47,85 +52,77 @@ function ResetForm() {
 
   if (!token) {
     return (
-      <>
-        <p className={styles.note}>
+      <div className="flex flex-col gap-4">
+        <p className={noteClass}>
           That reset link is incomplete. Request a new one and open it directly from the email.
         </p>
-        <Link href="/forgot-password" className={styles.provider}>
-          Request a new link
-        </Link>
-      </>
+        <Button variant="outline" asChild className="w-full">
+          <Link href="/forgot-password">Request a new link</Link>
+        </Button>
+      </div>
     );
   }
 
   return (
-    <>
-      <p className={styles.note}>Choose a new password. This signs you out on every device.</p>
-      <form onSubmit={handleSubmit(onSubmit)} noValidate>
-        <label className={styles.label} htmlFor="password">
-          New password
-        </label>
-        <input
-          id="password"
-          type="password"
-          autoComplete="new-password"
-          className={styles.input}
-          aria-invalid={!!errors.password}
-          aria-describedby={errors.password ? "password-error" : undefined}
-          {...register("password")}
-        />
-        {errors.password && (
-          <p id="password-error" className={styles.fieldError} role="alert">
-            {errors.password.message}
-          </p>
-        )}
+    <div className="flex flex-col gap-4">
+      <p className={noteClass}>Choose a new password. This signs you out on every device.</p>
+      <form onSubmit={handleSubmit(onSubmit)} noValidate className="flex flex-col gap-4">
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="password">New password</Label>
+          <Input
+            id="password"
+            type="password"
+            autoComplete="new-password"
+            aria-invalid={!!errors.password}
+            aria-describedby={errors.password ? "password-error" : undefined}
+            {...register("password")}
+          />
+          {errors.password && (
+            <p id="password-error" className={errorClass} role="alert">
+              {errors.password.message}
+            </p>
+          )}
+        </div>
 
-        <label className={styles.label} htmlFor="confirm">
-          Confirm new password
-        </label>
-        <input
-          id="confirm"
-          type="password"
-          autoComplete="new-password"
-          className={styles.input}
-          aria-invalid={!!errors.confirm}
-          aria-describedby={errors.confirm ? "confirm-error" : undefined}
-          {...register("confirm")}
-        />
-        {errors.confirm && (
-          <p id="confirm-error" className={styles.fieldError} role="alert">
-            {errors.confirm.message}
-          </p>
-        )}
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="confirm">Confirm new password</Label>
+          <Input
+            id="confirm"
+            type="password"
+            autoComplete="new-password"
+            aria-invalid={!!errors.confirm}
+            aria-describedby={errors.confirm ? "confirm-error" : undefined}
+            {...register("confirm")}
+          />
+          {errors.confirm && (
+            <p id="confirm-error" className={errorClass} role="alert">
+              {errors.confirm.message}
+            </p>
+          )}
+        </div>
 
         {error && (
-          <p className={styles.formError} role="alert">
+          <p className={errorClass} role="alert">
             {error}
           </p>
         )}
 
-        <button type="submit" className={styles.primary} disabled={isSubmitting}>
+        <Button type="submit" className="w-full" disabled={isSubmitting}>
           Set new password
-        </button>
+        </Button>
       </form>
-    </>
+    </div>
   );
 }
 
 export default function ResetPasswordPage() {
+  // useSearchParams opts this subtree into client rendering, so the boundary has
+  // to exist for the shell to prerender.
   return (
-    <main className={styles.page}>
-      <div className={styles.card}>
-        <h1 className={styles.brand}>
-          <Mark size={28} />
-          Study Tracker
-        </h1>
-        {/* useSearchParams opts this subtree into client rendering, so the
-            boundary has to exist for the shell to prerender. */}
-        <Suspense fallback={<p className={styles.note}>Checking that link.</p>}>
-          <ResetForm />
-        </Suspense>
-      </div>
-    </main>
+    <AuthPanel>
+      <Suspense fallback={<p className={noteClass}>Checking that link.</p>}>
+        <ResetForm />
+      </Suspense>
+    </AuthPanel>
   );
 }
