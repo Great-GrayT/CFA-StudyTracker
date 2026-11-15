@@ -1,11 +1,15 @@
 import type { Metadata, Viewport } from "next";
 import { ThemeProvider } from "next-themes";
-import { Toaster } from "sonner";
+import { Archivo, Newsreader } from "next/font/google";
+import { Toaster } from "@/components/ui/sonner";
 import { QueryProvider } from "@/lib/query-provider";
 import { ServiceWorkerRegistrar } from "@/components/service-worker-registrar";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
-import "./tokens.css";
+import "./globals.css";
+
+const archivo = Archivo({ subsets: ["latin"], axes: ["wdth"], variable: "--font-archivo", display: "swap" });
+const newsreader = Newsreader({ subsets: ["latin"], variable: "--font-newsreader", display: "swap" });
 
 export const metadata: Metadata = {
   title: "Study Tracker",
@@ -32,7 +36,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" className={`${archivo.variable} ${newsreader.variable}`} suppressHydrationWarning>
       <body>
         <ThemeProvider attribute="data-theme" defaultTheme="system" enableSystem>
           <QueryProvider>

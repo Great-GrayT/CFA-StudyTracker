@@ -67,7 +67,7 @@
   --space-8: 64px;
 
   --radius-data: 0;
-  --radius-input: 2px;
+  --radius-input: 4px;
   --radius-pill: 999px;
 
   --ease-exit: cubic-bezier(0.4, 0, 1, 1);
@@ -77,8 +77,8 @@
   --dur-move: 200ms;
   --dur-sheet: 300ms;
 
-  --font-ui: "Archivo", ui-sans-serif, system-ui, sans-serif;
-  --font-prose: "Newsreader", ui-serif, Georgia, serif;
+  --font-ui: var(--font-archivo), "Archivo", ui-sans-serif, system-ui, sans-serif;
+  --font-prose: var(--font-newsreader), "Newsreader", ui-serif, Georgia, serif;
 }
 
 /* System preference, but only when the user has not chosen explicitly. */
@@ -161,7 +161,6 @@ body {
   background: var(--ground);
   color: var(--text);
   font-family: var(--font-ui);
-  font-size: 16px;
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
   /* Stops the whole page rubber-banding behind fixed chrome on iOS. */
@@ -179,21 +178,33 @@ body {
   overflow-x: clip;
 }
 
-/* Every interactive element gets a visible ring. The token has no other job,
-   so it can never be accidentally restyled by a component. */
-:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
-  border-radius: var(--radius-input);
-}
+/* Layered so Tailwind utilities (outline-hidden, ring, rounded-*) on the kit
+   controls win; unlayered rules would beat every utility. */
+@layer base {
+  /* Every interactive element gets a visible ring. The token has no other
+     job, so a component cannot accidentally restyle it. */
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
 
-/* Inputs never below 16px: iOS zooms the viewport on focus below that. */
-input,
-select,
-textarea,
-button {
-  font: inherit;
-  font-size: max(16px, 1rem);
+  input,
+  select,
+  textarea,
+  button {
+    font: inherit;
+  }
+
+  /* iOS zooms the viewport on focus below 16px, so the floor is mobile only
+     and desktop keeps the 14px body scale. */
+  @media (max-width: 767px) {
+    input,
+    select,
+    textarea,
+    button {
+      font-size: max(16px, 1rem);
+    }
+  }
 }
 
 button {
