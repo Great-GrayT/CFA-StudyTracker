@@ -30,7 +30,7 @@ import {
   solveQuestionMultiple,
 } from "../core/pairing";
 import { packReview, projectCoverageDate, reviewPhaseStart, reviewQueue } from "../core/review";
-import { countsForCalibration, creditedMinutes } from "../core/task-credit";
+import { countsForCalibration, creditedMinutes, OFF_PLAN } from "../core/task-credit";
 import {
   answerReviewMinutes,
   questionPaceAnchor,
@@ -675,6 +675,24 @@ function isProtectedWork(task: {
   );
 }
 
+/**
+ * The earliest missed day whose work a cell carries: same kind, a shared
+ * reading. The packer reshapes work freely, so overlap is the only honest
+ * link between a missed cell and the cells that now owe its material.
+ */
+export function missedOrigin(
+  missed: Array<{ date: Date; kind: string; readingIds: string[] }>,
+  cell: { kind: string; readingIds: string[] },
+): Date | null {
+  let earliest: Date | null = null;
+  for (const m of missed) {
+    if (m.kind !== cell.kind) continue;
+    if (!m.readingIds.some((id) => cell.readingIds.includes(id))) continue;
+    if (earliest === null || m.date < earliest) earliest = m.date;
+  }
+  return earliest;
+}
+
 function readingIdsEqual(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false;
   return a.every((v, i) => v === b[i]);
@@ -790,7 +808,9 @@ export async function generateHorizon(
   // every estimate below is scaled by the candidate's own observed pace
   // instead of staying frozen at seed values forever.
   const completedTasks = await db.planTask.findMany({
-    where: { planId, status: "done" },
+    // An off-plan session's estimate is its own minutes, so its ratio is
+    // always 1 and would only dilute the real pace.
+    where: { planId, status: "done", OR: [{ insertedBecause: null }, { insertedBecause: { not: OFF_PLAN } }] },
     orderBy: { date: "asc" },
     select: { date: true, status: true, estimatedMinutes: true, actualMinutes: true },
   });
@@ -1191,6 +1211,20 @@ export async function generateHorizon(
       }
     }
 
+    // Frozen cells left pending were missed. Their material is still owed
+    // (loadWorkDone credits only done and partial), so the plan below already
+    // re-places it; this is only to say which cells carry it.
+    const missed = await tx.planTask.findMany({
+      where: {
+        planId,
+        date: { lt: todayDate },
+        frozen: true,
+        status: "pending",
+        OR: [{ insertedBecause: null }, { insertedBecause: { not: OFF_PLAN } }],
+      },
+      select: { date: true, kind: true, readingIds: true },
+    });
+
     // Get existing tasks in window for comparison.
     const tasksInWindow = await tx.planTask.findMany({
       where: {
@@ -1223,6 +1257,10 @@ export async function generateHorizon(
       for (let order = 0; order < day.tasks.length; order++) {
         const plannedTask = day.tasks[order];
         const key = `${dayDate.getTime()}|${order}`;
+        const postponedFrom = missedOrigin(missed, {
+          kind: plannedTask.kind,
+          readingIds: plannedTask.readingIds ?? [],
+        });
         const existingInWindow = tasksInWindow.find(
           (t) => `${t.date.getTime()}|${t.order}` === key,
         );
@@ -1230,7 +1268,14 @@ export async function generateHorizon(
         if (existingInWindow) {
           // Never overwrite real work, even if the plan reassigned this slot.
           if (isProtectedWork(existingInWindow)) continue;
-          if (taskMatchesPlan(existingInWindow, plannedTask)) continue;
+          if (taskMatchesPlan(existingInWindow, plannedTask)) {
+            // Same content, but a late record can clear (or a new miss set)
+            // the reason it is here.
+            if (existingInWindow.postponedFrom?.getTime() !== postponedFrom?.getTime()) {
+              await tx.planTask.update({ where: { id: existingInWindow.id }, data: { postponedFrom } });
+            }
+            continue;
+          }
 
           await tx.planTask.update({
             where: { id: existingInWindow.id },
@@ -1247,6 +1292,7 @@ export async function generateHorizon(
               splitOf: plannedTask.splitOf,
               splitIndex: plannedTask.splitIndex,
               splitCount: plannedTask.splitCount,
+              postponedFrom,
             },
           });
           continue;
@@ -1269,6 +1315,7 @@ export async function generateHorizon(
             splitOf: plannedTask.splitOf,
             splitIndex: plannedTask.splitIndex,
             splitCount: plannedTask.splitCount,
+            postponedFrom,
             status: "pending",
             frozen: false,
           },

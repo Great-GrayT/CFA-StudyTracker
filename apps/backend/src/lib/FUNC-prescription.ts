@@ -14,7 +14,7 @@
 // what a past task meant is not something a catalogue refresh should be able
 // to do.
 import { db } from "./db";
-import { creditedMinutes } from "../core/task-credit";
+import { creditedMinutes, OFF_PLAN } from "../core/task-credit";
 
 /** A single thing to do, named the way the provider names it. */
 export type PrescribedMaterial = {
@@ -45,6 +45,10 @@ export type PrescribedTask = {
   topicName: string | null;
   moduleTitle: string | null;
   materials: PrescribedMaterial[];
+  /** Earliest missed day (YYYY-MM-DD) whose work this cell carries, else null. */
+  postponedFrom: string | null;
+  /** A session the candidate logged themselves, not one the plan asked for. */
+  offPlan: boolean;
 };
 
 export type PrescribedDay = {
@@ -209,13 +213,27 @@ export async function getPrescription(
     unitsByReading.set(ur.readingId, list);
   }
 
+  // An off-plan cell names the package it was studied in.
+  const offPlanPackageIds = [
+    ...new Set(tasks.filter((t) => t.insertedBecause === OFF_PLAN && t.packageId).map((t) => t.packageId!)),
+  ];
+  const offPlanPackages = await db.studyPackage.findMany({
+    where: { id: { in: offPlanPackageIds } },
+    select: { id: true, name: true },
+  });
+  const packageNameById = new Map(offPlanPackages.map((p) => [p.id, p.name]));
+
   const byDate = new Map<string, PrescribedTask[]>();
 
   for (const task of tasks) {
     const dateStr = task.date.toISOString().slice(0, 10);
     const reading = task.readingIds.map((id) => readingById.get(id)).find(Boolean);
     const wantedRole = roleFor(task.kind);
-    const allowedPackages = packageIdsByRole.get(wantedRole) ?? new Set<string>();
+    const offPlan = task.insertedBecause === OFF_PLAN;
+    const allowedPackages =
+      offPlan && task.packageId
+        ? new Set([task.packageId])
+        : (packageIdsByRole.get(wantedRole) ?? new Set<string>());
 
     const candidateUnits = task.readingIds
       .flatMap((id) => unitsByReading.get(id) ?? [])
@@ -282,6 +300,18 @@ export async function getPrescription(
     // CFA Institute's own study tools by virtue of being registered, so that
     // gap has an answer: send them there instead of telling them their
     // packages have failed them.
+    const ownPackage = offPlan && task.packageId ? packageNameById.get(task.packageId) : undefined;
+    if (materials.length === 0 && ownPackage) {
+      // The candidate said where they studied; the catalogue just has no unit
+      // for it. Their word beats a generic pointer.
+      materials.push({
+        action,
+        label: reading?.name ?? "Study session",
+        packageName: ownPackage,
+        url: null,
+        questionCount: null,
+      });
+    }
     if (materials.length === 0) {
       materials.push({
         // "Use", not the task's own verb: nobody watches a study-tools site,
@@ -307,6 +337,8 @@ export async function getPrescription(
       topicName: reading?.topic.name ?? null,
       moduleTitle: reading?.name ?? null,
       materials,
+      postponedFrom: task.postponedFrom ? task.postponedFrom.toISOString().slice(0, 10) : null,
+      offPlan,
     };
 
     const list = byDate.get(dateStr) ?? [];
@@ -358,7 +390,8 @@ export async function getPrescription(
     const done = dayTasks.filter((t) => isDone(t.status));
     days.push({
       date: dateStr,
-      totalMinutes: dayTasks.reduce((sum, t) => sum + t.estimatedMinutes, 0),
+      // What the plan asked for: a session logged off plan was never asked.
+      totalMinutes: dayTasks.filter((t) => !t.offPlan).reduce((sum, t) => sum + t.estimatedMinutes, 0),
       doneMinutes: dayTasks.reduce(
         (sum, t) => sum + creditedMinutes({ ...t, status: isDone(t.status) ? "done" : t.status }),
         0,

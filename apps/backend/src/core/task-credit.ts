@@ -9,6 +9,9 @@
  * the estimate.
  */
 
+/** `PlanTask.insertedBecause` for a session the candidate logged themselves. */
+export const OFF_PLAN = "off-plan";
+
 export type SubmittedTask = {
   status: string;
   estimatedMinutes: number;

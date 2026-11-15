@@ -299,6 +299,13 @@ model PlanTask {
   logEntryId        String?
   // Reason this task was inserted programmatically (e.g., "retry-weak", "mock-review-inserted")
   insertedBecause   String?
+  // Earliest missed day whose work this cell carries. Set by the horizon write
+  // when a frozen pending cell of the same kind shares a reading, so the day
+  // view can say the work was moved rather than silently re-owed.
+  postponedFrom     DateTime?
+  // The package an off-plan cell was studied in. Planned cells resolve their
+  // material from the plan's package roles; a logged session names its own.
+  packageId         String?
   plan              StudyPlan     @relation(fields: [planId], references: [id])
   logs              StudyLogEntry[]
   @@index([planId, date])
