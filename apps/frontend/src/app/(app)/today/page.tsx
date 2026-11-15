@@ -2,7 +2,6 @@
 
 import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
-import { AppShell } from "@/components/app-shell";
 
 import { DeviationSparkline, buildSeries } from "@/components/pace-field";
 import { DayPlan } from "@/components/day-plan";
@@ -15,25 +14,19 @@ import {
   useProgress,
   useLogs,
   useHolidays,
-  usePackages,
   usePrescription,
   flattenCurriculum,
 } from "@/lib/hooks";
 import { readPace, remainingWeekSplit, startOfUTCDay, addUTCDays } from "@/lib/pace";
 import { debriefTime } from "@/lib/day-end";
 import styles from "./today.module.css";
-import dynamic from "next/dynamic";
 
-// Loaded on demand: the sheet renders nothing until it is opened, so its
-// virtualized outcome list has no business in this route's first load.
-const Composer = dynamic(() => import("@/components/composer").then((m) => m.Composer));
 
 const hours = new Intl.NumberFormat("en", { maximumFractionDigits: 1 });
 const plural = new Intl.PluralRules("en");
 const outcomeWord = (n: number) => (plural.select(n) === "one" ? "outcome" : "outcomes");
 
 export default function TodayPage() {
-  const [composing, setComposing] = useState(false);
 
   const plan = usePlan();
   const planId = plan.data?.id;
@@ -41,7 +34,6 @@ export default function TodayPage() {
   const progress = useProgress(planId);
   const logs = useLogs(planId);
   const holidays = useHolidays(planId);
-  const packages = usePackages();
 
   // The candidate's own calendar day, formatted the way the API wants it.
   // en-CA is the shortest route to YYYY-MM-DD without pulling in a formatter.
@@ -110,14 +102,14 @@ export default function TodayPage() {
 
   if (plan.isLoading || curriculum.isLoading) {
     return (
-      <AppShell onCompose={() => setComposing(true)}>
+      <div className="mx-auto w-full max-w-[44rem] min-w-0 p-4 md:p-8">
         <div className={styles.skeleton} aria-busy="true" aria-label="Loading today">
           <div className={styles.skelLine} />
           <div className={styles.skelBlock} />
           <div className={styles.skelRow} />
           <div className={styles.skelRow} />
         </div>
-      </AppShell>
+      </div>
     );
   }
 
@@ -128,7 +120,7 @@ export default function TodayPage() {
     startOfUTCDay(new Date(plan.data.examDate)).getTime() === startOfUTCDay(new Date()).getTime();
 
   return (
-    <AppShell onCompose={() => setComposing(true)}>
+    <div className="mx-auto w-full max-w-[44rem] min-w-0 p-4 md:p-8">
       {/* First thing on the page, and the biggest: how long is left of today.
           Not tied to the day the candidate has selected below, because that
           selection is for reading a plan, and this is their own deadline. */}
@@ -242,16 +234,7 @@ export default function TodayPage() {
           />
         </>
       )}
-
-      <Composer
-        open={composing}
-        onClose={() => setComposing(false)}
-        planId={planId}
-        curriculum={curriculum.data}
-        packages={packages.data ?? []}
-        suggestedLosId={progress.data?.studyNext[0]?.losId}
-      />
-    </AppShell>
+    </div>
   );
 }
 

@@ -14,32 +14,58 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 
+// Controlled when value is passed; uncontrolled otherwise, as it shipped.
 export function DatePicker({
   className,
-}: React.HTMLAttributes<HTMLDivElement>) {
-  const [date, setDate] = React.useState<Date>();
+  value,
+  onChange,
+  id = 'date',
+  disabled,
+  max,
+  placeholder = 'Pick a date',
+  'aria-describedby': describedBy,
+}: Omit<React.HTMLAttributes<HTMLDivElement>, 'onChange'> & {
+  value?: Date;
+  onChange?: (date: Date | undefined) => void;
+  id?: string;
+  disabled?: boolean;
+  /** Last selectable day, inclusive. */
+  max?: Date;
+  placeholder?: string;
+}) {
+  const [inner, setInner] = React.useState<Date>();
+  const [open, setOpen] = React.useState(false);
+  const date = value !== undefined || onChange ? value : inner;
 
   return (
     <div className={cn('grid gap-2', className)}>
-      <Popover>
+      <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button
-            id="date"
+            id={id}
             variant={'outline'}
+            disabled={disabled}
+            aria-describedby={describedBy}
             className={cn(
-              'w-full justify-start text-right font-normal',
+              'w-full justify-start text-left font-normal tabular-nums',
               !date && 'text-muted-foreground'
             )}
           >
-            <CalendarIcon className="ml-2 h-4 w-4" />
-            {date ? format(date, 'PPP') : <span>Pick a date</span>}
+            <CalendarIcon className="h-4 w-4" />
+            {date ? format(date, 'EEE d MMM yyyy') : <span>{placeholder}</span>}
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-auto p-0" align="start">
           <Calendar
             mode="single"
             selected={date}
-            onSelect={setDate}
+            defaultMonth={date}
+            onSelect={(d) => {
+              if (onChange) onChange(d);
+              else setInner(d);
+              setOpen(false);
+            }}
+            disabled={max ? { after: max } : undefined}
             initialFocus
           />
         </PopoverContent>
@@ -61,11 +87,11 @@ export function DateRangePicker({
             id="date"
             variant={'outline'}
             className={cn(
-              'w-full justify-start text-right font-normal',
+              'w-full justify-start text-left font-normal',
               !date && 'text-muted-foreground'
             )}
           >
-            <CalendarIcon className="ml-2 h-4 w-4" />
+            <CalendarIcon className="h-4 w-4" />
             {date?.from ? (
               date.to ? (
                 <>

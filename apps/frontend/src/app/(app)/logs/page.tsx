@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react";
 import { Virtuoso } from "react-virtuoso";
-import { AppShell } from "@/components/app-shell";
 import { useLogs, useCurriculum, usePlan, useDeleteLog, flattenCurriculum } from "@/lib/hooks";
 import { startOfUTCDay, addUTCDays } from "@/lib/pace";
 import type { LogEntry } from "@/lib/types";
@@ -22,14 +21,14 @@ export default function LogsPage() {
 
   if (logs.isLoading || curriculum.isLoading) {
     return (
-      <AppShell>
+      <div className="mx-auto w-full max-w-[44rem] min-w-0 p-4 md:p-8">
         <div className={styles.skeleton} aria-busy="true" aria-label="Loading log history">
           <div className={styles.skelLine} />
           <div className={styles.skelRow} />
           <div className={styles.skelRow} />
           <div className={styles.skelRow} />
         </div>
-      </AppShell>
+      </div>
     );
   }
 
@@ -42,12 +41,12 @@ export default function LogsPage() {
 
   if (logs.data!.length === 0) {
     return (
-      <AppShell>
+      <div className="mx-auto w-full max-w-[44rem] min-w-0 p-4 md:p-8">
         <div>
           <h1 className={styles.title}>Log history</h1>
           <p className={styles.empty}>No sessions logged yet.</p>
         </div>
-      </AppShell>
+      </div>
     );
   }
 
@@ -61,7 +60,7 @@ export default function LogsPage() {
   ]);
 
   return (
-    <AppShell>
+    <div className="mx-auto w-full max-w-[44rem] min-w-0 p-4 md:p-8">
       <div>
         <h1 className={styles.title}>Log history</h1>
 
@@ -82,7 +81,7 @@ export default function LogsPage() {
           }}
         />
       </div>
-    </AppShell>
+    </div>
   );
 }
 

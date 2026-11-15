@@ -1,7 +1,6 @@
 "use client";
 
 import { useId, useMemo, useState } from "react";
-import { AppShell } from "@/components/app-shell";
 import { useMocks, usePackages } from "@/lib/hooks";
 import { usePlan } from "@/lib/hooks";
 import { api } from "@/lib/api";
@@ -26,21 +25,21 @@ export default function MocksPage() {
 
   if (mocks.isLoading || plan.isLoading) {
     return (
-      <AppShell>
+      <div className="mx-auto w-full max-w-[44rem] min-w-0 p-4 md:p-8">
         <div className={styles.skeleton} aria-busy="true" aria-label="Loading mock exams">
           <div className={styles.skelLine} />
           <div className={styles.skelBlock} />
           <div className={styles.skelRow} />
           <div className={styles.skelRow} />
         </div>
-      </AppShell>
+      </div>
     );
   }
 
   if (!mocks.data || !packages.data || !planId) return null;
 
   return (
-    <AppShell>
+    <div className="mx-auto w-full max-w-[44rem] min-w-0 p-4 md:p-8">
       <div className={styles.head}>
         <h1 className={styles.title}>Mock exams</h1>
         <button
@@ -95,7 +94,7 @@ export default function MocksPage() {
           onClose={() => setShowAdd(false)}
         />
       )}
-    </AppShell>
+    </div>
   );
 }
 

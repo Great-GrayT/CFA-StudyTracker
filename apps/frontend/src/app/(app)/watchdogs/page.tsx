@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
-import { AppShell } from "@/components/app-shell";
 import { InstallCard } from "@/components/install-card";
 import { useCronStatus, usePushDevices } from "@/lib/hooks";
 import { api, ApiError } from "@/lib/api";
@@ -166,7 +165,7 @@ export default function WatchdogsPage() {
   const failWord = plural.select(lastRun?.plansFailed ?? 0) === "one" ? "plan" : "plans";
 
   return (
-    <AppShell>
+    <div className="mx-auto w-full max-w-[44rem] min-w-0 p-4 md:p-8">
       <div className={styles.page}>
         <h1 className={styles.title}>System health</h1>
 
@@ -330,7 +329,7 @@ export default function WatchdogsPage() {
           </>
         )}
       </div>
-    </AppShell>
+    </div>
   );
 }
 

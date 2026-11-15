@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { AppShell } from "@/components/app-shell";
 import {
   usePlan,
   useLogs,
@@ -85,23 +84,23 @@ export default function PlanPage() {
 
   if (plan.isLoading) {
     return (
-      <AppShell>
+      <div className="mx-auto w-full max-w-[44rem] min-w-0 p-4 md:p-8">
         <div className={styles.skeleton} aria-busy="true">
           <div className={styles.skelLine} />
           <div className={styles.skelBlock} />
         </div>
-      </AppShell>
+      </div>
     );
   }
 
   if (!plan.data) {
     return (
-      <AppShell>
+      <div className="mx-auto w-full max-w-[44rem] min-w-0 p-4 md:p-8">
         <section className={styles.container}>
           <h1 className={styles.title}>Plan</h1>
           <p className={styles.empty}>No active plan. Set one up to start tracking.</p>
         </section>
-      </AppShell>
+      </div>
     );
   }
 
@@ -262,7 +261,7 @@ export default function PlanPage() {
   }
 
   return (
-    <AppShell>
+    <div className="mx-auto w-full max-w-[44rem] min-w-0 p-4 md:p-8">
       <section className={styles.container} aria-labelledby="plan-heading">
         <h1 id="plan-heading" className={styles.title}>
           Plan
@@ -680,6 +679,6 @@ export default function PlanPage() {
         </div>
         </div>
       </section>
-    </AppShell>
+    </div>
   );
 }

@@ -1,18 +1,14 @@
 "use client";
 
-import { use, useMemo, useState } from "react";
+import { use, useMemo } from "react";
 import Link from "next/link";
-import { AppShell } from "@/components/app-shell";
 
 import { usePlan, useCurriculum, useLogs, usePackages, flattenCurriculum } from "@/lib/hooks";
+import { useRecord } from "@/components/record/record-provider";
 import styles from "./los.module.css";
-import dynamic from "next/dynamic";
 import { ConfidenceMeter } from "@/components/confidence";
 import { Pager, usePaged } from "@/components/pager";
 
-// Loaded on demand: the sheet renders nothing until it is opened, so its
-// virtualized outcome list has no business in this route's first load.
-const Composer = dynamic(() => import("@/components/composer").then((m) => m.Composer));
 
 // One outcome, in full.
 //
@@ -27,7 +23,7 @@ const plural = new Intl.PluralRules("en");
 
 export default function LosPage({ params }: { params: Promise<{ losId: string }> }) {
   const { losId } = use(params);
-  const [composing, setComposing] = useState(false);
+  const record = useRecord();
 
   const plan = usePlan();
   const curriculum = useCurriculum(plan.data?.levelId);
@@ -90,7 +86,7 @@ export default function LosPage({ params }: { params: Promise<{ losId: string }>
 
   if (!los && !curriculum.isLoading) {
     return (
-      <AppShell onCompose={() => setComposing(true)}>
+      <div className="mx-auto w-full max-w-[44rem] min-w-0 p-4 md:p-8">
         <Link href="/coverage" className={styles.back}>
           Back to coverage
         </Link>
@@ -98,12 +94,12 @@ export default function LosPage({ params }: { params: Promise<{ losId: string }>
           This outcome is not in the current curriculum. It may have been renumbered in a yearly
           update.
         </p>
-      </AppShell>
+      </div>
     );
   }
 
   return (
-    <AppShell onCompose={() => setComposing(true)}>
+    <div className="mx-auto w-full max-w-[44rem] min-w-0 p-4 md:p-8">
       <Link href={los ? `/coverage/${los.topicId}` : "/coverage"} className={styles.back}>
         Back to {los?.topicName ?? "coverage"}
       </Link>
@@ -239,20 +235,11 @@ export default function LosPage({ params }: { params: Promise<{ losId: string }>
           />
         </section>
 
-        <button type="button" className={styles.primary} onClick={() => setComposing(true)}>
+        <button type="button" className={styles.primary} onClick={() => record.open({ losId })}>
           Record study
         </button>
       </article>
-
-      <Composer
-        open={composing}
-        onClose={() => setComposing(false)}
-        planId={plan.data?.id}
-        curriculum={curriculum.data}
-        packages={packages.data ?? []}
-        suggestedLosId={losId}
-      />
-    </AppShell>
+    </div>
   );
 }
 

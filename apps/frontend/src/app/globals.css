@@ -19,12 +19,23 @@
   --color-secondary-foreground: var(--text);
   --color-muted: var(--raised);
   --color-muted-foreground: var(--muted);
-  --color-accent: var(--raised);
+  --color-accent: var(--accent-tint);
   --color-accent-foreground: var(--text);
   --color-destructive: var(--alarm);
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--rule);
   --color-input: var(--rule-strong);
   --color-ring: var(--focus);
+
+  /* The sidebar sits on the page ground, split off by a hairline, not a panel. */
+  --color-sidebar: var(--ground);
+  --color-sidebar-foreground: var(--text);
+  --color-sidebar-primary: var(--claimed);
+  --color-sidebar-primary-foreground: var(--primary-foreground);
+  --color-sidebar-accent: var(--accent-tint);
+  --color-sidebar-accent-foreground: var(--text);
+  --color-sidebar-border: var(--rule);
+  --color-sidebar-ring: var(--focus);
 
   --color-chart-1: var(--stage-fp-reading);
   --color-chart-2: var(--stage-fp-questions);
@@ -59,17 +70,28 @@
   font-family: var(--font-prose);
 }
 
-/* Text on --claimed: white on light, the ground on dark. */
+/* Text on --claimed and --alarm: white on light, the ground on dark, where
+   both fills are light enough that white fails contrast. */
 :root {
   --primary-foreground: #fff;
+  --destructive-foreground: #fff;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --primary-foreground: var(--ground);
+    --destructive-foreground: var(--ground);
   }
 }
 :root[data-theme="dark"] {
   --primary-foreground: var(--ground);
+  --destructive-foreground: var(--ground);
+}
+
+/* Hover and selection tint. Accent used to equal --raised, which made
+   hover:bg-accent invisible on raised surfaces; a touch of the one accent
+   colour reads on both ground and raised without a new token value. */
+:root {
+  --accent-tint: color-mix(in oklab, var(--claimed) 10%, var(--raised));
 }
 
 @layer base {

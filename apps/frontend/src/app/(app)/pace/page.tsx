@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { AppShell } from "@/components/app-shell";
 import { PaceField, buildSeries } from "@/components/pace-field";
 import {
   usePlan,
@@ -190,13 +189,13 @@ export default function PacePage() {
 
   if (plan.isLoading || curriculum.isLoading) {
     return (
-      <AppShell>
+      <div className="mx-auto w-full max-w-[44rem] min-w-0 p-4 md:p-8">
         <div className={styles.skeleton} aria-busy="true">
           <div className={styles.skelLine} />
           <div className={styles.skelBlock} />
           <div className={styles.skelBlock} />
         </div>
-      </AppShell>
+      </div>
     );
   }
 
@@ -206,7 +205,7 @@ export default function PacePage() {
 
   if (examPassed) {
     return (
-      <AppShell>
+      <div className="mx-auto w-full max-w-[44rem] min-w-0 p-4 md:p-8">
         <section className={styles.container} aria-labelledby="pace-heading">
           <div className={styles.header}>
             <h1 id="pace-heading" className={styles.title}>
@@ -219,12 +218,12 @@ export default function PacePage() {
             plan when you are ready.
           </p>
         </section>
-      </AppShell>
+      </div>
     );
   }
 
   return (
-    <AppShell>
+    <div className="mx-auto w-full max-w-[44rem] min-w-0 p-4 md:p-8">
       <section className={styles.container} aria-labelledby="pace-heading">
         <div className={styles.header}>
           <h1 id="pace-heading" className={styles.title}>
@@ -417,6 +416,6 @@ export default function PacePage() {
           </>
         )}
       </section>
-    </AppShell>
+    </div>
   );
 }

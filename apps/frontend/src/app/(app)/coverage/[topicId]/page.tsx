@@ -2,16 +2,12 @@
 
 import { use, useMemo, useState } from "react";
 import Link from "next/link";
-import { AppShell } from "@/components/app-shell";
 
-import { usePlan, useCurriculum, useLogs, usePackages } from "@/lib/hooks";
+import { usePlan, useCurriculum, useLogs } from "@/lib/hooks";
+import { useRecord } from "@/components/record/record-provider";
 import type { LogEntry } from "@/lib/types";
 import styles from "./topic.module.css";
-import dynamic from "next/dynamic";
 
-// Loaded on demand: the sheet renders nothing until it is opened, so its
-// virtualized outcome list has no business in this route's first load.
-const Composer = dynamic(() => import("@/components/composer").then((m) => m.Composer));
 
 // The reading strip: one row per reading, subdivided into one segment per
 // outcome. Chosen over a tree because 80 readings fit on a phone and 700
@@ -35,14 +31,12 @@ function statusOf(logs: LogEntry[]): Status {
 
 export default function TopicPage({ params }: { params: Promise<{ topicId: string }> }) {
   const { topicId } = use(params);
-  const [composing, setComposing] = useState(false);
-  const [suggested, setSuggested] = useState<string | undefined>();
+  const record = useRecord();
   const [expanded, setExpanded] = useState<string | null>(null);
 
   const plan = usePlan();
   const curriculum = useCurriculum(plan.data?.levelId);
   const logs = useLogs(plan.data?.id);
-  const packages = usePackages();
 
   const topic = curriculum.data?.topics.find((t) => t.id === topicId);
 
@@ -58,11 +52,11 @@ export default function TopicPage({ params }: { params: Promise<{ topicId: strin
 
   if (!topic) {
     return (
-      <AppShell onCompose={() => setComposing(true)}>
+      <div className="mx-auto w-full max-w-[44rem] min-w-0 p-4 md:p-8">
         <p className={styles.muted}>
           {curriculum.isLoading ? "Loading." : "That topic is not in the current curriculum."}
         </p>
-      </AppShell>
+      </div>
     );
   }
 
@@ -70,7 +64,7 @@ export default function TopicPage({ params }: { params: Promise<{ topicId: strin
   const coveredCount = allIds.filter((id) => logsByLos.has(id)).length;
 
   return (
-    <AppShell onCompose={() => setComposing(true)}>
+    <div className="mx-auto w-full max-w-[44rem] min-w-0 p-4 md:p-8">
       <Link href="/coverage" className={styles.back}>
         Back to coverage
       </Link>
@@ -125,8 +119,7 @@ export default function TopicPage({ params }: { params: Promise<{ topicId: strin
                           type="button"
                           className={styles.logBtn}
                           onClick={() => {
-                            setSuggested(los.id);
-                            setComposing(true);
+                            record.open({ losId: los.id });
                           }}
                           aria-label={`Record study for ${los.text}`}
                         >
@@ -148,15 +141,6 @@ export default function TopicPage({ params }: { params: Promise<{ topicId: strin
         <li><span className={`${styles.swatch} ${styles.flagged}`} /> Flagged</li>
         <li><span className={`${styles.swatch} ${styles.untouched}`} /> Not started</li>
       </ul>
-
-      <Composer
-        open={composing}
-        onClose={() => setComposing(false)}
-        planId={plan.data?.id}
-        curriculum={curriculum.data}
-        packages={packages.data ?? []}
-        suggestedLosId={suggested}
-      />
-    </AppShell>
+    </div>
   );
 }

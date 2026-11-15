@@ -17,7 +17,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import { Drawer, DrawerContent, DrawerTrigger } from '@/components/ui/drawer';
+import { Drawer, DrawerContent, DrawerTitle, DrawerTrigger } from '@/components/ui/drawer';
 import { useMediaQuery } from '@/hooks/ui/use-media-query';
 import { Badge } from '@/components/ui/badge';
 
@@ -39,6 +39,9 @@ interface ComboboxProps {
   value?: string | string[];
   defaultValue?: string | string[];
   maxDisplayItems?: number;
+  id?: string;
+  disabled?: boolean;
+  'aria-labelledby'?: string;
 }
 
 const DEFAULT_MAX_DISPLAY_ITEMS = 1;
@@ -138,6 +141,9 @@ export function Combobox({
   defaultValue = '',
   multiple = false,
   maxDisplayItems = DEFAULT_MAX_DISPLAY_ITEMS,
+  id,
+  disabled = false,
+  'aria-labelledby': labelledBy,
 }: ComboboxProps) {
   const [open, setOpen] = React.useState(false);
 
@@ -182,7 +188,8 @@ export function Combobox({
         // Don't close the popover/drawer in multiple mode
       } else {
         // Handle single selection (original behavior)
-        const newValue = currentValue === value ? '' : currentValue;
+        // Reselecting keeps the value: a fast repeat Enter must not clear a field.
+        const newValue = currentValue;
         if (!isControlled) {
           setInternalValue(newValue);
         }
@@ -282,24 +289,26 @@ export function Combobox({
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button
+            id={id}
             variant="outline"
             role="combobox"
             aria-expanded={open}
+            aria-labelledby={labelledBy}
             className={cn(
               'min-h-10 w-[200px] justify-between',
               multiple && 'flex-wrap',
               className
             )}
-            disabled={isLoading}
+            disabled={isLoading || disabled}
           >
             <div className="flex flex-1 items-center overflow-hidden">
-              {renderSelectedContent()}
+              <span className="truncate">{renderSelectedContent()}</span>
             </div>
             <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
           </Button>
         </PopoverTrigger>
         <PopoverContent
-          className={cn('w-[200px] p-0', className)}
+          className="w-(--radix-popover-trigger-width) min-w-[200px] p-0"
           align="start"
           sideOffset={4}
         >
@@ -323,20 +332,27 @@ export function Combobox({
     <Drawer open={open} onOpenChange={setOpen}>
       <DrawerTrigger asChild>
         <Button
+          id={id}
           variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          aria-labelledby={labelledBy}
           className={cn(
             'min-h-10 w-[150px] justify-start',
             multiple && 'flex-wrap',
             className
           )}
-          disabled={isLoading}
+          disabled={isLoading || disabled}
         >
           <div className="flex flex-1 items-center overflow-hidden">
-            {renderSelectedContent()}
+            <span className="truncate">{renderSelectedContent()}</span>
           </div>
+          <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
         </Button>
       </DrawerTrigger>
-      <DrawerContent>
+      <DrawerContent aria-describedby={undefined}>
+        {/* Radix requires a dialog title; the placeholder names the choice. */}
+        <DrawerTitle className="sr-only">{placeholder}</DrawerTitle>
         <div className="mt-4 border-t p-4">
           <ComboboxContent
             data={data}

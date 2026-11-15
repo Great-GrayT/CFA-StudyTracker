@@ -1,30 +1,22 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { AppShell } from "@/components/app-shell";
 
 import { WeightGap } from "@/components/weight-gap";
-import { usePlan, useCurriculum, useLogs, usePackages, useProgress } from "@/lib/hooks";
+import { usePlan, useCurriculum, useLogs } from "@/lib/hooks";
 import { weightedCoveragePercent, type TopicCoverage } from "@/lib/coverage";
 import styles from "./coverage.module.css";
-import dynamic from "next/dynamic";
 
-// Loaded on demand: the sheet renders nothing until it is opened, so its
-// virtualized outcome list has no business in this route's first load.
-const Composer = dynamic(() => import("@/components/composer").then((m) => m.Composer));
 
 const pct = new Intl.NumberFormat("en", { maximumFractionDigits: 0 });
 
 export default function CoveragePage() {
   const router = useRouter();
-  const [composing, setComposing] = useState(false);
 
   const plan = usePlan();
   const curriculum = useCurriculum(plan.data?.levelId);
   const logs = useLogs(plan.data?.id);
-  const packages = usePackages();
-  const progress = useProgress(plan.data?.id);
 
   // Coverage is reconstructed from the log history, NOT from studyNext: the
   // backend's studyNextList filters covered outcomes out entirely, so it can
@@ -76,7 +68,7 @@ export default function CoveragePage() {
   const loading = plan.isLoading || curriculum.isLoading || logs.isLoading;
 
   return (
-    <AppShell onCompose={() => setComposing(true)}>
+    <div className="mx-auto w-full max-w-[44rem] min-w-0 p-4 md:p-8">
       <h1 className={styles.title}>Coverage</h1>
 
       {loading ? (
@@ -132,15 +124,6 @@ export default function CoveragePage() {
           </p>
         </>
       )}
-
-      <Composer
-        open={composing}
-        onClose={() => setComposing(false)}
-        planId={plan.data?.id}
-        curriculum={curriculum.data}
-        packages={packages.data ?? []}
-        suggestedLosId={progress.data?.studyNext[0]?.losId}
-      />
-    </AppShell>
+    </div>
   );
 }

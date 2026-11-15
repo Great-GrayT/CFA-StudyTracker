@@ -166,7 +166,7 @@ const Sidebar = React.forwardRef<
 >(
   (
     {
-      side = 'right',
+      side = 'left',
       variant = 'sidebar',
       collapsible = 'offcanvas',
       className,
@@ -241,7 +241,7 @@ const Sidebar = React.forwardRef<
             // Adjust the padding for floating and inset variants.
             variant === 'floating' || variant === 'inset'
               ? 'p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]'
-              : 'group-data-[collapsible=icon]:w-(--sidebar-width-icon) group-data-[side=left]:border-l group-data-[side=right]:border-r',
+              : 'group-data-[collapsible=icon]:w-(--sidebar-width-icon) border-sidebar-border group-data-[side=left]:border-r group-data-[side=right]:border-l',
             className
           )}
           {...props}
@@ -513,8 +513,8 @@ SidebarMenuItem.displayName = 'SidebarMenuItem';
 
 const sidebarMenuButtonVariants = cva(
   cn(
-    'peer/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md p-2 outline-hidden ring-sidebar-ring transition-[width,height,padding] text-right text-sm hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50',
-    'group-has-data-[sidebar=menu-action]/menu-item:pl-8 group-has-data-[sidebar=menu-action]/menu-item:pr-2',
+    'peer/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md p-2 outline-hidden ring-sidebar-ring transition-[width,height,padding] text-left text-sm hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50',
+    'group-has-data-[sidebar=menu-action]/menu-item:pr-8',
     'aria-disabled:pointer-events-none aria-disabled:opacity-50',
     'data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground',
     'data-[state=open]:hover:bg-sidebar-accent data-[state=open]:hover:text-sidebar-accent-foreground',
@@ -615,9 +615,8 @@ const SidebarMenuAction = React.forwardRef<
       data-sidebar="menu-action"
       className={cn(
         'text-sidebar-foreground ring-sidebar-ring hover:bg-sidebar-accent hover:text-sidebar-accent-foreground peer-hover/menu-button:text-sidebar-accent-foreground',
-        // Update positioning for RTL
         'absolute top-1.5 flex aspect-square w-5 items-center justify-center rounded-md p-0 outline-hidden transition-transform focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0',
-        'left-1',
+        'right-1',
         // Increases the hit area of the button on mobile.
         'after:absolute after:-inset-2 md:after:hidden',
         'peer-data-[size=sm]/menu-button:top-1',
@@ -643,8 +642,7 @@ const SidebarMenuBadge = React.forwardRef<
     data-sidebar="menu-badge"
     className={cn(
       'text-sidebar-foreground pointer-events-none absolute flex h-5 min-w-5 items-center justify-center rounded-md px-1 text-xs font-medium tabular-nums select-none',
-      // Update positioning for RTL
-      'left-1',
+      'right-1',
       'peer-hover/menu-button:text-sidebar-accent-foreground peer-data-[active=true]/menu-button:text-sidebar-accent-foreground',
       'peer-data-[size=sm]/menu-button:top-1',
       'peer-data-[size=default]/menu-button:top-1.5',
@@ -704,8 +702,8 @@ const SidebarMenuSub = React.forwardRef<
     data-sidebar="menu-sub"
     className={cn(
       'border-sidebar-border mx-3.5 flex min-w-0 flex-col gap-1 py-0.5',
-      'border-r',
-      '-translate-x-px',
+      'border-l',
+      'translate-x-px',
       'px-2.5',
       'group-data-[collapsible=icon]:hidden',
       className
@@ -740,8 +738,7 @@ const SidebarMenuSubButton = React.forwardRef<
       className={cn(
         'text-sidebar-foreground ring-sidebar-ring hover:bg-sidebar-accent hover:text-sidebar-accent-foreground active:bg-sidebar-accent active:text-sidebar-accent-foreground [&>svg]:text-sidebar-accent-foreground',
         'flex h-7 min-w-0 items-center gap-2 overflow-hidden rounded-md px-2 outline-hidden focus-visible:ring-2',
-        // Update transform for RTL
-        'translate-x-px',
+        '-translate-x-px',
         'disabled:pointer-events-none disabled:opacity-50',
         'aria-disabled:pointer-events-none aria-disabled:opacity-50',
         '[&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0',

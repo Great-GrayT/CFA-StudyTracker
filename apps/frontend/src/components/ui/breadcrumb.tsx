@@ -1,11 +1,11 @@
 import * as React from 'react';
 import { Slot as SlotPrimitive } from 'radix-ui';
-import { ChevronLeft, MoreHorizontal } from 'lucide-react';
+import { ChevronRight, MoreHorizontal } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 
 function Breadcrumb({ ...props }: React.ComponentProps<'nav'>) {
-  return <nav aria-label="breadcrumb" data-slot="breadcrumb" {...props} />;
+  return <nav aria-label="Breadcrumb" data-slot="breadcrumb" {...props} />;
 }
 
 function BreadcrumbList({ className, ...props }: React.ComponentProps<'ol'>) {
@@ -75,7 +75,7 @@ function BreadcrumbSeparator({
       className={cn('[&>svg]:size-3.5', className)}
       {...props}
     >
-      {children ?? <ChevronLeft />}
+      {children ?? <ChevronRight />}
     </li>
   );
 }

@@ -3,7 +3,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { AppShell } from "@/components/app-shell";
 import { usePlan, useLogs, useMocks } from "@/lib/hooks";
 import { api, signOut } from "@/lib/api";
 import { toast } from "sonner";
@@ -164,7 +163,7 @@ export default function SettingsPage() {
   const dayWord = plural.select(dataCounts?.historyDays ?? 0) === "one" ? "day" : "days";
 
   return (
-    <AppShell>
+    <div className="mx-auto w-full max-w-[44rem] min-w-0 p-4 md:p-8">
       <div className={styles.page}>
         <h1 className={styles.title}>Settings</h1>
 
@@ -386,6 +385,6 @@ export default function SettingsPage() {
           />
         )}
       </div>
-    </AppShell>
+    </div>
   );
 }

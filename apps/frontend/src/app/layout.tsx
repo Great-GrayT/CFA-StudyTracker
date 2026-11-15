@@ -44,7 +44,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <a href="#main" className="visually-hidden">
               Skip to content
             </a>
-            <div id="main">{children}</div>
+            {/* The app shell's <main id="main"> is the skip target; wrapping
+                everything here would skip straight onto the sidebar. */}
+            {children}
             <Toaster position="top-center" closeButton />
             {/* Both serve their scripts and beacons from this origin, so the
                 same-origin CSP covers them with no exception. */}

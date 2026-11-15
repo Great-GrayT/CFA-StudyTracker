@@ -4,7 +4,6 @@ import { useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AppShell } from "@/components/app-shell";
 import { WeightGap } from "@/components/weight-gap";
 import { usePlan, useCurriculum, useLogs } from "@/lib/hooks";
 import type { TopicCoverage } from "@/lib/coverage";
@@ -56,7 +55,7 @@ export default function ExplorePage() {
   }, [curriculum.data, logs.data]);
 
   return (
-    <AppShell>
+    <div className="mx-auto w-full max-w-[44rem] min-w-0 p-4 md:p-8">
       <Link href="/coverage" className={styles.back}>
         Back to coverage
       </Link>
@@ -93,6 +92,6 @@ export default function ExplorePage() {
       {/* Always present, not only as a fallback: this is the accessible path
           to the same numbers, and the 3D canvas is marked aria-hidden. */}
       <WeightGap topics={topics} onSelect={(id) => router.push(`/coverage/${id}`)} />
-    </AppShell>
+    </div>
   );
 }

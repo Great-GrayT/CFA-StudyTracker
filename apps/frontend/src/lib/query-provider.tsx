@@ -16,15 +16,18 @@ import { get, set, del } from "idb-keyval";
 //
 // Writes are never queued. The product spec puts offline writes out of scope
 // for v1, so a failed mutation says so in place rather than pretending.
+/** Where the persisted cache lives; sign out deletes it. */
+export const CACHE_KEY = "cfa-cache";
+
 const idbPersister = {
   persistClient: async (client: unknown) => {
-    await set("cfa-cache", client);
+    await set(CACHE_KEY, client);
   },
   restoreClient: async () => {
-    return (await get("cfa-cache")) ?? undefined;
+    return (await get(CACHE_KEY)) ?? undefined;
   },
   removeClient: async () => {
-    await del("cfa-cache");
+    await del(CACHE_KEY);
   },
 };
 
