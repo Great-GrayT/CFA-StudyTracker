@@ -4,23 +4,16 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, ApiError, messageForStatus } from "@/lib/api";
-import type { CoachPreference, GeocodeMatch, Plan } from "@/lib/types";
-import styles from "./coach-settings.module.css";
+import type { CoachPreference, Plan } from "@/lib/types";
+import { Button } from "@/components/ui/button";
 
-// The study coach, managed from Settings: how much each channel sends, and
-// where the candidate studies.
+// How much each coach channel sends, and when it writes. Rendered inside the
+// Coach and devices section.
 //
-// Two decisions shaped this.
-//
-// The preference is a three-way choice, not a switch. What replaced it was a
-// toggle labelled "Missed day alerts" wired to component state, so it reset on
-// every reload and controlled nothing at all. A switch cannot express "all
-// three / night only / off", and reaching for one is how that happened.
-//
-// The city lookup returns a list and makes the candidate pick. There is a
-// Manchester in England and one in New Hampshire, and guessing wrong would put
-// both their weather lines and, far worse, their delivery times on the wrong
-// continent, with nothing downstream able to notice.
+// The preference is a three-way choice, not a switch. A toggle labelled
+// "Missed day alerts" was wired to component state, so it reset on every reload
+// and controlled nothing at all. A switch cannot express "all three / night
+// only / off", and reaching for one is how that happened.
 
 const CHOICES: { value: CoachPreference; label: string }[] = [
   { value: "all", label: "All three" },
@@ -30,21 +23,19 @@ const CHOICES: { value: CoachPreference; label: string }[] = [
   { value: "off", label: "Off" },
 ];
 
+const HINT = "text-muted-foreground text-[13px] leading-relaxed";
+const LEGEND = "text-[14px] font-medium";
+const FIELD = "border-border flex flex-col gap-2 border-t pt-4 first:border-t-0 first:pt-0";
+
 /**
- * One channel's three-way preference.
+ * Native radios inside a fieldset, not styled buttons. A radiogroup built from
+ * buttons announces a pattern it does not implement: a radio group is one tab
+ * stop with arrow-key movement, and three buttons are three tab stops that
+ * ignore arrows. The platform already does this correctly, so the input stays
+ * real and only the label is styled.
  *
- * Native radios inside a fieldset, not styled buttons. An earlier version used
- * three `<button role="radio">` elements in a `role="radiogroup"`, which
- * announces a pattern it did not implement: a radiogroup is a SINGLE tab stop
- * whose options are reached with the arrow keys, and three buttons are three
- * tab stops that ignore arrows entirely. A keyboard or screen reader user was
- * being promised one interaction and given another. The platform already does
- * all of this correctly, so the input stays real and only the label is styled.
- *
- * `selected` is the value shown as active, which is the pending choice while a
- * save is in flight rather than the saved one. Without that the pill does not
- * light up until the round trip returns, and the control feels broken at
- * exactly the moment the user is looking for confirmation.
+ * `selected` is the pending choice while a save is in flight, so the control
+ * confirms the change at once rather than after the round trip.
  */
 function ChannelChoice({
   name,
@@ -60,24 +51,32 @@ function ChannelChoice({
   onChange: (next: CoachPreference) => void;
 }) {
   return (
-    <fieldset className={styles.channel}>
-      <legend className={styles.channelLabel}>{label}</legend>
-      <div className={styles.choices}>
+    <fieldset className={FIELD}>
+      <legend className={LEGEND}>{label}</legend>
+      <div className="flex flex-wrap gap-2">
         {CHOICES.map((choice) => {
           const id = `${name}-${choice.value}`;
+          const checked = choice.value === selected;
           return (
-            <div key={choice.value} className={styles.choiceWrap}>
+            <div key={choice.value} className="relative">
               <input
-                className={styles.choiceInput}
+                className="peer sr-only"
                 type="radio"
                 id={id}
                 name={name}
                 value={choice.value}
-                checked={choice.value === selected}
+                checked={checked}
                 disabled={pending}
                 onChange={() => onChange(choice.value)}
               />
-              <label className={styles.choiceLabel} htmlFor={id}>
+              <label
+                htmlFor={id}
+                className={`flex h-9 max-md:h-11 cursor-pointer items-center border px-3 text-[13px] transition-colors peer-focus-visible:ring-ring/50 peer-focus-visible:ring-[3px] peer-disabled:cursor-not-allowed peer-disabled:opacity-50 ${
+                  checked
+                    ? "border-primary bg-primary/10 text-foreground font-medium"
+                    : "border-border text-muted-foreground hover:text-foreground"
+                } rounded-sm`}
+              >
                 {choice.label}
               </label>
             </div>
@@ -91,8 +90,7 @@ function ChannelChoice({
 export function CoachSettings({ plan, onSaved }: { plan: Plan; onSaved: () => void }) {
   const [pending, setPending] = useState(false);
   // Shown as active while the save is in flight. Cleared on failure, so a
-  // rejected change snaps back to the truth rather than leaving the control
-  // claiming something the server never accepted.
+  // rejected change snaps back to the truth.
   const [optimistic, setOptimistic] = useState<{
     emailCoach?: CoachPreference;
     pushCoach?: CoachPreference;
@@ -120,9 +118,8 @@ export function CoachSettings({ plan, onSaved }: { plan: Plan; onSaved: () => vo
   }
 
   return (
-    <section className={styles.section}>
-      <h2 className={styles.sectionTitle}>Study coach</h2>
-      <p className={styles.lede}>
+    <div className="flex flex-col gap-5">
+      <p className={HINT}>
         The coach writes you a plan each morning, a nudge in the evening if nothing is logged yet,
         and a summary at night. Each channel is set separately.
       </p>
@@ -133,11 +130,7 @@ export function CoachSettings({ plan, onSaved }: { plan: Plan; onSaved: () => vo
         selected={optimistic.emailCoach ?? plan.emailCoach}
         pending={pending}
         onChange={(next) =>
-          save(
-            "emailCoach",
-            next,
-            next === "off" ? "Coach emails stopped." : "Coach emails updated.",
-          )
+          save("emailCoach", next, next === "off" ? "Coach emails stopped." : "Coach emails updated.")
         }
       />
 
@@ -155,14 +148,14 @@ export function CoachSettings({ plan, onSaved }: { plan: Plan; onSaved: () => vo
         }
       />
 
-      <p className={styles.hint}>
+      <p className={HINT}>
         Both channels say the same thing. Turning one off never affects the other, and neither
         touches your plan or anything you have recorded.
       </p>
 
       <CoachSchedule plan={plan} />
       <CoachTryout />
-    </section>
+    </div>
   );
 }
 
@@ -183,6 +176,8 @@ const SLOT_LABELS: Record<Slot, string> = {
 };
 const DEFAULT_TIMES: Record<Slot, string> = { prescription: "06:30", nudge: "20:00", debrief: "22:30" };
 const SLOTS: Slot[] = ["prescription", "nudge", "debrief"];
+const FIELD_INPUT =
+  "border-input bg-background h-9 max-md:h-11 rounded-sm border px-3 text-[14px] tabular-nums focus-visible:ring-ring/50 focus-visible:ring-[3px] focus-visible:outline-none disabled:opacity-50";
 
 /** "P_REST_BEHIND" reads as "rest behind" under its slot's heading. */
 function eventLabel(key: string): string {
@@ -226,15 +221,15 @@ function CoachSchedule({ plan }: { plan: Plan }) {
 
   const zone = info.data?.timeZone;
   return (
-    <fieldset className={styles.channel}>
-      <legend className={styles.channelLabel}>When it writes</legend>
-      <div className={styles.times}>
+    <fieldset className={FIELD}>
+      <legend className={LEGEND}>When it writes</legend>
+      <div className="grid gap-3 sm:grid-cols-3">
         {SLOTS.map((slot) => (
-          <label key={slot} className={styles.time}>
-            <span>{SLOT_LABELS[slot]}</span>
+          <label key={slot} className="flex flex-col gap-1.5 text-[13px]">
+            <span className="text-muted-foreground">{SLOT_LABELS[slot]}</span>
             <input
               type="time"
-              className={styles.timeInput}
+              className={FIELD_INPUT}
               value={times[slot]}
               disabled={saving || !info.data}
               aria-invalid={error ? true : undefined}
@@ -244,24 +239,24 @@ function CoachSchedule({ plan }: { plan: Plan }) {
         ))}
       </div>
       {zone ? (
-        <p className={styles.hint}>
+        <p className={HINT}>
           {zone === "UTC"
-            ? "These times are in UTC, because no city is set. Choose your city below and they follow your own clock."
+            ? "These times are in UTC, because no city is set. Set your city below and they follow your own clock."
             : `These times are in ${zone}.`}
         </p>
       ) : null}
       {error ? (
-        <p className={styles.error} role="alert">
+        <p role="alert" className="text-alarm-ink text-[13px]">
           {error}
         </p>
       ) : null}
-      <div className={styles.row}>
-        <button type="button" className={styles.button} disabled={saving || !info.data} onClick={() => save(times)}>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="outline" disabled={saving || !info.data} onClick={() => save(times)}>
           {saving ? "Saving" : "Save times"}
-        </button>
-        <button type="button" className={styles.textButton} disabled={saving} onClick={() => save(null)}>
+        </Button>
+        <Button variant="ghost" disabled={saving} onClick={() => save(null)}>
           Reset to defaults
-        </button>
+        </Button>
       </div>
     </fieldset>
   );
@@ -294,17 +289,17 @@ function CoachTryout() {
   }
 
   return (
-    <fieldset className={styles.channel}>
-      <legend className={styles.channelLabel}>Try a message</legend>
-      <p className={styles.hint}>
+    <fieldset className={FIELD}>
+      <legend className={LEGEND}>Try a message</legend>
+      <p className={HINT}>
         Shows what the coach would say, worked out from your plan right now. Nothing is recorded as
         sent, so the real message later today still goes out.
       </p>
-      <label className={styles.time} htmlFor="coach-tryout">
-        <span>Message</span>
+      <label className="flex max-w-sm flex-col gap-1.5 text-[13px]" htmlFor="coach-tryout">
+        <span className="text-muted-foreground">Message</span>
         <select
           id="coach-tryout"
-          className={styles.select}
+          className={`${FIELD_INPUT} pr-8`}
           value={target}
           onChange={(e) => setTarget(e.target.value)}
         >
@@ -328,31 +323,31 @@ function CoachTryout() {
             : null}
         </select>
       </label>
-      <div className={styles.row}>
-        <button type="button" className={styles.button} disabled={busy} onClick={() => run()}>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="outline" disabled={busy} onClick={() => run()}>
           Show message
-        </button>
-        <button type="button" className={styles.textButton} disabled={busy} onClick={() => run("email")}>
+        </Button>
+        <Button variant="ghost" disabled={busy} onClick={() => run("email")}>
           Email it to me
-        </button>
-        <button type="button" className={styles.textButton} disabled={busy} onClick={() => run("push")}>
+        </Button>
+        <Button variant="ghost" disabled={busy} onClick={() => run("push")}>
           Send to my phone
-        </button>
+        </Button>
       </div>
       <div aria-live="polite">
         {preview ? (
-          <div className={styles.preview}>
-            <p className={styles.hint}>
+          <div className="border-border mt-1 flex flex-col gap-2 border-l pl-4">
+            <p className={HINT}>
               {preview.key ? `Event: ${eventLabel(preview.key)}. ` : ""}
               {`Streak ${preview.state.streakDays}, ${preview.state.tasksDone} of ${preview.state.taskCount} tasks recorded today.`}
             </p>
             {preview.message ? (
               <>
-                <p className={styles.previewSubject}>{preview.message.subject}</p>
-                <p className={styles.previewBody}>{preview.message.text}</p>
+                <p className="text-[14px] font-medium">{preview.message.subject}</p>
+                <p className="font-prose text-[16px] leading-relaxed">{preview.message.text}</p>
               </>
             ) : (
-              <p className={styles.lede}>
+              <p className="text-muted-foreground text-[14px]">
                 The coach would send nothing for this right now. The evening nudge, for one, stays
                 quiet once you have recorded study today.
               </p>
@@ -361,156 +356,5 @@ function CoachTryout() {
         ) : null}
       </div>
     </fieldset>
-  );
-}
-
-export function LocationSettings({ plan, onSaved }: { plan: Plan; onSaved: () => void }) {
-  const [query, setQuery] = useState("");
-  const [matches, setMatches] = useState<GeocodeMatch[] | null>(null);
-  const [searching, setSearching] = useState(false);
-  const [saving, setSaving] = useState(false);
-
-  async function search(e: React.FormEvent) {
-    e.preventDefault();
-    const trimmed = query.trim();
-    if (trimmed.length < 2) return;
-
-    setSearching(true);
-    setMatches(null);
-    try {
-      const body = await api.get<{ results: GeocodeMatch[] }>(
-        `geocode?q=${encodeURIComponent(trimmed)}`,
-      );
-      setMatches(body.results);
-    } catch {
-      // An unreachable lookup and an unknown place are the same thing from
-      // here, and the empty state below says so without guessing which.
-      setMatches([]);
-    } finally {
-      setSearching(false);
-    }
-  }
-
-  async function choose(match: GeocodeMatch) {
-    setSaving(true);
-    try {
-      await api.patch(`plans/${plan.id}`, {
-        location: {
-          city: match.city,
-          countryCode: match.countryCode,
-          latitude: match.latitude,
-          longitude: match.longitude,
-          timeZone: match.timeZone,
-        },
-      });
-      toast.success(`Studying in ${match.city}. Times set to ${match.timeZone}.`);
-      setMatches(null);
-      setQuery("");
-      onSaved();
-    } catch (err) {
-      toast.error(
-        err instanceof ApiError ? messageForStatus(err.status) : "Could not save that. Try again.",
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function clear() {
-    setSaving(true);
-    try {
-      // The zone is deliberately left alone. Email times silently moving to UTC
-      // as a side effect of a privacy choice would be a nasty surprise.
-      await api.patch(`plans/${plan.id}`, { location: null });
-      toast.success("Location removed.");
-      onSaved();
-    } catch (err) {
-      toast.error(
-        err instanceof ApiError ? messageForStatus(err.status) : "Could not save that. Try again.",
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <section className={styles.section}>
-      <h2 className={styles.sectionTitle}>Where you study</h2>
-      <p className={styles.lede}>
-        Your city sets the times the coach writes to you, and lets it mention the weather where you
-        actually are. City only, and only what you type here.
-      </p>
-
-      {plan.city ? (
-        <div className={styles.current}>
-          <p className={styles.currentPlace}>
-            {plan.city}
-            {plan.countryCode ? `, ${plan.countryCode}` : ""}
-          </p>
-          <p className={styles.hint}>Messages are timed to {plan.timeZone}.</p>
-          <button
-            type="button"
-            className={styles.quietButton}
-            disabled={saving}
-            onClick={clear}
-          >
-            Remove location
-          </button>
-        </div>
-      ) : (
-        <p className={styles.hint}>
-          No city set. Messages are timed to {plan.timeZone}.
-        </p>
-      )}
-
-      <form className={styles.searchRow} onSubmit={search}>
-        <label className={styles.searchLabel} htmlFor="city-search">
-          {plan.city ? "Change city" : "Your city"}
-        </label>
-        <div className={styles.searchControls}>
-          <input
-            id="city-search"
-            className={styles.input}
-            type="text"
-            value={query}
-            placeholder="Manchester"
-            autoComplete="address-level2"
-            onChange={(e) => setQuery(e.target.value)}
-          />
-          <button
-            type="submit"
-            className={styles.findButton}
-            disabled={searching || query.trim().length < 2}
-          >
-            {searching ? "Finding" : "Find"}
-          </button>
-        </div>
-      </form>
-
-      {matches !== null &&
-        (matches.length === 0 ? (
-          <p className={styles.hint}>
-            Nothing found for that. Try the nearest larger town, or check the spelling.
-          </p>
-        ) : (
-          <ul className={styles.matches}>
-            {matches.map((match) => (
-              <li key={`${match.latitude},${match.longitude}`}>
-                <button
-                  type="button"
-                  className={styles.match}
-                  disabled={saving}
-                  onClick={() => choose(match)}
-                >
-                  <span className={styles.matchPlace}>
-                    {[match.city, match.admin1, match.countryCode].filter(Boolean).join(", ")}
-                  </span>
-                  <span className={styles.matchZone}>{match.timeZone}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        ))}
-    </section>
   );
 }

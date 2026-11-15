@@ -4,9 +4,12 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { registerPasskey, isPasskeySupported } from "@/lib/auth-client";
-import styles from "./security-settings.module.css";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 
-// Passkeys and two-step sign in, managed from Settings.
+// Passkeys and two-step sign in, rendered inside the Security section.
 //
 // Both are opt in and both are reversible, which is why each destructive step
 // says what it costs before it happens rather than after.
@@ -20,7 +23,8 @@ type Passkey = {
   lastUsedAt: string | null;
 };
 
-type Me = { id: string; email: string; twoStepEnabled?: boolean };
+const SUB = "text-[16px] leading-tight font-semibold";
+const HINT = "text-muted-foreground text-[13px] leading-relaxed";
 
 export function SecuritySettings({ twoStepEnabled }: { twoStepEnabled: boolean }) {
   const [supported, setSupported] = useState(false);
@@ -111,25 +115,24 @@ export function SecuritySettings({ twoStepEnabled }: { twoStepEnabled: boolean }
   }
 
   return (
-    <section className={styles.section} aria-labelledby="security-heading">
-      <h2 id="security-heading" className={styles.heading}>
-        Security
-      </h2>
-
-      <section className={styles.block}>
-        <h3 className={styles.subheading}>Passkeys</h3>
-        <p className={styles.hint}>
-          Sign in with your fingerprint, face, or device PIN instead of a password. A passkey
-          cannot be phished, because it only works on this site.
+    <>
+      <div className="flex flex-col gap-3">
+        <h3 className={SUB}>Passkeys</h3>
+        <p className={HINT}>
+          Sign in with your fingerprint, face, or device PIN instead of a password. A passkey cannot
+          be phished, because it only works on this site.
         </p>
 
         {passkeys.length > 0 ? (
-          <ul className={styles.list}>
+          <ul className="border-border flex flex-col border-t">
             {passkeys.map((p) => (
-              <li key={p.id} className={styles.row}>
-                <span className={styles.rowMain}>
-                  <span className={styles.rowName}>{p.label ?? "Passkey"}</span>
-                  <span className={styles.rowMeta}>
+              <li
+                key={p.id}
+                className="border-border flex min-h-11 items-center justify-between gap-4 border-b py-2"
+              >
+                <span className="flex min-w-0 flex-col">
+                  <span className="truncate text-[14px]">{p.label ?? "Passkey"}</span>
+                  <span className="text-muted-foreground text-[12px] tabular-nums">
                     Added {new Date(p.createdAt).toLocaleDateString()}
                     {p.lastUsedAt
                       ? `, last used ${new Date(p.lastUsedAt).toLocaleDateString()}`
@@ -137,160 +140,167 @@ export function SecuritySettings({ twoStepEnabled }: { twoStepEnabled: boolean }
                     {p.backedUp ? ", synced" : ""}
                   </span>
                 </span>
-                <button
-                  type="button"
-                  className={styles.remove}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="max-md:h-11"
                   onClick={() => removePasskey(p.id)}
                   aria-label={`Remove ${p.label ?? "this passkey"}`}
                 >
                   Remove
-                </button>
+                </Button>
               </li>
             ))}
           </ul>
         ) : (
-          <p className={styles.empty}>No passkeys yet.</p>
+          <p className={HINT}>No passkeys yet.</p>
         )}
 
         {supported ? (
-          <button type="button" className={styles.action} onClick={addPasskey}>
-            Add a passkey
-          </button>
+          <div>
+            <Button variant="outline" onClick={addPasskey}>
+              Add a passkey
+            </Button>
+          </div>
         ) : (
-          <p className={styles.empty}>This browser does not support passkeys.</p>
+          <p className={HINT}>This browser does not support passkeys.</p>
         )}
-      </section>
+      </div>
 
-      <section className={styles.block}>
-        <h3 className={styles.subheading}>Two-step sign in</h3>
+      <div className="flex flex-col gap-3">
+        <h3 className={SUB}>Two-step sign in</h3>
 
         {enabled ? (
           <>
-            <p className={styles.hint}>
+            <p className={HINT}>
               On. You are asked for a code from your authenticator app each time you sign in with
               your password.
             </p>
             {disabling ? (
-              <form onSubmit={turnOff}>
-                <p className={styles.hint}>
+              <form onSubmit={turnOff} className="flex max-w-sm flex-col gap-3">
+                <p className={HINT}>
                   Confirm your password to turn it off. This also deletes your recovery codes.
                 </p>
-                <label className={styles.label} htmlFor="disable-password">
-                  Password
-                </label>
-                <input
-                  id="disable-password"
-                  type="password"
-                  autoComplete="current-password"
-                  className={styles.input}
-                  value={disablePassword}
-                  onChange={(e) => setDisablePassword(e.target.value)}
-                />
-                <div className={styles.actions}>
-                  <button type="submit" className={styles.danger}>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="disable-password">Password</Label>
+                  <Input
+                    id="disable-password"
+                    type="password"
+                    autoComplete="current-password"
+                    value={disablePassword}
+                    onChange={(e) => setDisablePassword(e.target.value)}
+                    className="h-9 max-md:h-11"
+                  />
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="submit" variant="destructive">
                     Turn off two-step
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.action}
-                    onClick={() => setDisabling(false)}
-                  >
+                  </Button>
+                  <Button type="button" variant="outline" onClick={() => setDisabling(false)}>
                     Keep it on
-                  </button>
+                  </Button>
                 </div>
               </form>
             ) : (
-              <button type="button" className={styles.action} onClick={() => setDisabling(true)}>
-                Turn off two-step
-              </button>
+              <div>
+                <Button variant="outline" onClick={() => setDisabling(true)}>
+                  Turn off two-step
+                </Button>
+              </div>
             )}
           </>
         ) : setup ? (
-          <form onSubmit={confirmTwoStep}>
-            <p className={styles.hint}>
+          <form onSubmit={confirmTwoStep} className="flex max-w-sm flex-col gap-3">
+            <p className={HINT}>
               Scan this with your authenticator app, then enter the code it shows.
             </p>
-            {/* The URI is rendered as text as well as a link: a QR image would
-                mean either a canvas dependency or fetching a picture of the
-                secret from someone else's server. */}
-            <a className={styles.otpauth} href={setup.otpauthUri}>
+            {/* The URI is text as well as a link: a QR image would mean a canvas
+                dependency or fetching a picture of the secret from another server. */}
+            <a
+              className="text-primary text-[14px] underline underline-offset-4"
+              href={setup.otpauthUri}
+            >
               Open in your authenticator app
             </a>
-            <p className={styles.hint}>
-              Or type this key in by hand: <code className={styles.secret}>{setup.secret}</code>
+            <p className={HINT}>
+              Or type this key in by hand:{" "}
+              <code className="text-foreground text-[13px] tabular-nums break-all">{setup.secret}</code>
             </p>
-            <label className={styles.label} htmlFor="totp-code">
-              Code from the app
-            </label>
-            <input
-              id="totp-code"
-              className={styles.input}
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-            />
-            <div className={styles.actions}>
-              <button type="submit" className={styles.action}>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="totp-code">Code from the app</Label>
+              <InputOTP id="totp-code" maxLength={6} value={code} onChange={setCode} inputMode="numeric" autoComplete="one-time-code">
+                <InputOTPGroup>
+                  {[0, 1, 2, 3, 4, 5].map((i) => (
+                    <InputOTPSlot key={i} index={i} className="size-11 text-[16px] tabular-nums md:size-9" />
+                  ))}
+                </InputOTPGroup>
+              </InputOTP>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button type="submit" disabled={code.length !== 6}>
                 Turn on two-step
-              </button>
-              <button type="button" className={styles.action} onClick={() => setSetup(null)}>
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setSetup(null);
+                  setCode("");
+                }}
+              >
                 Cancel
-              </button>
+              </Button>
             </div>
           </form>
         ) : (
           <>
-            <p className={styles.hint}>
-              Off. Turning it on asks for a code from an authenticator app whenever you sign in
-              with your password. Passkeys skip this step, because they are already two factors.
+            <p className={HINT}>
+              Off. Turning it on asks for a code from an authenticator app whenever you sign in with
+              your password. Passkeys skip this step, because they are already two factors.
             </p>
-            <button type="button" className={styles.action} onClick={beginTwoStep}>
-              Set up two-step sign in
-            </button>
+            <div>
+              <Button variant="outline" onClick={beginTwoStep}>
+                Set up two-step sign in
+              </Button>
+            </div>
           </>
         )}
 
         {recoveryCodes && (
-          <div className={styles.recovery} role="alert">
-            <h4 className={styles.subheading}>Save these recovery codes</h4>
-            <p className={styles.hint}>
+          <div role="alert" className="border-border flex flex-col gap-3 border-l pl-4">
+            <h4 className={SUB}>Save these recovery codes</h4>
+            <p className={HINT}>
               Each one signs you in once if you lose your phone. This is the only time they are
               shown.
             </p>
-            <ul className={`${styles.codes} tnum`}>
+            <ul className="grid grid-cols-2 gap-x-6 gap-y-1 text-[14px] tabular-nums">
               {recoveryCodes.map((c) => (
                 <li key={c}>{c}</li>
               ))}
             </ul>
-            <button
-              type="button"
-              className={styles.action}
-              onClick={() => {
-                void navigator.clipboard?.writeText(recoveryCodes.join("\n"));
-                toast.success("Recovery codes copied.");
-              }}
-            >
-              Copy them
-            </button>
-            <button
-              type="button"
-              className={styles.action}
-              onClick={() => setRecoveryCodes(null)}
-            >
-              I have saved them
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  void navigator.clipboard?.writeText(recoveryCodes.join("\n"));
+                  toast.success("Recovery codes copied.");
+                }}
+              >
+                Copy them
+              </Button>
+              <Button variant="outline" onClick={() => setRecoveryCodes(null)}>
+                I have saved them
+              </Button>
+            </div>
           </div>
         )}
-      </section>
+      </div>
 
       {error && (
-        <p className={styles.error} role="alert">
+        <p role="alert" className="text-alarm-ink text-[13px]">
           {error}
         </p>
       )}
-    </section>
+    </>
   );
 }
-
-export type { Me };
