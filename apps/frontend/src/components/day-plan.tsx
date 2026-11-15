@@ -336,8 +336,7 @@ export function DayPlan({
           {heading}
         </h2>
         <p className={styles.empty}>
-          Nothing scheduled. Set your available hours on the plan screen and the days fill
-          themselves.
+          Nothing scheduled. Set your weekly hours in Setup and the days fill themselves.
         </p>
       </section>
     );

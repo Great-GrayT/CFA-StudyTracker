@@ -20,7 +20,7 @@ export function weekDates(todayISO: string): string[] {
   return Array.from({ length: 7 }, (_, i) => new Date(monday + i * 86_400_000).toISOString().slice(0, 10));
 }
 
-// This week only: other weeks live in Plan.
+// Today shows this week only; Plan's calendar passes its own heading for other weeks.
 export function WeekStrip({
   dates,
   days,
@@ -28,6 +28,7 @@ export function WeekStrip({
   selected,
   onSelect,
   loading,
+  heading = "This week",
 }: {
   dates: string[];
   days: PrescribedDay[] | undefined;
@@ -35,13 +36,14 @@ export function WeekStrip({
   selected: string;
   onSelect: (date: string) => void;
   loading: boolean;
+  heading?: string;
 }) {
   const byDate = new Map((days ?? []).map((d) => [d.date, d]));
 
   return (
     <section aria-labelledby="week-strip" className="flex flex-col gap-2">
       <h2 id="week-strip" className="text-[16px] font-semibold">
-        This week
+        {heading}
       </h2>
       <ol className="grid grid-cols-7 gap-1">
         {dates.map((date) => {

@@ -1,30 +1,26 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { toast } from "sonner";
-import { api, ApiError, messageForStatus } from "@/lib/api";
-import { useCurriculum } from "@/lib/hooks";
-import type { Plan, Topic } from "@/lib/types";
+import { useMemo, useState } from "react";
+import type { Topic } from "@/lib/types";
 import { ConfidencePicker } from "./confidence";
 import styles from "./prior-work.module.css";
 
 // What the candidate had already studied before the plan took over.
-//
-// Lives in Settings as well as onboarding: people arrive having studied on
-// their own, and they also go their own way for a fortnight mid-plan.
 //
 // Declared per topic, because that is what anyone remembers, with an opening
 // into the topic's modules for the candidate who knows exactly which videos
 // they watched. Each kind of work names its material, because a Kaplan video
 // and a Meldrum video are the same coverage but a question bank is only
 // settled by questions answered in it.
+//
+// Controlled: the parent holds the declarations and decides when to save, so
+// onboarding can reuse this without writing anything.
 
-type SourceKind = "notes" | "videos" | "questions";
-type Source = { id: string; name: string };
-type PriorWorkData = { sources: Record<SourceKind, Source[]>; declarations: Declaration[] };
+export type SourceKind = "notes" | "videos" | "questions";
+export type Source = { id: string; name: string };
+export type PriorWorkData = { sources: Record<SourceKind, Source[]>; declarations: Declaration[] };
 
-type Declaration = {
+export type Declaration = {
   topicId: string;
   readingId: string | null;
   notesFrom: string | null;
@@ -81,6 +77,30 @@ function toDeclaration(topicId: string, readingId: string | null, row: Row): Dec
           },
     confidence: row.confidence > 0 ? row.confidence : null,
   };
+}
+
+/** Rows keyed by topic id, or by module (reading) id for an override. */
+function rowsFrom(declarations: Declaration[]): Record<string, Row> {
+  const out: Record<string, Row> = {};
+  for (const d of declarations) out[d.readingId ?? d.topicId] = rowFrom(d);
+  return out;
+}
+
+/**
+ * The declarations the rows describe. A topic counts only when it has
+ * something declared; an overridden module is sent even when empty, since
+ * that means "not this one".
+ */
+function buildDeclarations(topics: Topic[], rows: Record<string, Row>, overrides: Set<string>): Declaration[] {
+  const out: Declaration[] = [];
+  for (const topic of topics) {
+    const row = rows[topic.id];
+    if (row && declares(row)) out.push(toDeclaration(topic.id, null, row));
+    for (const m of topic.readings) {
+      if (overrides.has(m.id)) out.push(toDeclaration(topic.id, m.id, rows[m.id] ?? emptyRow));
+    }
+  }
+  return out;
 }
 
 function SourceSelect({
@@ -319,83 +339,42 @@ function TopicRow({
   );
 }
 
-export function PriorWork({ plan, onSaved }: { plan: Plan; onSaved: () => void }) {
-  const curriculum = useCurriculum(plan.levelId);
-  const saved = useQuery({
-    queryKey: ["prior-work", plan.id],
-    queryFn: () => api.get<PriorWorkData>(`plans/${plan.id}/prior-work`),
-  });
-  // Keyed by topic id or module (reading) id.
-  const [rows, setRows] = useState<Record<string, Row>>({});
-  const [overrides, setOverrides] = useState<Set<string>>(new Set());
-  const [pending, setPending] = useState(false);
-  const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    if (!saved.data) return;
-    const next: Record<string, Row> = {};
-    const own = new Set<string>();
-    for (const d of saved.data.declarations) {
-      next[d.readingId ?? d.topicId] = rowFrom(d);
-      if (d.readingId) own.add(d.readingId);
-    }
-    setRows(next);
-    setOverrides(own);
-  }, [saved.data]);
-
-  const topics = useMemo(
-    () => (curriculum.data?.topics ?? []).slice().sort((a, b) => a.order - b.order),
-    [curriculum.data],
+export function PriorWork({
+  topics,
+  sources,
+  value,
+  onChange,
+  disabled = false,
+  loading = false,
+  failed = false,
+}: {
+  topics: Topic[];
+  /** Undefined until the saved answers have loaded. */
+  sources: Record<SourceKind, Source[]> | undefined;
+  value: Declaration[];
+  onChange: (next: Declaration[]) => void;
+  disabled?: boolean;
+  loading?: boolean;
+  failed?: boolean;
+}) {
+  const ordered = useMemo(() => topics.slice().sort((a, b) => a.order - b.order), [topics]);
+  const rows = useMemo(() => rowsFrom(value), [value]);
+  const overrides = useMemo(
+    () => new Set(value.flatMap((d) => (d.readingId ? [d.readingId] : []))),
+    [value],
   );
-  const sources = saved.data?.sources;
-
-  const declarations = useMemo(() => {
-    const out: Declaration[] = [];
-    for (const topic of topics) {
-      const row = rows[topic.id];
-      if (row && declares(row)) out.push(toDeclaration(topic.id, null, row));
-      // An overridden module is sent even when empty: it means "not this one".
-      for (const m of topic.readings) {
-        if (overrides.has(m.id)) out.push(toDeclaration(topic.id, m.id, rows[m.id] ?? emptyRow));
-      }
-    }
-    return out;
-  }, [topics, rows, overrides]);
-  const filled = new Set(declarations.map((d) => d.topicId)).size;
+  const filled = new Set(value.map((d) => d.topicId)).size;
 
   function update(key: string, patch: Partial<Row>) {
-    setRows((prev) => ({ ...prev, [key]: { ...emptyRow, ...prev[key], ...patch } }));
+    onChange(buildDeclarations(ordered, { ...rows, [key]: { ...emptyRow, ...rows[key], ...patch } }, overrides));
   }
 
   function setOverride(readingId: string, on: boolean) {
-    setOverrides((prev) => {
-      const next = new Set(prev);
-      if (on) next.add(readingId);
-      else next.delete(readingId);
-      return next;
-    });
+    const next = new Set(overrides);
+    if (on) next.add(readingId);
+    else next.delete(readingId);
+    onChange(buildDeclarations(ordered, rows, next));
   }
-
-  async function save() {
-    setPending(true);
-    try {
-      await api.post(`plans/${plan.id}/prior-work`, { declarations });
-      toast.success(
-        declarations.length === 0
-          ? "Cleared what you had already studied."
-          : "Saved. The days ahead have been replanned around it.",
-      );
-      await saved.refetch();
-      onSaved();
-    } catch (err) {
-      toast.error(err instanceof ApiError ? messageForStatus(err.status) : "Could not save that. Try again.");
-    } finally {
-      setPending(false);
-    }
-  }
-
-  const loading = curriculum.isLoading || saved.isLoading;
-  const failed = curriculum.isError || saved.isError;
 
   return (
     <section className={styles.section}>
@@ -406,9 +385,9 @@ export function PriorWork({ plan, onSaved }: { plan: Plan; onSaved: () => void }
         something twice, and counts questions you already did in a bank it would otherwise set.
       </p>
 
-      <details className={styles.details} open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <details className={styles.details}>
         <summary className={styles.summary}>
-          {filled === 0 ? "Add what you have done" : `${filled} of ${topics.length} topic areas filled in`}
+          {filled === 0 ? "Add what you have done" : `${filled} of ${ordered.length} topic areas filled in`}
         </summary>
 
         {loading && <p className={styles.note}>Loading the curriculum.</p>}
@@ -419,14 +398,14 @@ export function PriorWork({ plan, onSaved }: { plan: Plan; onSaved: () => void }
           </p>
         )}
 
-        {!loading && !failed && topics.length === 0 && (
+        {!loading && !failed && ordered.length === 0 && (
           <p className={styles.note}>
             The curriculum for your level has not been loaded yet, so there is nothing to declare
             against.
           </p>
         )}
 
-        {topics.length > 0 && sources && (
+        {ordered.length > 0 && sources && (
           <>
             <p className={styles.note}>
               Rough figures are fine and far better than none. Leave a topic blank if you have not
@@ -434,29 +413,19 @@ export function PriorWork({ plan, onSaved }: { plan: Plan; onSaved: () => void }
             </p>
 
             <ul className={styles.list}>
-              {topics.map((topic) => (
+              {ordered.map((topic) => (
                 <TopicRow
                   key={topic.id}
                   topic={topic}
                   rows={rows}
                   overrides={overrides}
                   sources={sources}
-                  disabled={pending}
+                  disabled={disabled}
                   update={update}
                   setOverride={setOverride}
                 />
               ))}
             </ul>
-
-            <div className={styles.actions}>
-              <button className={styles.save} type="button" disabled={pending} onClick={save}>
-                {pending ? "Saving" : "Save and replan"}
-              </button>
-              <p className={styles.caution}>
-                This replaces whatever you declared before, rather than adding to it. Work you have
-                logged inside the app is never touched.
-              </p>
-            </div>
           </>
         )}
       </details>

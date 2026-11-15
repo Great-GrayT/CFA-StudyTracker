@@ -10,7 +10,7 @@ import styles from "./settings.module.css";
 import { SecuritySettings } from "@/components/security-settings";
 import { CoachSettings, LocationSettings } from "@/components/coach-settings";
 import { PlannerSettings } from "@/components/planner-settings";
-import { PriorWork } from "@/components/prior-work";
+import { PriorWorkForm } from "@/components/plan/prior-work-form";
 import { DeleteAccount } from "@/components/delete-account";
 import { RestartPlan } from "@/components/restart-plan";
 
@@ -281,7 +281,7 @@ export default function SettingsPage() {
         ) : plan.data ? (
           <>
             <PlannerSettings plan={plan.data} onSaved={() => plan.refetch()} />
-            <PriorWork plan={plan.data} onSaved={() => plan.refetch()} />
+            <PriorWorkForm plan={plan.data} onSaved={() => plan.refetch()} />
             <CoachSettings plan={plan.data} onSaved={() => plan.refetch()} />
             <LocationSettings plan={plan.data} onSaved={() => plan.refetch()} />
           </>
