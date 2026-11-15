@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { PaceField, buildSeries } from "@/components/pace-field";
+import { PaceField } from "@/components/pace-field";
 import {
   usePlan,
   useLogs,
@@ -11,6 +11,7 @@ import {
 } from "@/lib/hooks";
 import {
   readPace,
+  buildSeries,
   missedDays,
   startOfUTCDay,
   addUTCDays,

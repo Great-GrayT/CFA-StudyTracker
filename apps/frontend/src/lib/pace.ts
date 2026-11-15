@@ -231,3 +231,128 @@ export function remainingWeekSplit(
     practiceHours: total * (1 - contentRatio),
   };
 }
+
+export type PacePoint = {
+  date: string;
+  target: number;
+  newCoverage: number;
+  reviewWork: number;
+};
+
+/**
+ * Daily series from the log history, plan start to today or the exam.
+ *
+ * Built client side rather than from ProgressSnapshot, which stores only two
+ * integers per day and so cannot carry the new versus review split at all.
+ */
+export function buildSeries(opts: {
+  plan: Plan;
+  logs: LogEntry[];
+  totalOutcomes: number;
+  holidays: Holiday[];
+  to?: Date;
+}): PacePoint[] {
+  const { plan, logs, totalOutcomes } = opts;
+  const start = startOfUTCDay(new Date(plan.startDate));
+  const exam = startOfUTCDay(new Date(plan.examDate));
+  const end = startOfUTCDay(opts.to ?? new Date());
+  const last = end.getTime() < exam.getTime() ? end : exam;
+
+  const holidays = opts.holidays.map((h) => ({
+    start: startOfUTCDay(new Date(h.startDate)),
+    end: startOfUTCDay(new Date(h.endDate)),
+  }));
+
+  const totalHours = hoursBetween(plan.weeklyAvailability, start, exam, holidays);
+  const rate = totalHours > 0 ? totalOutcomes / totalHours : 0;
+
+  const byDate = new Map<string, LogEntry[]>();
+  for (const l of logs) {
+    const key = toISODate(new Date(l.date));
+    const list = byDate.get(key);
+    if (list) list.push(l);
+    else byDate.set(key, [l]);
+  }
+
+  const out: PacePoint[] = [];
+  let cursor = start;
+  let runningNew = 0;
+  let runningReview = 0;
+  const seen = new Set<string>();
+
+  while (cursor.getTime() <= last.getTime()) {
+    const key = toISODate(cursor);
+    for (const l of byDate.get(key) ?? []) {
+      if (seen.has(l.losId)) runningReview += 1;
+      else {
+        seen.add(l.losId);
+        runningNew += 1;
+      }
+    }
+    const elapsedHours = hoursBetween(plan.weeklyAvailability, start, cursor, holidays);
+    out.push({
+      date: key,
+      target: Math.max(0, Math.min(totalOutcomes, Math.round(rate * elapsedHours))),
+      newCoverage: runningNew,
+      reviewWork: runningReview,
+    });
+    cursor = addUTCDays(cursor, 1);
+  }
+  return out;
+}
+
+export type PaceRange = "30d" | "90d" | "all";
+
+/** The trailing window of a daily series. */
+export function sliceSeries(series: PacePoint[], range: PaceRange): PacePoint[] {
+  if (range === "all") return series;
+  const days = range === "30d" ? 30 : 90;
+  return series.slice(Math.max(0, series.length - days));
+}
+
+export type PaceRollup = {
+  /** Week: ISO date of its Monday. Month: YYYY-MM. */
+  key: string;
+  /** The period's last day in the series. */
+  end: string;
+  /** Distinct outcomes covered by the period's last day. */
+  covered: number;
+  target: number;
+  delta: number;
+  /** Outcomes first covered inside the period. */
+  added: number;
+};
+
+/**
+ * One row per week or month, read at the period's last day, newest first.
+ *
+ * Covered is new coverage only, the same figure as the pace sentence: counting
+ * review here would let re-drilling hide a breadth shortfall.
+ */
+export function rollupSeries(series: PacePoint[], by: "week" | "month"): PaceRollup[] {
+  const keyOf = (date: string) => {
+    if (by === "month") return date.slice(0, 7);
+    const d = new Date(`${date}T00:00:00Z`);
+    return toISODate(addUTCDays(d, -((d.getUTCDay() + 6) % 7)));
+  };
+  const ends: PacePoint[] = [];
+  const keys: string[] = [];
+  for (const p of series) {
+    const k = keyOf(p.date);
+    if (keys[keys.length - 1] === k) ends[ends.length - 1] = p;
+    else {
+      keys.push(k);
+      ends.push(p);
+    }
+  }
+  // The series opens at zero coverage, so the first period's gain is its total.
+  const rows = ends.map((p, i) => ({
+    key: keys[i],
+    end: p.date,
+    covered: p.newCoverage,
+    target: p.target,
+    delta: p.newCoverage - p.target,
+    added: p.newCoverage - (i > 0 ? ends[i - 1].newCoverage : 0),
+  }));
+  return rows.reverse();
+}

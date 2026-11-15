@@ -9,6 +9,10 @@ import {
   toISODate,
   addUTCDays,
   startOfUTCDay,
+  buildSeries,
+  sliceSeries,
+  rollupSeries,
+  type PacePoint,
 } from "./pace";
 import type { LogEntry, Plan, WeeklyAvailability } from "./types";
 
@@ -252,5 +256,84 @@ describe("remainingWeekSplit", () => {
   it("is zero on the last day of a week with no hours left", () => {
     const sunday = new Date("2026-09-13");
     expect(remainingWeekSplit(weekdaysOnly, sunday).totalHours).toBe(0);
+  });
+});
+
+describe("buildSeries", () => {
+  const p = plan({ startDate: "2026-09-01", examDate: "2026-09-10" });
+
+  it("runs one point a day from the plan start to the given day", () => {
+    const s = buildSeries({ plan: p, logs: [], totalOutcomes: 10, holidays: [], to: new Date("2026-09-04") });
+    expect(s.map((x) => x.date)).toEqual(["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04"]);
+  });
+
+  it("stops at the exam even when asked for later", () => {
+    const s = buildSeries({ plan: p, logs: [], totalOutcomes: 10, holidays: [], to: new Date("2026-12-01") });
+    expect(s[s.length - 1].date).toBe("2026-09-10");
+  });
+
+  it("keeps new coverage and review apart, cumulatively", () => {
+    const logs = [log("a", "2026-09-01"), log("a", "2026-09-02"), log("b", "2026-09-02")];
+    const s = buildSeries({ plan: p, logs, totalOutcomes: 10, holidays: [], to: new Date("2026-09-03") });
+    expect(s.map((x) => [x.newCoverage, x.reviewWork])).toEqual([
+      [1, 0],
+      [2, 1],
+      [2, 1],
+    ]);
+  });
+
+  it("reaches the whole syllabus as its target on exam day", () => {
+    const s = buildSeries({ plan: p, logs: [], totalOutcomes: 10, holidays: [], to: new Date("2026-09-10") });
+    expect(s[s.length - 1].target).toBe(10);
+  });
+});
+
+const pt = (date: string, target: number, newCoverage: number, reviewWork = 0): PacePoint => ({
+  date,
+  target,
+  newCoverage,
+  reviewWork,
+});
+
+describe("sliceSeries", () => {
+  const s = Array.from({ length: 100 }, (_, i) => pt(toISODate(addUTCDays(new Date("2026-09-01"), i)), i, i));
+
+  it("keeps the last 30 or 90 days", () => {
+    expect(sliceSeries(s, "30d")).toHaveLength(30);
+    expect(sliceSeries(s, "90d")[0].date).toBe(s[10].date);
+  });
+
+  it("keeps everything for all, and a short series whole", () => {
+    expect(sliceSeries(s, "all")).toBe(s);
+    expect(sliceSeries(s.slice(0, 5), "90d")).toHaveLength(5);
+  });
+});
+
+describe("rollupSeries", () => {
+  // Wed 2 Sep to Tue 15 Sep 2026: three ISO weeks, starting 31 Aug, 7 Sep, 14 Sep.
+  const s = Array.from({ length: 14 }, (_, i) => pt(toISODate(addUTCDays(new Date("2026-09-02"), i)), i * 2, i));
+
+  it("reads each week at its last day, newest first", () => {
+    const rows = rollupSeries(s, "week");
+    expect(rows.map((r) => r.key)).toEqual(["2026-09-14", "2026-09-07", "2026-08-31"]);
+    // Week of 7 Sep ends Sunday 13 Sep, index 11.
+    expect(rows[1]).toMatchObject({ end: "2026-09-13", covered: 11, target: 22, delta: -11, added: 7 });
+  });
+
+  it("counts only new coverage, so review can never stand in for breadth", () => {
+    const rows = rollupSeries([pt("2026-09-01", 5, 3, 40)], "week");
+    expect(rows[0]).toMatchObject({ covered: 3, delta: -2, added: 3 });
+  });
+
+  it("rolls up by calendar month", () => {
+    const rows = rollupSeries([pt("2026-09-30", 4, 4), pt("2026-10-01", 5, 6)], "month");
+    expect(rows.map((r) => [r.key, r.covered, r.added])).toEqual([
+      ["2026-10", 6, 2],
+      ["2026-09", 4, 4],
+    ]);
+  });
+
+  it("returns nothing for an empty series", () => {
+    expect(rollupSeries([], "month")).toEqual([]);
   });
 });

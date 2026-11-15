@@ -1,8 +1,8 @@
 "use client";
 
 import { useId, useMemo, useState } from "react";
-import type { Holiday, LogEntry, Plan } from "@/lib/types";
-import { splitWork, startOfUTCDay, addUTCDays, toISODate, hoursBetween } from "@/lib/pace";
+import type { Holiday } from "@/lib/types";
+import { splitWork, toISODate, type PacePoint } from "@/lib/pace";
 import styles from "./pace-field.module.css";
 
 // Target against actual over the whole plan, hand-authored because no chart
@@ -10,75 +10,6 @@ import styles from "./pace-field.module.css";
 // review work, which the product spec requires never be blended, and the gap
 // between target and actual is filled in two different colours depending on
 // its sign.
-
-export type PacePoint = {
-  date: string;
-  target: number;
-  newCoverage: number;
-  reviewWork: number;
-};
-
-/**
- * Daily series from the log history.
- *
- * Built client side rather than from ProgressSnapshot, which stores only two
- * integers per day and so cannot carry the new versus review split at all.
- */
-export function buildSeries(opts: {
-  plan: Plan;
-  logs: LogEntry[];
-  totalOutcomes: number;
-  holidays: Holiday[];
-  to?: Date;
-}): PacePoint[] {
-  const { plan, logs, totalOutcomes } = opts;
-  const start = startOfUTCDay(new Date(plan.startDate));
-  const exam = startOfUTCDay(new Date(plan.examDate));
-  const end = startOfUTCDay(opts.to ?? new Date());
-  const last = end.getTime() < exam.getTime() ? end : exam;
-
-  const holidays = opts.holidays.map((h) => ({
-    start: startOfUTCDay(new Date(h.startDate)),
-    end: startOfUTCDay(new Date(h.endDate)),
-  }));
-
-  const totalHours = hoursBetween(plan.weeklyAvailability, start, exam, holidays);
-  const rate = totalHours > 0 ? totalOutcomes / totalHours : 0;
-
-  const byDate = new Map<string, LogEntry[]>();
-  for (const l of logs) {
-    const key = toISODate(new Date(l.date));
-    const list = byDate.get(key);
-    if (list) list.push(l);
-    else byDate.set(key, [l]);
-  }
-
-  const out: PacePoint[] = [];
-  let cursor = start;
-  let runningNew = 0;
-  let runningReview = 0;
-  const seen = new Set<string>();
-
-  while (cursor.getTime() <= last.getTime()) {
-    const key = toISODate(cursor);
-    for (const l of byDate.get(key) ?? []) {
-      if (seen.has(l.losId)) runningReview += 1;
-      else {
-        seen.add(l.losId);
-        runningNew += 1;
-      }
-    }
-    const elapsedHours = hoursBetween(plan.weeklyAvailability, start, cursor, holidays);
-    out.push({
-      date: key,
-      target: Math.max(0, Math.min(totalOutcomes, Math.round(rate * elapsedHours))),
-      newCoverage: runningNew,
-      reviewWork: runningReview,
-    });
-    cursor = addUTCDays(cursor, 1);
-  }
-  return out;
-}
 
 const W = 640;
 const H = 200;

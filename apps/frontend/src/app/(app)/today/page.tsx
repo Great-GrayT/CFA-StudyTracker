@@ -10,7 +10,6 @@ import { WeekStrip, weekDates } from "@/components/today/week-strip";
 import { StandingPanel } from "@/components/today/standing-panel";
 import { StudyNext } from "@/components/today/study-next";
 import { OfflineLine, RegionError, regionState } from "@/components/states/region-states";
-import { buildSeries } from "@/components/pace-field";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,7 +23,7 @@ import {
   useProgress,
 } from "@/lib/hooks";
 import { ApiError } from "@/lib/api";
-import { addUTCDays, missedDays, readPace, startOfUTCDay } from "@/lib/pace";
+import { addUTCDays, buildSeries, missedDays, readPace, startOfUTCDay } from "@/lib/pace";
 import { debriefTime, msUntilDayEnd } from "@/lib/day-end";
 import { examPhase, studyNextRows } from "@/lib/today";
 import { useOnline } from "@/hooks/use-online";
