@@ -342,6 +342,30 @@ export const createLogSchema = z
     path: ["questionsCorrect"],
   });
 
+/** Kinds a candidate can log themselves; the rest are the planner's own. */
+export const SESSION_KINDS = ["content-notes", "content-video", "eocq", "questions", "review"] as const;
+
+// A study session shaped like a plan cell: one module, one kind, one package.
+export const createSessionSchema = z
+  .object({
+    readingId: z.string().min(1),
+    kind: z.enum(SESSION_KINDS),
+    packageId: z.string().min(1).optional(),
+    minutes: z.number().int().min(1).max(600),
+    confidence: z.number().int().min(1).max(5),
+    questionsAnswered: z.number().int().min(0).optional(),
+    questionsCorrect: z.number().int().min(0).optional(),
+    // A calendar day in the plan's own time zone; absent means today there.
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    note: z.string().max(2000).optional(),
+    taskId: z.string().min(1).optional(),
+    finished: z.boolean().optional(),
+  })
+  .refine((d) => (d.questionsCorrect ?? 0) <= (d.questionsAnswered ?? 0), {
+    message: "questionsCorrect cannot exceed questionsAnswered",
+    path: ["questionsCorrect"],
+  });
+
 export const forgotPasswordSchema = z.object({
   email: z.string().email(),
 });
