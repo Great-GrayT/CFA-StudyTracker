@@ -232,21 +232,29 @@ export function useInvalidateAfterLog(planId: string | undefined) {
   };
 }
 
-export function useCreateLog(planId: string | undefined) {
+/** Kinds a candidate can log; the backend refuses the planner's own kinds. */
+export type SessionKind = "content-notes" | "content-video" | "eocq" | "questions" | "review";
+
+export type SessionInput = {
+  readingId: string;
+  kind: SessionKind;
+  packageId?: string;
+  minutes: number;
+  confidence: number;
+  questionsAnswered?: number;
+  questionsCorrect?: number;
+  date?: string;
+  note?: string;
+  taskId?: string;
+  finished?: boolean;
+};
+
+/** Records a session shaped like a plan cell: on plan it settles the cell, off plan it adds one. */
+export function useCreateSession(planId: string | undefined) {
   const invalidate = useInvalidateAfterLog(planId);
   return useMutation({
-    mutationFn: (body: {
-      losId: string;
-      confidence: number;
-      questionsAnswered: number;
-      questionsCorrect?: number;
-      packageId?: string;
-      note?: string;
-      date?: string;
-      taskId?: string;
-      finished?: boolean;
-      actualMinutes?: number;
-    }) => api.post<LogEntry>("logs", { planId, ...body }),
+    mutationFn: (body: SessionInput) =>
+      api.post<{ task: { id: string; status: string } }>(`plans/${planId}/sessions`, body),
     onSuccess: invalidate,
   });
 }

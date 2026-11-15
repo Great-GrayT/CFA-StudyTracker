@@ -63,6 +63,7 @@
 
 .input {
   width: 100%;
+  min-height: 44px;
   padding: var(--space-3);
   margin-bottom: var(--space-3);
   background: var(--ground);
@@ -73,68 +74,6 @@
 
 .input[aria-invalid="true"] {
   border-color: var(--alarm);
-}
-
-.results {
-  border: 1px solid var(--rule);
-  margin-bottom: var(--space-4);
-}
-
-.result {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: var(--space-3);
-  background: transparent;
-  border: 0;
-  border-bottom: 1px solid var(--rule);
-  color: var(--text);
-  min-height: 44px;
-}
-
-.result:hover {
-  background: var(--ground);
-}
-
-.resultText {
-  display: block;
-  font-size: 15px;
-  margin-bottom: 2px;
-}
-
-.resultMeta,
-.selectedMeta {
-  display: block;
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.noResults {
-  padding: var(--space-4);
-  color: var(--muted);
-  margin: 0;
-}
-
-.selected {
-  padding: var(--space-3);
-  background: var(--ground);
-  border: 1px solid var(--rule-strong);
-  margin-bottom: var(--space-4);
-}
-
-.selectedText {
-  margin: 0 0 var(--space-1);
-  font-size: 15px;
-}
-
-.change {
-  margin-top: var(--space-2);
-  background: transparent;
-  border: 0;
-  padding: 0;
-  color: var(--claimed-ink);
-  font-size: 14px;
-  text-decoration: underline;
 }
 
 .fieldset {
@@ -174,19 +113,6 @@
   border-radius: var(--radius-pill);
   background: conic-gradient(currentColor var(--pct), var(--rule) 0);
   flex: none;
-}
-
-.disclosure {
-  background: transparent;
-  border: 0;
-  padding: var(--space-2) 0;
-  color: var(--claimed-ink);
-  font-size: 14px;
-  text-decoration: underline;
-}
-
-.extras {
-  margin-top: var(--space-2);
 }
 
 .error {
@@ -263,11 +189,6 @@
   accent-color: var(--claimed);
 }
 
-.planDetail {
-  display: grid;
-  gap: var(--space-2);
-}
-
 .planChoice {
   display: flex;
   flex-wrap: wrap;
@@ -282,4 +203,131 @@
   font-size: 15px;
   color: var(--text);
   cursor: pointer;
+}
+
+.input:focus-visible,
+.kind input:focus-visible + span {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.input:disabled {
+  opacity: 0.6;
+}
+
+/* The five kinds a plan cell can be, as chips: one choice, always visible,
+   so the candidate sees the same vocabulary the plan uses. */
+.kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.kind {
+  position: relative;
+  cursor: pointer;
+}
+
+.kind input {
+  position: absolute;
+  opacity: 0;
+  inset: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.kind span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-pill);
+  background: var(--ground);
+  color: var(--text);
+  font-size: 14px;
+  transition: background-color var(--dur-tap) var(--ease-settle);
+}
+
+.kind input:checked + span {
+  background: var(--claimed);
+  border-color: var(--claimed);
+  color: var(--ground);
+  font-weight: 600;
+}
+
+/* The record as the day view will draw it: same spine, same order of
+   section, module, verb, package, minutes. */
+.preview {
+  display: grid;
+  grid-template-columns: 3px minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: start;
+  padding: var(--space-3) 0;
+  margin-top: var(--space-2);
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+}
+
+.previewSpine {
+  align-self: stretch;
+  background: var(--strong);
+  border-radius: var(--radius-pill);
+}
+
+.previewBody {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.previewModule {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-2);
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.previewModuleName {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.previewTag {
+  padding: 0 var(--space-2);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.previewMaterial {
+  margin: 0;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.previewVerb {
+  font-weight: 600;
+}
+
+.previewMinutes {
+  font-size: 14px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+  .pair {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kind span {
+    transition: none;
+  }
 }
