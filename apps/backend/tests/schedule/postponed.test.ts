@@ -55,6 +55,29 @@ describe("postponed cells", () => {
     expect(tagged).toBe(0);
   });
 
+  test("a missed cell whose work was done in a later cell stops tagging", async () => {
+    const { planId, missed } = await missOneDay();
+    const nextDate = new Date(`${NEXT}T00:00:00Z`);
+    // The carried work is done on the next day, in the cell that carried it.
+    await db.planTask.updateMany({
+      where: { planId, date: nextDate, postponedFrom: { not: null } },
+      data: { status: "done", actualMinutes: 30 },
+    });
+    // A later cell for the same module and kind is new work (a second pass,
+    // a review), not the missed one.
+    await generateHorizon(planId, "2027-01-06");
+
+    const stillTagged = await db.planTask.findMany({
+      where: { planId, date: { gt: nextDate }, postponedFrom: dDate },
+    });
+    const carriedThenDone = await db.planTask.findMany({ where: { planId, date: nextDate, status: "done" } });
+    for (const t of stillTagged) {
+      const settled = carriedThenDone.some((d) => d.kind === t.kind && overlaps(d.readingIds, t.readingIds));
+      expect(settled).toBe(false);
+    }
+    expect(missed.length).toBeGreaterThan(0);
+  });
+
   test("an off-plan cell does not dilute pace calibration", async () => {
     const { planId } = await setupPlanWithCatalogue();
     const reading = await db.reading.findFirstOrThrow({ where: { topic: { levelId: "II" } }, orderBy: { id: "asc" } });

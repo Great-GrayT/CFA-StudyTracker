@@ -1214,7 +1214,7 @@ export async function generateHorizon(
     // Frozen cells left pending were missed. Their material is still owed
     // (loadWorkDone credits only done and partial), so the plan below already
     // re-places it; this is only to say which cells carry it.
-    const missed = await tx.planTask.findMany({
+    const missedCells = await tx.planTask.findMany({
       where: {
         planId,
         date: { lt: todayDate },
@@ -1224,6 +1224,19 @@ export async function generateHorizon(
       },
       select: { date: true, kind: true, readingIds: true },
     });
+    // A missed cell stays pending forever, so once a later cell of the same
+    // kind and module is worked, the miss is settled; otherwise every future
+    // review of that module would claim to be postponed.
+    const worked = await tx.planTask.findMany({
+      where: { planId, status: { in: ["done", "partial"] } },
+      select: { date: true, kind: true, readingIds: true },
+    });
+    const missed = missedCells.filter(
+      (m) =>
+        !worked.some(
+          (w) => w.date > m.date && w.kind === m.kind && w.readingIds.some((id) => m.readingIds.includes(id)),
+        ),
+    );
 
     // Get existing tasks in window for comparison.
     const tasksInWindow = await tx.planTask.findMany({
