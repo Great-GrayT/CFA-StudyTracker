@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { LEGACY_REDIRECTS } from "./src/lib/routes";
 
 // Content Security Policy.
 //
@@ -60,6 +61,7 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   generateBuildId: () => Promise.resolve(BUILD_ID),
   env: { NEXT_PUBLIC_BUILD_ID: BUILD_ID },
+  redirects: async () => LEGACY_REDIRECTS,
   async headers() {
     return [
       {

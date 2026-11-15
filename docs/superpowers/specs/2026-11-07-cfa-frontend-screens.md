@@ -2,8 +2,8 @@
 title: CFA Study Tracker screens and copy
 type: spec
 module: apps/frontend
-updated: 2026-11-07
-status: draft
+updated: 2026-11-15
+status: superseded
 ---
 
 ## Purpose

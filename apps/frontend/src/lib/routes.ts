@@ -14,9 +14,8 @@ export function needsLogin(pathname: string, hasSession: boolean): boolean {
   return APP_ROUTES.some((r) => pathname === r || pathname.startsWith(`${r}/`));
 }
 
-// Not wired into next.config.ts yet: config redirects run before page files,
-// so doing it before the new pages exist would break the old ones. Order
-// matters: /coverage/explore must precede /coverage/:topicId.
+// Wired into next.config.ts redirects. Order matters: /coverage/explore must
+// precede /coverage/:topicId.
 export const LEGACY_REDIRECTS: { source: string; destination: string; permanent: false }[] = [
   { source: "/coverage", destination: "/syllabus", permanent: false },
   { source: "/coverage/explore", destination: "/syllabus?view=3d", permanent: false },

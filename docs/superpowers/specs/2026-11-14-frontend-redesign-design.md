@@ -3,7 +3,7 @@ title: Frontend redesign on the shadcn asset kit
 type: spec
 module: apps/frontend
 updated: 2026-11-15
-status: draft
+status: active
 ---
 
 ## Purpose
