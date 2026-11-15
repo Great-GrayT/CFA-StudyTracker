@@ -243,26 +243,37 @@ function SubmitControl({ task, submit }: { task: PrescribedTask; submit: Submit 
   );
 }
 
-export function TaskRow({
-  task,
-  onSubmit,
-  missed = false,
-}: {
-  task: PrescribedTask;
-  onSubmit?: SubmitFor;
-  /** A past task never started: drawn as work owed, not as work to do. */
-  missed?: boolean;
-}) {
-  const submit: Submit | undefined = onSubmit ? (s) => onSubmit(task.id, s) : undefined;
+// Calendar dates from the API are UTC midnights; format them in UTC so the
+// day never shifts in a zone west of Greenwich.
+const shortDay = new Intl.DateTimeFormat("en-GB", {
+  weekday: "short",
+  day: "numeric",
+  month: "short",
+  timeZone: "UTC",
+});
+
+export function postponedLabel(iso: string): string {
+  return `Postponed from ${shortDay.format(new Date(`${iso}T00:00:00Z`)).replace(",", "")}`;
+}
+
+export function TaskRow({ task, onSubmit }: { task: PrescribedTask; onSubmit?: SubmitFor }) {
+  // An off-plan cell is the record itself; undoing it would leave an empty
+  // pending cell the plan never asked for.
+  const submit: Submit | undefined =
+    onSubmit && !task.offPlan ? (s) => onSubmit(task.id, s) : undefined;
   const done = task.status === "done" || task.status === "completed";
 
   return (
-    <li className={done ? styles.rowDone : missed ? styles.rowMissed : styles.row}>
+    <li className={done ? styles.rowDone : styles.row}>
       <span className={styles.spine} aria-hidden="true" />
       <div className={styles.body}>
         <p className={styles.module}>
           {task.topicName}
           {task.moduleTitle ? <span className={styles.moduleName}>{task.moduleTitle}</span> : null}
+          {task.postponedFrom ? (
+            <span className={styles.tagPostponed}>{postponedLabel(task.postponedFrom)}</span>
+          ) : null}
+          {task.offPlan ? <span className={styles.tag}>Off plan</span> : null}
         </p>
 
         <ul className={styles.materials}>

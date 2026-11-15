@@ -53,8 +53,7 @@
 }
 
 .row,
-.rowDone,
-.rowMissed {
+.rowDone {
   display: grid;
   /* The spine is 3px and never shrinks; the body takes what is left, with a 0
      floor so a long module title cannot widen the page. */
@@ -82,18 +81,6 @@
 
 /* Not done: greyed through colour, not opacity, so the text keeps its
    contrast; the alarm spine says this is owed. */
-.rowMissed .spine {
-  background: var(--alarm);
-}
-
-.rowMissed .action,
-.rowMissed .moduleName,
-.rowMissed .link,
-.rowMissed .plain,
-.rowMissed .minutes {
-  color: var(--muted);
-}
-
 .body {
   display: grid;
   gap: var(--space-2);
@@ -128,6 +115,26 @@
   font-size: 15px;
   line-height: 1.45;
   min-width: 0;
+}
+
+/* Why a cell is here, in words: the outline sets it apart from the module
+   name without relying on colour alone. */
+.tag,
+.tagPostponed {
+  align-self: center;
+  padding: 1px var(--space-2);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+/* Postponed work is owed, so it borrows the alarm ink the missed state used. */
+.tagPostponed {
+  border-color: var(--alarm);
+  color: var(--text);
 }
 
 /* The verb, not a label: "Watch", "Read", "Questions". It is the first thing

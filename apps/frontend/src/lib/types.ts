@@ -275,6 +275,10 @@ export type PrescribedTask = {
   topicName: string | null;
   moduleTitle: string | null;
   materials: PrescribedMaterial[];
+  /** Earliest missed day (YYYY-MM-DD) whose work this cell carries, else null. */
+  postponedFrom: string | null;
+  /** A session the candidate logged themselves, not one the plan asked for. */
+  offPlan: boolean;
 };
 
 export type PrescribedDay = {
