@@ -61,11 +61,11 @@ export function YourDataSection({ planId }: { planId: string | undefined }) {
           </p>
           <p className={HINT}>
             Browse your{" "}
-            <Link href="/logs" className="text-primary underline underline-offset-4">
+            <Link href="/progress?tab=journal" className="text-primary underline underline-offset-4">
               study record
             </Link>{" "}
             or your{" "}
-            <Link href="/mocks" className="text-primary underline underline-offset-4">
+            <Link href="/progress?tab=mocks" className="text-primary underline underline-offset-4">
               mock exams
             </Link>
             .

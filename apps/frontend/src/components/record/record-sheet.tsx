@@ -565,7 +565,7 @@ export function RecordSheet({
   if (isMobile) {
     return (
       <Drawer open={open} onOpenChange={onOpenChange}>
-        <DrawerContent className="bg-card max-h-[92dvh] rounded-t-xl">
+        <DrawerContent className="bg-card data-[vaul-drawer-direction=bottom]:max-h-[92dvh] data-[vaul-drawer-direction=bottom]:rounded-t-xl">
           <DrawerHeader className="px-4 pt-2 pb-3 text-left">
             <DrawerTitle className="text-[16px]">Record study</DrawerTitle>
             <DrawerDescription className="sr-only">{description}</DrawerDescription>

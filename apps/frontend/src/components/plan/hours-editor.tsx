@@ -2,12 +2,8 @@
 
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
+import { clampHours, MAX_HOURS } from "@/lib/hours";
 import { WEEKDAYS, WEEKDAY_LABELS, type WeeklyAvailability } from "@/lib/types";
-
-// Whole hours, capped where the planner's own ranges stop.
-export const MAX_HOURS = 12;
-
-const clampHours = (n: number) => Math.max(0, Math.min(MAX_HOURS, Math.round(Number.isFinite(n) ? n : 0)));
 
 /**
  * Weekly hours, a slider and a number per weekday.
@@ -41,7 +37,8 @@ export function HoursEditor({
               className="min-w-0 flex-1"
               min={0}
               max={MAX_HOURS}
-              step={1}
+              step={0.5}
+              thumbLabel={`${WEEKDAY_LABELS[day]} hours`}
               disabled={disabled}
               value={[hours]}
               onValueChange={([next]) => onChange({ ...value, [day]: clampHours(next) })}
@@ -49,10 +46,10 @@ export function HoursEditor({
             <Input
               id={id}
               type="number"
-              inputMode="numeric"
+              inputMode="decimal"
               min={0}
               max={MAX_HOURS}
-              step={1}
+              step={0.5}
               value={hours}
               disabled={disabled}
               className="tabular-nums h-9 max-md:h-11 w-16 shrink-0 text-right"

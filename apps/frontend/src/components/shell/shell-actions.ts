@@ -63,6 +63,6 @@ export async function exportEverything(): Promise<void> {
   }
 }
 
-// Interim homes until Progress (Task 6) and Plan (Task 7) own these forms.
-export const ADD_MOCK_HREF = "/mocks";
-export const ADD_HOLIDAY_HREF = "/plan";
+// Each form lives on its page's tab, so the palette lands on the form, not the page default.
+export const ADD_MOCK_HREF = "/progress?tab=mocks";
+export const ADD_HOLIDAY_HREF = "/plan?tab=setup";

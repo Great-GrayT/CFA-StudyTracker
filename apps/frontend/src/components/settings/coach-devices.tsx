@@ -16,6 +16,8 @@ import { getVapidPublicKey } from "@/lib/vapid";
 import type { Plan } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { OfflineLine, RegionError, regionState } from "@/components/states/region-states";
+import { useOnline } from "@/hooks/use-online";
 import { CoachSettings } from "@/components/coach-settings";
 import { InstallCard } from "@/components/install-card";
 import { SettingsSection } from "./section";
@@ -63,8 +65,27 @@ export function CoachDevicesSection({
   );
 }
 
+// Two rows in the same shape as a device row, so the list does not jump on load.
+function DevicesSkeleton() {
+  return (
+    <ul className="border-border flex flex-col border-t" aria-hidden="true">
+      {[0, 1].map((i) => (
+        <li key={i} className="border-border flex min-h-11 items-center justify-between gap-4 border-b py-2">
+          <span className="flex flex-col gap-1.5">
+            <Skeleton className="h-4 w-40 rounded-sm" />
+            <Skeleton className="h-3 w-24 rounded-sm" />
+          </span>
+          <Skeleton className="h-8 w-16 rounded-sm" />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function Devices() {
   const pushDevices = usePushDevices();
+  const online = useOnline();
+  const { loading: devicesLoading, error: devicesError } = regionState(pushDevices);
   const [supported, setSupported] = useState(false);
   const [currentSubscription, setCurrentSubscription] = useState<PushSubscription | null>(null);
   const [subscribing, setSubscribing] = useState(false);
@@ -155,6 +176,7 @@ function Devices() {
   }
 
   const devices = pushDevices.data?.subscriptions ?? [];
+  const showDevices = !devicesLoading && !devicesError && devices.length > 0;
 
   return (
     <div className="flex flex-col gap-3">
@@ -163,7 +185,15 @@ function Devices() {
         Phone notifications go to every device you have added. Each one shows the name it was given.
       </p>
 
-      {devices.length > 0 && (
+      {devicesLoading && <DevicesSkeleton />}
+
+      {!devicesLoading && !!devicesError && (
+        <RegionError error={devicesError} online={online} onRetry={() => void pushDevices.refetch()} />
+      )}
+
+      {showDevices && !online && <OfflineLine />}
+
+      {showDevices && (
         <ul className="border-border flex flex-col border-t">
           {devices.map((device) => {
             const isThisDevice = currentSubscription?.endpoint === device.endpoint;
