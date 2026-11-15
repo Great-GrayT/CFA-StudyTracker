@@ -13,6 +13,7 @@ import { CoachSettings, LocationSettings } from "@/components/coach-settings";
 import { PlannerSettings } from "@/components/planner-settings";
 import { PriorWork } from "@/components/prior-work";
 import { DeleteAccount } from "@/components/delete-account";
+import { RestartPlan } from "@/components/restart-plan";
 
 const numbers = new Intl.NumberFormat("en");
 const plural = new Intl.PluralRules("en");
@@ -370,6 +371,10 @@ export default function SettingsPage() {
             only picked up main's padding and sat 24px wider on each side than
             every other card on the screen. */}
         <SecuritySettings twoStepEnabled={user?.twoStepEnabled ?? false} />
+
+        {/* Above Delete account: the two big resets sit together, the milder
+            first. */}
+        {plan.data && <RestartPlan planId={plan.data.id} />}
 
         {/* Last on the page, and collapsed. An irreversible action belongs at
             the end of a settings screen, not beside the ones you change often. */}
