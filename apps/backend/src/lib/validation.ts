@@ -40,18 +40,11 @@ export const weeklyAvailabilitySchema = z.object({
   sun: z.number().min(0),
 });
 
-const initialLogSchema = z.object({
-  losId: z.string(),
-  confidence: z.number().int().min(1).max(5),
-  questionsAnswered: z.number().int().min(0),
-});
-
 export const createPlanSchema = z.object({
   levelId: z.string(),
   examDate: examDateSchema,
   startDate: z.coerce.date().optional(),
   weeklyAvailability: weeklyAvailabilitySchema,
-  initialLogs: z.array(initialLogSchema).optional(),
 });
 
 /**

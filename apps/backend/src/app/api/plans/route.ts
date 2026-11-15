@@ -30,12 +30,12 @@ export async function POST(req: Request): Promise<Response> {
   if (!parsed.success) {
     return Response.json({ error: "Invalid request body" }, { status: 400 });
   }
-  const { levelId, examDate, weeklyAvailability, initialLogs } = parsed.data;
+  const { levelId, examDate, weeklyAvailability } = parsed.data;
   const startDate = parsed.data.startDate ?? new Date();
 
-  // Deactivate-then-create-then-backfill all happen inside one transaction so
-  // a reader can never observe two active plans, or a plan with only some of
-  // its backfilled logs, even under concurrent requests from the same user.
+  // Deactivate-then-create happen inside one transaction so a reader can never
+  // observe two active plans, even under concurrent requests from the same
+  // user. What was already studied is saved through prior-work afterwards.
   const plan = await db.$transaction(async (tx) => {
     await tx.studyPlan.updateMany({
       where: { userId: auth.userId, isActive: true },
@@ -52,23 +52,6 @@ export async function POST(req: Request): Promise<Response> {
         isActive: true,
       },
     });
-
-    if (initialLogs && initialLogs.length > 0) {
-      await tx.studyLogEntry.createMany({
-        data: initialLogs.map((entry) => ({
-          userId: auth.userId,
-          planId: created.id,
-          losId: entry.losId,
-          confidence: entry.confidence,
-          questionsAnswered: entry.questionsAnswered,
-          // Entered at plan creation, so this is a statement about the past
-          // rather than work logged as it happened. Mastery still treats it as
-          // real evidence; the flag is what keeps the two tellable apart.
-          selfDeclared: true,
-          date: startDate,
-        })),
-      });
-    }
 
     return created;
   });

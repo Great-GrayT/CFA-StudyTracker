@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useReducer, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { useLevels, useCurriculum, usePackages, usePlan, keys } from "@/lib/hooks";
@@ -12,7 +12,7 @@ import { WEEKDAYS, type WeeklyAvailability, type PackageRole } from "@/lib/types
 import { Mark } from "@/components/mark";
 import { HoursEditor } from "@/components/plan/hours-editor";
 import { PackagesEditor } from "@/components/plan/packages-editor";
-import { BackfillPicker } from "@/components/backfill-picker";
+import { PriorWork, type Declaration, type Source, type SourceKind } from "@/components/prior-work";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,9 +21,11 @@ import { cn } from "@/lib/utils";
 
 // Six steps, resumable.
 //
-// Step 3 (start date) exists because without it a mid-stream candidate's
-// backfilled outcomes all date to today, and the app reports them as a large
-// surplus. That broke the exact user the backfill screen was built for.
+// Step 3 (start date) measures progress from when the candidate really began.
+//
+// The last step is the same "already studied" form as Plan and Settings, so
+// what a candidate declares here names its material and the planner credits
+// it. It is saved through the plan's prior-work route once the plan exists.
 
 const DRAFT_KEY = "cfa-onboarding-draft";
 
@@ -34,7 +36,7 @@ type Draft = {
   startDate: string;
   availability: WeeklyAvailability;
   packages: Array<{ packageId: string; roles: PackageRole[] }>;
-  backfill: Array<{ losId: string; confidence: number; questionsAnswered: number }>;
+  priorWork: Declaration[];
 };
 
 const emptyDraft: Draft = {
@@ -44,7 +46,7 @@ const emptyDraft: Draft = {
   startDate: toISODate(startOfUTCDay(new Date())),
   availability: { mon: 0, tue: 0, wed: 0, thu: 0, fri: 0, sat: 0, sun: 0 },
   packages: [],
-  backfill: [],
+  priorWork: [],
 };
 
 type Action =
@@ -81,13 +83,25 @@ export default function OnboardingPage() {
   const curriculum = useCurriculum(draft.levelId ?? undefined);
   const packages = usePackages();
   const plan = usePlan();
+  // What the form may name as material, for the chosen level. Needs no plan.
+  const sources = useQuery({
+    queryKey: ["prior-work-sources", draft.levelId],
+    queryFn: () =>
+      api.get<Record<SourceKind, Source[]>>(`prior-work/sources?levelId=${draft.levelId}`),
+    enabled: !!draft.levelId && draft.step === 5,
+  });
 
   // Resumable: closing the tab mid-setup must not restart a flow whose last
   // step can take ten minutes.
   useEffect(() => {
     try {
       const raw = localStorage.getItem(DRAFT_KEY);
-      if (raw) dispatch({ type: "restore", draft: { ...emptyDraft, ...JSON.parse(raw) } });
+      if (raw) {
+        // Drafts saved before this step changed carry a backfill list the
+        // planner never credited; it is dropped rather than migrated.
+        const { backfill: _retired, ...saved } = JSON.parse(raw) as Partial<Draft> & { backfill?: unknown };
+        dispatch({ type: "restore", draft: { ...emptyDraft, ...saved } });
+      }
     } catch {
       // A corrupt draft is not worth failing setup over.
     }
@@ -138,7 +152,6 @@ export default function OnboardingPage() {
         examDate: draft.examDate,
         startDate: draft.startDate,
         weeklyAvailability: draft.availability,
-        ...(draft.backfill.length > 0 ? { initialLogs: draft.backfill } : {}),
       });
 
       // Package roles are a separate resource, so they are attached after the
@@ -148,6 +161,18 @@ export default function OnboardingPage() {
           await api.post(`plans/${created.id}/packages`, p);
         } catch {
           toast.warning("The plan was created, but one package could not be saved.");
+        }
+      }
+
+      // Saved after the packages, so the replan it triggers already knows
+      // which package plays which role.
+      if (draft.priorWork.length > 0) {
+        try {
+          await api.post(`plans/${created.id}/prior-work`, { declarations: draft.priorWork });
+        } catch {
+          toast.warning(
+            "The plan was created, but what you had already studied was not saved. Add it on the Plan screen.",
+          );
         }
       }
 
@@ -344,13 +369,14 @@ export default function OnboardingPage() {
             )}
 
             {draft.step === 5 && (
-              <BackfillPicker
-                curriculum={curriculum.data}
-                startDate={draft.startDate}
-                availability={draft.availability}
-                examDate={draft.examDate}
-                value={draft.backfill}
-                onChange={(backfill) => dispatch({ type: "set", patch: { backfill } })}
+              <PriorWork
+                topics={curriculum.data?.topics ?? []}
+                sources={sources.data}
+                value={draft.priorWork}
+                disabled={submitting}
+                loading={curriculum.isLoading || sources.isLoading}
+                failed={curriculum.isError || sources.isError}
+                onChange={(priorWork) => dispatch({ type: "set", patch: { priorWork } })}
               />
             )}
 

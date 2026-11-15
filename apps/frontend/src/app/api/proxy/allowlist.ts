@@ -42,6 +42,8 @@ export const ALLOWED = [
   /^auth\/account\/delete$/,
   // The settings screen's one-shot read of everything the user can manage.
   /^settings$/,
+  // What setup's "already studied" form may name, before a plan exists.
+  /^prior-work\/sources$/,
   // City lookup for the study-location picker.
   /^geocode$/,
   // "Send me one now", so a candidate can tell a working channel from a

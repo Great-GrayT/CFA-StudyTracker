@@ -64,7 +64,10 @@ test("creating a new active plan deactivates the previous active plan", async ()
   expect(plans.filter((p) => p.isActive)).toEqual([expect.objectContaining({ id: second.id })]);
 });
 
-test("creating a plan with backfilled logs writes one StudyLogEntry per entry, dated startDate", async () => {
+// The old setup step sent outcomes with no material, which the planner could
+// not credit. Prior work is now saved through plans/:id/prior-work, so a
+// stale client's initialLogs must write nothing.
+test("creating a plan ignores the retired initialLogs field", async () => {
   const user = await registerUser();
   const losId = await anyLosIdForLevel("I");
   const plan = await createPlan(user, {
@@ -74,10 +77,8 @@ test("creating a plan with backfilled logs writes one StudyLogEntry per entry, d
     weeklyAvailability: fullWeek,
     initialLogs: [{ losId, confidence: 4, questionsAnswered: 12 }],
   });
-  const logs = await listLogs(user, plan.id);
-  expect(logs).toEqual([
-    expect.objectContaining({ losId, confidence: 4, questionsAnswered: 12, date: new Date("2026-10-01") }),
-  ]);
+  expect(plan.id).toBeTruthy();
+  expect(await listLogs(user, plan.id)).toEqual([]);
 });
 
 test("adding a holiday range persists it and it's listed back", async () => {
