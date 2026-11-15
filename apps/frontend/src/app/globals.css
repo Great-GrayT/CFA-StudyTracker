@@ -109,3 +109,40 @@
     font-variant-numeric: tabular-nums;
   }
 }
+
+/* Label ink on each confidence fill, picked for 4.5:1 per step in each theme
+   (the ramp runs dark to light in dark mode, so the ink flips with it). */
+:root {
+  --conf-ink-1: var(--text);
+  --conf-ink-2: #fff;
+  --conf-ink-3: #fff;
+  --conf-ink-4: #fff;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --conf-ink-1: #fff;
+    --conf-ink-2: var(--ground);
+    --conf-ink-3: var(--ground);
+    --conf-ink-4: var(--ground);
+  }
+}
+:root[data-theme="dark"] {
+  --conf-ink-1: #fff;
+  --conf-ink-2: var(--ground);
+  --conf-ink-3: var(--ground);
+  --conf-ink-4: var(--ground);
+}
+
+/* The syllabus map's one orchestrated reveal; callers skip it under reduced motion. */
+@keyframes syllabus-reveal {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  [data-reveal] [data-slot="treemap-cell"] {
+    animation: syllabus-reveal 240ms var(--ease-enter) both;
+    animation-delay: var(--reveal-delay, 0ms);
+  }
+}

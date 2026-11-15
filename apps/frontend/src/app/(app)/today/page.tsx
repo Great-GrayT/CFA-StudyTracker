@@ -9,7 +9,7 @@ import { TodaysWork } from "@/components/today/todays-work";
 import { WeekStrip, weekDates } from "@/components/today/week-strip";
 import { StandingPanel } from "@/components/today/standing-panel";
 import { StudyNext } from "@/components/today/study-next";
-import { OfflineLine, RegionError } from "@/components/today/region-states";
+import { OfflineLine, RegionError, regionState } from "@/components/states/region-states";
 import { buildSeries } from "@/components/pace-field";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -50,20 +50,6 @@ function useDayClock(timeZone: string, debrief: string): number | null {
     return () => window.clearInterval(id);
   }, [timeZone, debrief]);
   return left;
-}
-
-type QueryLike = { isPending: boolean; fetchStatus: string; error: unknown };
-
-/**
- * Loading only while a fetch can run. A query paused offline with nothing
- * cached would otherwise skeleton forever, so it reads as an offline error.
- */
-function regionState(q: QueryLike): { loading: boolean; error: unknown } {
-  const paused = q.isPending && q.fetchStatus === "paused";
-  return {
-    loading: q.isPending && !paused && !q.error,
-    error: q.error ?? (paused ? new ApiError(0, "You are offline.") : null),
-  };
 }
 
 function Shell({ children }: { children: React.ReactNode }) {

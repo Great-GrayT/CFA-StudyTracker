@@ -8,8 +8,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils";
 import type { FlatLos } from "@/lib/hooks";
 import type { StudyNextRow } from "@/lib/today";
-import { RegionError } from "./region-states";
-import { useIsCut } from "./truncated-text";
+import { RegionError } from "@/components/states/region-states";
+import { useIsCut } from "@/components/states/truncated-text";
 
 export function StudyNext({
   rows,

@@ -7,7 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import type { PaceReading } from "@/lib/pace";
 import type { MockExam } from "@/lib/types";
-import { RegionError } from "./region-states";
+import { RegionError } from "@/components/states/region-states";
 
 const hours = new Intl.NumberFormat("en", { maximumFractionDigits: 1 });
 const dayMonth = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });

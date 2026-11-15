@@ -16,8 +16,8 @@ import { useUndoRecord } from "@/components/record/use-undo-record";
 import { cn } from "@/lib/utils";
 import { kindLabel, minutesShort, postponedLabel, sortCells } from "@/lib/today";
 import type { PrescribedDay, PrescribedMaterial, PrescribedTask } from "@/lib/types";
-import { RegionError } from "./region-states";
-import { TruncatedText } from "./truncated-text";
+import { RegionError } from "@/components/states/region-states";
+import { TruncatedText } from "@/components/states/truncated-text";
 
 const shortDay = new Intl.DateTimeFormat("en-GB", {
   weekday: "long",

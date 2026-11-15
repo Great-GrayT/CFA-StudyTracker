@@ -16,6 +16,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { useIsCut } from '@/components/states/truncated-text';
 
 // Type Definitions
 interface TreemapDataItem {
@@ -57,6 +58,15 @@ interface TreemapConfig {
   onDrillDown?: (node: TreemapNode) => void;
   renderCell?: (node: TreemapNode) => React.ReactNode;
   renderTooltip?: (node: TreemapNode) => React.ReactNode;
+  /** False drops the click-to-select ring and aria-pressed. */
+  selectable?: boolean;
+  /** Accessible name per cell; the default reads the raw value. */
+  getAriaLabel?: (node: TreemapNode) => string;
+  /** Extra style per visible cell, e.g. a staggered entrance. */
+  cellStyle?: (node: TreemapNode, index: number) => CSSProperties;
+  /** Visible label for the breadcrumb's root; an icon when absent. */
+  rootLabel?: string;
+  ariaLabel?: string;
 }
 
 // Jotai atoms for state management
@@ -213,16 +223,21 @@ const TreemapCell: React.FC<{
   config: TreemapConfig;
   onCellClick?: (node: TreemapNode) => void;
   onDrillDown?: (node: TreemapNode) => void;
-}> = ({ node, config, onCellClick, onDrillDown }) => {
+  index?: number;
+} & Omit<React.HTMLAttributes<HTMLDivElement>, 'style'> & {
+  ref?: React.Ref<HTMLDivElement>;
+}> = ({ node, config, onCellClick, onDrillDown, index = 0, ref, ...rest }) => {
   const [hoveredNode, setHoveredNode] = useAtom(hoveredNodeAtom);
   const [selectedNodes, setSelectedNodes] = useAtom(selectedNodesAtom);
   const cellRef = useRef<HTMLDivElement>(null);
 
-  const isSelected = selectedNodes.has(node.id);
+  const selectable = config.selectable !== false;
+  const isSelected = selectable && selectedNodes.has(node.id);
   const isHovered = hoveredNode?.id === node.id;
+  // ?? not ||: a minCellSize of 0 means draw every cell.
   const showCell =
-    node.width >= (config.minCellSize || 20) &&
-    node.height >= (config.minCellSize || 20);
+    node.width >= (config.minCellSize ?? 20) &&
+    node.height >= (config.minCellSize ?? 20);
 
   const handleNodeAction = useCallback(() => {
     if (node.children && config.enableDrillDown && onDrillDown) {
@@ -231,7 +246,7 @@ const TreemapCell: React.FC<{
       onCellClick(node);
     }
 
-    setSelectedNodes((prev) => {
+    if (selectable) setSelectedNodes((prev) => {
       const next = new Set(prev);
       if (next.has(node.id)) {
         next.delete(node.id);
@@ -246,24 +261,27 @@ const TreemapCell: React.FC<{
     onCellClick,
     onDrillDown,
     setSelectedNodes,
+    selectable,
   ]);
 
   const handleClick = useCallback(
-    (e: React.MouseEvent) => {
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      rest.onClick?.(e);
       e.stopPropagation();
       handleNodeAction();
     },
-    [handleNodeAction]
+    [handleNodeAction, rest]
   );
 
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      rest.onKeyDown?.(e);
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
         handleNodeAction();
       }
     },
-    [handleNodeAction]
+    [handleNodeAction, rest]
   );
 
   if (!showCell) return null;
@@ -278,7 +296,7 @@ const TreemapCell: React.FC<{
       config.animationEnabled !== false
         ? `all ${config.animationDuration || 300}ms cubic-bezier(0.4, 0, 0.2, 1)`
         : undefined,
-    transform: isHovered ? 'scale(0.98)' : 'scale(1)',
+    ...config.cellStyle?.(node, index),
   };
 
   const cellColor =
@@ -289,30 +307,42 @@ const TreemapCell: React.FC<{
 
   return (
     <div
-      ref={cellRef}
+      {...rest}
+      ref={(el) => {
+        cellRef.current = el;
+        if (typeof ref === 'function') ref(el);
+        else if (ref) (ref as React.MutableRefObject<HTMLDivElement | null>).current = el;
+      }}
       style={cellStyle}
       className={cn(
-        'relative cursor-pointer overflow-hidden',
-        'focus:ring-primary focus:ring-2 focus:ring-offset-2 focus:outline-none',
-        'transition-all duration-200',
-        isSelected && 'ring-primary ring-2 ring-offset-2',
-        isHovered && 'brightness-110'
+        'cursor-pointer overflow-hidden',
+        // Inset, since the container clips; two-tone, so it shows on any fill.
+        'focus-visible:z-10 focus-visible:shadow-[inset_0_0_0_2px_var(--focus),inset_0_0_0_4px_var(--ground)] focus-visible:outline-none',
+        isSelected && 'ring-primary ring-2 ring-inset',
+        isHovered && 'brightness-110',
+        rest.className
       )}
       onClick={handleClick}
       onKeyDown={handleKeyDown}
-      onMouseEnter={() => setHoveredNode(node)}
-      onMouseLeave={() => setHoveredNode(null)}
+      onMouseEnter={(e) => {
+        rest.onMouseEnter?.(e);
+        setHoveredNode(node);
+      }}
+      onMouseLeave={(e) => {
+        rest.onMouseLeave?.(e);
+        setHoveredNode(null);
+      }}
       tabIndex={0}
       role="button"
-      aria-label={`${node.name}: ${node.value}`}
-      aria-pressed={isSelected}
+      aria-label={config.getAriaLabel ? config.getAriaLabel(node) : `${node.name}: ${node.value}`}
+      aria-pressed={selectable ? isSelected : undefined}
       data-slot="treemap-cell"
     >
       <div
         className={cn(
           'absolute inset-0 flex flex-col items-center justify-center p-2',
-          'border border-slate-300 bg-slate-200 dark:border-slate-600 dark:bg-slate-700',
-          `rounded-${config.borderRadius || 'md'}`
+          'border-background bg-card border',
+          config.borderRadius === 0 ? 'rounded-none' : `rounded-${config.borderRadius || 'md'}`
         )}
         style={{ backgroundColor: cellColor }}
       >
@@ -335,35 +365,63 @@ const TreemapCell: React.FC<{
   );
 };
 
+// A crumb that names itself in a tooltip only when its label is cut.
+const Crumb: React.FC<{
+  label: string;
+  className: string;
+  current: boolean;
+  onClick: () => void;
+}> = ({ label, className, current, onClick }) => {
+  const ref = useRef<HTMLButtonElement>(null);
+  const cut = useIsCut(ref, label);
+  return (
+    <Tooltip open={cut ? undefined : false}>
+      <TooltipTrigger asChild>
+        <button
+          ref={ref}
+          type="button"
+          onClick={onClick}
+          aria-current={current ? 'page' : undefined}
+          className={className}
+        >
+          {label}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs">{label}</TooltipContent>
+    </Tooltip>
+  );
+};
+
 // TreemapBreadcrumb Component
 const TreemapBreadcrumb: React.FC<{
   path: string[];
   onNavigate: (index: number) => void;
-}> = ({ path, onNavigate }) => {
+  rootLabel?: string;
+}> = ({ path, onNavigate, rootLabel }) => {
+  const crumb =
+    'hover:text-primary focus-visible:ring-ring min-w-0 truncate rounded-sm outline-hidden focus-visible:ring-2 max-md:py-3.5';
   return (
     <nav
-      className="mb-4 flex items-center space-x-2 text-sm"
+      className="mb-2 flex min-w-0 items-center gap-1.5 text-[13px]"
       aria-label="Breadcrumb"
     >
       <button
+        type="button"
         onClick={() => onNavigate(0)}
-        className="hover:text-primary flex items-center transition-colors"
-        aria-label="Navigate to root"
+        className={cn(crumb, 'flex shrink-0 items-center')}
+        aria-label={rootLabel ? undefined : 'Navigate to root'}
       >
-        <Home className="h-4 w-4" />
+        {rootLabel ?? <Home className="h-4 w-4" />}
       </button>
       {path.map((item, index) => (
         <React.Fragment key={index}>
-          <ChevronRight className="h-4 w-4 text-slate-400" />
-          <button
+          <ChevronRight className="text-muted-foreground h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <Crumb
+            label={item}
             onClick={() => onNavigate(index + 1)}
-            className={cn(
-              'hover:text-primary transition-colors',
-              index === path.length - 1 && 'text-primary font-medium'
-            )}
-          >
-            {item}
-          </button>
+            current={index === path.length - 1}
+            className={cn(crumb, 'block', index === path.length - 1 && 'text-foreground font-medium')}
+          />
         </React.Fragment>
       ))}
     </nav>
@@ -461,7 +519,8 @@ const TreemapContainer: React.FC<{
     if (!config.enableKeyboardNavigation) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && drillDownPath.length > 0) {
+      // A sheet or menu that handled Escape already marked it.
+      if (e.key === 'Escape' && !e.defaultPrevented && drillDownPath.length > 0) {
         setDrillDownPath((prev) => prev.slice(0, -1));
       }
     };
@@ -488,27 +547,29 @@ const TreemapContainer: React.FC<{
             return findNode(data);
           })}
           onNavigate={handleBreadcrumbNavigate}
+          rootLabel={config.rootLabel}
         />
       )}
 
       <TooltipProvider>
         <div
           ref={containerRef}
-          className="relative overflow-hidden rounded-lg bg-slate-100 dark:bg-slate-800"
+          className="bg-background relative overflow-hidden"
           style={{
             width: config.width || '100%',
             height: config.height || '600px',
           }}
-          role="treegrid"
-          aria-label="Treemap visualization"
+          role="group"
+          aria-label={config.ariaLabel ?? 'Treemap visualization'}
         >
-          {layoutNodes.map((node) => (
+          {layoutNodes.map((node, index) => (
             <React.Fragment key={node.id}>
               {config.showTooltip !== false ? (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <TreemapCell
                       node={node}
+                      index={index}
                       config={config}
                       onCellClick={config.onCellClick}
                       onDrillDown={handleDrillDown}
@@ -536,6 +597,7 @@ const TreemapContainer: React.FC<{
               ) : (
                 <TreemapCell
                   node={node}
+                  index={index}
                   config={config}
                   onCellClick={config.onCellClick}
                   onDrillDown={handleDrillDown}
@@ -646,5 +708,5 @@ const TreemapExample: React.FC = () => {
 
 export default TreemapExample;
 
-export { TreemapContainer as Treemap };
+export { TreemapContainer as Treemap, drillDownPathAtom };
 export type { TreemapDataItem, TreemapNode, TreemapConfig };

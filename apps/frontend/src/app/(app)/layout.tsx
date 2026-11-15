@@ -8,6 +8,7 @@ import { MobileBar } from "@/components/shell/mobile-bar";
 import { CommandPalette } from "@/components/shell/command-palette";
 import { PlanGuard } from "@/components/shell/plan-guard";
 import { RecordProvider } from "@/components/record/record-provider";
+import { OutcomeSheet } from "@/components/syllabus/outcome-sheet";
 
 // Every signed-in page renders inside this one shell; onboarding and the auth
 // pages sit outside the group, so the plan guard never runs there.
@@ -33,6 +34,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               </main>
               <MobileBar />
             </div>
+            {/* Here, not per page: ?los= opens the outcome on any app page. */}
+            <Suspense fallback={null}>
+              <OutcomeSheet />
+            </Suspense>
           </CommandPalette>
         </RecordProvider>
       </PlanGuard>
