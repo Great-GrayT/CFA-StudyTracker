@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   useCreateSession,
@@ -9,7 +9,6 @@ import {
   usePlan,
   usePlanPackages,
   usePrescription,
-  useSubmitTask,
   type SessionKind,
 } from "@/lib/hooks";
 import { ApiError, messageForStatus } from "@/lib/api";
@@ -18,6 +17,8 @@ import { useIsMobile } from "@/hooks/ui/use-mobile";
 import { cn } from "@/lib/utils";
 import { minutesLabel } from "@/components/day-plan";
 import { resolvePreset } from "@/lib/record";
+import { useOnline } from "@/hooks/use-online";
+import { useUndoRecord } from "./use-undo-record";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import {
   Drawer,
@@ -76,17 +77,6 @@ const dayToDate = (iso: string) => {
   return new Date(y, m - 1, d);
 };
 
-function subscribeOnline(cb: () => void) {
-  window.addEventListener("online", cb);
-  window.addEventListener("offline", cb);
-  return () => {
-    window.removeEventListener("online", cb);
-    window.removeEventListener("offline", cb);
-  };
-}
-function useOnline() {
-  return useSyncExternalStore(subscribeOnline, () => navigator.onLine, () => true);
-}
 
 export function RecordSheet({
   open,
@@ -105,7 +95,7 @@ export function RecordSheet({
   const packages = usePackages();
   const planPackages = usePlanPackages(planId);
   const createSession = useCreateSession(planId);
-  const submitTask = useSubmitTask(planId);
+  const undoRecord = useUndoRecord(planId);
 
   const [topicId, setTopicId] = useState("");
   const [readingId, setReadingId] = useState("");
@@ -202,10 +192,7 @@ export function RecordSheet({
   const ready = !!readingId && minutesValid && !correctTooHigh;
 
   function undo(taskId: string) {
-    submitTask.mutateAsync({ taskId, status: "pending" }).then(
-      () => toast("Undone. The cell is back on your plan."),
-      (err) => toast.error(err instanceof ApiError ? err.message : messageForStatus(0, "Could not undo that.")),
-    );
+    void undoRecord.undo(taskId);
   }
 
   async function submit(andNext: boolean) {

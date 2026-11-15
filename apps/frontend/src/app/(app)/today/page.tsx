@@ -1,274 +1,302 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useQueryClient } from "@tanstack/react-query";
 
-import { DeviationSparkline, buildSeries } from "@/components/pace-field";
-import { DayPlan } from "@/components/day-plan";
-import { DayCountdown } from "@/components/day-countdown";
-import { WeekStrip, weekOf, buildWeek } from "@/components/week-strip";
-import { Countdown } from "@/components/countdown";
+import { DayHeader } from "@/components/today/day-header";
+import { TodaysWork } from "@/components/today/todays-work";
+import { WeekStrip, weekDates } from "@/components/today/week-strip";
+import { StandingPanel } from "@/components/today/standing-panel";
+import { StudyNext } from "@/components/today/study-next";
+import { OfflineLine, RegionError } from "@/components/today/region-states";
+import { buildSeries } from "@/components/pace-field";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 import {
-  usePlan,
-  useCurriculum,
-  useProgress,
-  useLogs,
-  useHolidays,
-  usePrescription,
   flattenCurriculum,
+  useCurriculum,
+  useHolidays,
+  useLogs,
+  useMocks,
+  usePlan,
+  usePrescription,
+  useProgress,
 } from "@/lib/hooks";
-import { readPace, remainingWeekSplit, startOfUTCDay, addUTCDays } from "@/lib/pace";
-import { debriefTime } from "@/lib/day-end";
-import styles from "./today.module.css";
+import { ApiError } from "@/lib/api";
+import { addUTCDays, missedDays, readPace, startOfUTCDay } from "@/lib/pace";
+import { debriefTime, msUntilDayEnd } from "@/lib/day-end";
+import { examPhase, studyNextRows } from "@/lib/today";
+import { useOnline } from "@/hooks/use-online";
 
+const fullDate = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
 
-const hours = new Intl.NumberFormat("en", { maximumFractionDigits: 1 });
-const plural = new Intl.PluralRules("en");
-const outcomeWord = (n: number) => (plural.select(n) === "one" ? "outcome" : "outcomes");
+/**
+ * Milliseconds until the study day closes at the plan's debrief, in the plan's
+ * zone; null until mounted, since server and browser zones differ.
+ */
+function useDayClock(timeZone: string, debrief: string): number | null {
+  const [left, setLeft] = useState<number | null>(null);
+  useEffect(() => {
+    // Checked each second, stored only when the shown minute changes, so the
+    // page re-renders once a minute rather than every tick.
+    const bucket = (ms: number) => (ms <= 0 ? 0 : Math.ceil(ms / 60000));
+    const tick = () => {
+      const next = msUntilDayEnd(Date.now(), timeZone, debrief);
+      setLeft((prev) => (prev !== null && bucket(prev) === bucket(next) ? prev : next));
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [timeZone, debrief]);
+  return left;
+}
+
+type QueryLike = { isPending: boolean; fetchStatus: string; error: unknown };
+
+/**
+ * Loading only while a fetch can run. A query paused offline with nothing
+ * cached would otherwise skeleton forever, so it reads as an offline error.
+ */
+function regionState(q: QueryLike): { loading: boolean; error: unknown } {
+  const paused = q.isPending && q.fetchStatus === "paused";
+  return {
+    loading: q.isPending && !paused && !q.error,
+    error: q.error ?? (paused ? new ApiError(0, "You are offline.") : null),
+  };
+}
+
+function Shell({ children }: { children: React.ReactNode }) {
+  return <div className="mx-auto w-full max-w-[1200px] min-w-0 px-4 py-6 md:px-8 md:py-8">{children}</div>;
+}
 
 export default function TodayPage() {
-
+  const qc = useQueryClient();
+  const online = useOnline();
   const plan = usePlan();
   const planId = plan.data?.id;
   const curriculum = useCurriculum(plan.data?.levelId);
   const progress = useProgress(planId);
   const logs = useLogs(planId);
   const holidays = useHolidays(planId);
+  const mocks = useMocks(planId);
 
-  // The candidate's own calendar day, formatted the way the API wants it.
-  // en-CA is the shortest route to YYYY-MM-DD without pulling in a formatter.
+  // The candidate's calendar day; en-CA is the shortest route to YYYY-MM-DD.
   const todayISO = useMemo(() => new Intl.DateTimeFormat("en-CA").format(new Date()), []);
-
-  // The whole week is fetched at once, not just today: the strip needs every
-  // day's total, and seven days of tasks is a smaller payload than the
-  // curriculum tree this screen already holds.
-  const week = useMemo(() => weekOf(todayISO), [todayISO]);
+  const week = useMemo(() => weekDates(todayISO), [todayISO]);
+  // The whole week in one request: the strip needs every day's totals.
   const prescription = usePrescription(planId, week[0], week[6]);
-  const [selectedDate, setSelectedDate] = useState(todayISO);
+  const [selected, setSelected] = useState(todayISO);
 
-  // The study day ends at the plan's debrief, when the server replans and
-  // carries anything unstarted forward as Postponed. Refetch so it shows.
-  const planZone = plan.data?.timeZone ?? "UTC";
+  // The day closes at the debrief, when the server replans and carries
+  // unstarted work forward as Postponed. Invalidate so it shows.
   const debrief = debriefTime(plan.data?.coachSchedule);
-  const refetchPrescription = prescription.refetch;
-  const handleDayEnd = useCallback(() => void refetchPrescription(), [refetchPrescription]);
-  const selectedDay = prescription.data?.days.find((d) => d.date === selectedDate);
-  const todayDay = prescription.data?.days.find((d) => d.date === todayISO);
+  const msLeft = useDayClock(plan.data?.timeZone ?? "UTC", debrief);
+  const closed = msLeft !== null && msLeft <= 0;
+  useEffect(() => {
+    if (closed && planId) void qc.invalidateQueries({ queryKey: ["prescription", planId] });
+  }, [closed, planId, qc]);
 
-  const weekDays = useMemo(
+  const flat = useMemo(() => flattenCurriculum(curriculum.data), [curriculum.data]);
+  const byId = useMemo(() => new Map(flat.map((l) => [l.id, l])), [flat]);
+  const totalOutcomes = flat.length;
+  const paceInputs = useMemo(
     () =>
-      buildWeek(
-        week,
-        prescription.data?.days,
-        plan.data?.weeklyAvailability as Record<string, number> | undefined,
-        todayISO,
-      ),
-    [week, prescription.data?.days, plan.data?.weeklyAvailability, todayISO],
+      plan.data && logs.data && holidays.data && totalOutcomes > 0
+        ? { plan: plan.data, logs: logs.data, holidays: holidays.data, totalOutcomes }
+        : null,
+    [plan.data, logs.data, holidays.data, totalOutcomes],
   );
-
-  // What this weekday is nominally worth, so the day can say when it is
-  // running long rather than leaving the candidate to wonder.
-  const selectedBudgetMinutes = weekDays.find((d) => d.date === selectedDate)?.budgetMinutes;
-
-  const totalOutcomes = useMemo(
-    () => flattenCurriculum(curriculum.data).length,
-    [curriculum.data],
+  const pace = useMemo(() => (paceInputs ? readPace(paceInputs) : null), [paceInputs]);
+  const spark = useMemo(
+    () =>
+      paceInputs
+        ? buildSeries(paceInputs)
+            .slice(-30)
+            .map((p) => ({ date: p.date, delta: p.newCoverage - p.target }))
+        : [],
+    [paceInputs],
   );
+  const missed = useMemo(() => {
+    if (!paceInputs) return null;
+    const today = startOfUTCDay(new Date(`${todayISO}T00:00:00Z`));
+    return missedDays({ ...paceInputs, from: addUTCDays(today, -7), to: addUTCDays(today, -1) }).length;
+  }, [paceInputs, todayISO]);
 
-  const ready = plan.data && logs.data && holidays.data && totalOutcomes > 0;
+  const rows = useMemo(() => (progress.data ? studyNextRows(progress.data) : undefined), [progress.data]);
 
-  const pace = useMemo(() => {
-    if (!ready) return null;
-    return readPace({
-      plan: plan.data!,
-      logs: logs.data!,
-      totalOutcomes,
-      holidays: holidays.data!,
-    });
-  }, [ready, plan.data, logs.data, totalOutcomes, holidays.data]);
-
-  const series = useMemo(() => {
-    if (!ready) return [];
-    return buildSeries({
-      plan: plan.data!,
-      logs: logs.data!,
-      totalOutcomes,
-      holidays: holidays.data!,
-    });
-  }, [ready, plan.data, logs.data, totalOutcomes, holidays.data]);
-
-
-  const split = plan.data ? remainingWeekSplit(plan.data.weeklyAvailability) : null;
-
-  if (plan.isLoading || curriculum.isLoading) {
+  const planState = regionState(plan);
+  if (planState.loading) {
     return (
-      <div className="mx-auto w-full max-w-[44rem] min-w-0 p-4 md:p-8">
-        <div className={styles.skeleton} aria-busy="true" aria-label="Loading today">
-          <div className={styles.skelLine} />
-          <div className={styles.skelBlock} />
-          <div className={styles.skelRow} />
-          <div className={styles.skelRow} />
+      <Shell>
+        {/* Same two columns as the loaded page, so nothing jumps when it arrives. */}
+        <div
+          aria-busy="true"
+          aria-label="Loading today"
+          className="grid grid-cols-1 gap-x-10 gap-y-8 lg:grid-cols-[minmax(0,1fr)_320px]"
+        >
+          <div className="flex flex-col gap-8">
+            <div className="flex flex-col gap-3">
+              <Skeleton className="h-8 w-64 rounded-sm" />
+              <Skeleton className="h-4 w-48 rounded-sm" />
+              <Skeleton className="h-1.5 w-full max-w-md rounded-none" />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Skeleton className="h-5 w-32 rounded-sm" />
+              {[0, 1, 2].map((i) => (
+                <Skeleton key={i} className="h-9 w-full rounded-none" />
+              ))}
+            </div>
+            <Skeleton className="h-14 w-full rounded-sm" />
+          </div>
+          <div className="border-border flex flex-col gap-4 border-t pt-8 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-10">
+            <Skeleton className="h-5 w-24 rounded-sm" />
+            <Skeleton className="h-16 w-full rounded-none" />
+            <Skeleton className="h-5 w-40 rounded-sm" />
+            <Skeleton className="h-5 w-32 rounded-sm" />
+          </div>
         </div>
-      </div>
+      </Shell>
     );
   }
 
-  const examPassed =
-    plan.data && startOfUTCDay(new Date(plan.data.examDate)) < startOfUTCDay(new Date());
-  const examToday =
-    plan.data &&
-    startOfUTCDay(new Date(plan.data.examDate)).getTime() === startOfUTCDay(new Date()).getTime();
+  // Only a 404 means no plan; any other miss is an error, never an invitation to start over.
+  const noPlan = plan.error instanceof ApiError && plan.error.status === 404;
+  if (noPlan) {
+    return (
+      <Shell>
+        <PageState title="No study plan yet" body="Set your exam date and weekly hours, and Today fills with the day's work.">
+          <Button asChild>
+            <Link href="/onboarding">Set up a plan</Link>
+          </Button>
+        </PageState>
+      </Shell>
+    );
+  }
+  if (!plan.data) {
+    return (
+      <Shell>
+        <RegionError error={planState.error} online={online} onRetry={() => void plan.refetch()} />
+      </Shell>
+    );
+  }
+
+  const phase = examPhase(plan.data.examDate, todayISO);
+  if (phase === "exam-day") {
+    return (
+      <Shell>
+        <PageState title="Your exam is today" body="Nothing to record. Good luck.">
+          <Button asChild variant="outline">
+            <Link href="/syllabus">Look over your weakest outcomes</Link>
+          </Button>
+        </PageState>
+      </Shell>
+    );
+  }
+  if (phase === "after") {
+    return (
+      <Shell>
+        <PageState
+          title={`Your exam was on ${fullDate.format(new Date(`${plan.data.examDate.slice(0, 10)}T00:00:00Z`))}`}
+          body="Your history stays readable in Progress. Start a new plan when you are ready."
+        >
+          <Button asChild>
+            <Link href="/settings#start-over">Start a new plan</Link>
+          </Button>
+        </PageState>
+      </Shell>
+    );
+  }
+
+  const days = prescription.data?.days;
+  const work = regionState(prescription);
+  const paceState = [logs, holidays, curriculum].map(regionState).find((r) => r.error) ?? { error: null };
+  const nextState = [progress, curriculum].map(regionState);
+  const retryPrescription = () => void prescription.refetch();
+  const retryPace = () => {
+    void logs.refetch();
+    void holidays.refetch();
+    void curriculum.refetch();
+  };
 
   return (
-    <div className="mx-auto w-full max-w-[44rem] min-w-0 p-4 md:p-8">
-      {/* First thing on the page, and the biggest: how long is left of today.
-          Not tied to the day the candidate has selected below, because that
-          selection is for reading a plan, and this is their own deadline. */}
-      <DayCountdown
-        remainingMinutes={Math.max(
-          0,
-          (todayDay?.totalMinutes ?? 0) - (todayDay?.doneMinutes ?? 0),
-        )}
-        totalMinutes={todayDay?.totalMinutes ?? 0}
-        timeZone={planZone}
-        debrief={debrief}
-        onDayEnd={handleDayEnd}
-      />
-
-      {plan.data && <Countdown examDate={plan.data.examDate} startDate={plan.data.startDate} />}
-
-      {examPassed ? (
-        <section className={styles.endState}>
-          <h1 className={styles.endTitle}>
-            Your exam was on {new Date(plan.data!.examDate).toLocaleDateString()}.
-          </h1>
-          <p className={styles.endBody}>
-            Start a new plan when you are ready. Your history stays readable.
-          </p>
-          <Link href="/onboarding" className={styles.endAction}>
-            Start a new plan
-          </Link>
-        </section>
-      ) : examToday ? (
-        <section className={styles.endState}>
-          <h1 className={styles.endTitle}>Your exam is today.</h1>
-          <p className={styles.endBody}>Good luck.</p>
-        </section>
-      ) : (
-        <>
-          {pace && (
-            <section className={styles.hero} aria-labelledby="pace-heading">
-              <h1 id="pace-heading" className={styles.heroLine}>
-                {pace.delta === 0 ? (
-                  <>You are exactly on pace.</>
-                ) : pace.delta < 0 ? (
-                  <>
-                    You are{" "}
-                    <strong className={styles.behind}>
-                      {Math.abs(pace.delta)} {outcomeWord(Math.abs(pace.delta))} behind
-                    </strong>
-                    , about {hours.format(pace.hoursBehind)} hours of work.
-                  </>
-                ) : (
-                  <>
-                    You are{" "}
-                    <strong className={styles.ahead}>
-                      {pace.delta} {outcomeWord(pace.delta)} ahead
-                    </strong>
-                    .
-                  </>
-                )}
-              </h1>
-              <DeviationSparkline series={series} />
-            </section>
-          )}
-
-          {!pace?.realistic && pace && (
-            <p className={styles.unrealistic} role="status">
-              Finishing by {new Date(plan.data!.examDate).toLocaleDateString()} needs about{" "}
-              {hours.format(pace.requiredDailyHours)} hours a day from here, more than your plan
-              sets aside. Moving the exam date or adding study hours are the two things that change
-              this.
-            </p>
-          )}
-
-          {progress.data && (
-            <section className={styles.split} aria-label="New coverage against review work">
-              <SplitStack
-                newCoverage={progress.data.today.newCoverage}
-                reviewWork={progress.data.today.reviewWork}
-              />
-            </section>
-          )}
-
-
-          {split && split.totalHours > 0 && (
-            <section className={styles.plan} aria-labelledby="next-heading">
-              <h2 id="next-heading" className={styles.sectionTitle}>
-                Next two hours
-              </h2>
-              <SplitBar content={split.contentHours} practice={split.practiceHours} />
-              <p className={styles.planHint}>
-                {hours.format(split.contentHours)} hours content and{" "}
-                {hours.format(split.practiceHours)} hours practice is the suggested split of the{" "}
-                {hours.format(split.totalHours)} hours left this week.
-              </p>
-            </section>
-          )}
-
-          <WeekStrip week={weekDays} selected={selectedDate} onSelect={setSelectedDate} />
-
-          <DayPlan
-            day={selectedDay}
-            heading={
-              selectedDate === todayISO
-                ? "Today"
-                : new Date(`${selectedDate}T00:00:00Z`).toLocaleDateString(undefined, {
-                    weekday: "long",
-                    timeZone: "UTC",
-                  })
-            }
-            budgetMinutes={selectedBudgetMinutes}
-            planId={plan.data?.id}
-            submittable={selectedDate <= todayISO}
+    <Shell>
+      <div className="grid grid-cols-1 gap-x-10 gap-y-8 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="flex min-w-0 flex-col gap-8">
+          <div>
+            <DayHeader
+              todayISO={todayISO}
+              examDate={plan.data.examDate}
+              day={days?.find((d) => d.date === todayISO)}
+              loading={work.loading}
+              msLeft={msLeft}
+              debrief={debrief}
+              timeZone={plan.data.timeZone ?? "UTC"}
+            />
+            {!online ? <OfflineLine /> : null}
+          </div>
+          <TodaysWork
+            day={days?.find((d) => d.date === selected)}
+            date={selected}
+            todayISO={todayISO}
+            planId={plan.data.id}
+            loading={work.loading}
+            error={work.error}
+            online={online}
+            onRetry={retryPrescription}
           />
-        </>
-      )}
-    </div>
-  );
-}
+          <WeekStrip
+            dates={week}
+            days={days}
+            todayISO={todayISO}
+            selected={selected}
+            onSelect={setSelected}
+            loading={work.loading}
+          />
+        </div>
 
-/** Two quantities at one scale, so the proportion is the message. */
-function SplitStack({ newCoverage, reviewWork }: { newCoverage: number; reviewWork: number }) {
-  const total = Math.max(1, newCoverage + reviewWork);
-  return (
-    <div className={styles.stack}>
-      <div className={styles.stackBar} aria-hidden="true">
-        <span
-          className={`${styles.stackNew} data-fill`}
-          style={{ width: `${(newCoverage / total) * 100}%` }}
-        />
-        <span
-          className={styles.stackReview}
-          style={{ width: `${(reviewWork / total) * 100}%` }}
-        />
+        {/* Separated by a hairline and space, not boxed. */}
+        <aside className="border-border flex min-w-0 flex-col gap-8 border-t pt-8 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-10">
+          <StandingPanel
+            pace={pace}
+            paceEmpty={!!curriculum.data && totalOutcomes === 0}
+            spark={spark}
+            paceQuery={{
+              error: paceState.error,
+              onRetry: retryPace,
+            }}
+            coveragePercent={progress.data?.coveragePercent}
+            coverageQuery={{ error: regionState(progress).error, onRetry: () => void progress.refetch() }}
+            mocks={mocks.data}
+            mocksQuery={{ error: regionState(mocks).error, onRetry: () => void mocks.refetch() }}
+            missed={missed}
+            examDate={plan.data.examDate}
+            todayISO={todayISO}
+            online={online}
+          />
+          <StudyNext
+            rows={rows}
+            byId={byId}
+            loading={nextState.some((r) => r.loading)}
+            error={nextState.find((r) => r.error)?.error}
+            online={online}
+            onRetry={() => {
+              void progress.refetch();
+              void curriculum.refetch();
+            }}
+          />
+        </aside>
       </div>
-      <p className={styles.stackLabel}>
-        <span className={`${styles.stackFigure} tnum`}>{newCoverage}</span> new
-        <span className={styles.stackSep} />
-        <span className={`${styles.stackFigure} tnum`}>{reviewWork}</span> review
-      </p>
-    </div>
+    </Shell>
   );
 }
 
-/** The 1 to 2 content-practice target for the remaining week. */
-function SplitBar({ content, practice }: { content: number; practice: number }) {
-  const total = Math.max(0.001, content + practice);
+function PageState({ title, body, children }: { title: string; body: string; children?: React.ReactNode }) {
   return (
-    <div className={styles.ratio} aria-hidden="true">
-      <span className={styles.ratioContent} style={{ width: `${(content / total) * 100}%` }} />
-      <span className={styles.ratioPractice} style={{ width: `${(practice / total) * 100}%` }} />
-    </div>
+    <section className="flex max-w-lg flex-col items-start gap-3 py-12">
+      <h1 className="text-[26px] leading-tight font-semibold">{title}</h1>
+      <p className="text-muted-foreground text-[14px]">{body}</p>
+      {children}
+    </section>
   );
 }

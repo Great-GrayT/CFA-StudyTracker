@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { useSubmitTask, type TaskSubmission } from "@/lib/hooks";
 import { ConfidenceMeter, ConfidencePicker } from "./confidence";
 import type { PrescribedDay, PrescribedTask } from "@/lib/types";
+import { postponedLabel } from "@/lib/today";
 import styles from "./day-plan.module.css";
 
 /**
@@ -243,18 +244,6 @@ function SubmitControl({ task, submit }: { task: PrescribedTask; submit: Submit 
   );
 }
 
-// Calendar dates from the API are UTC midnights; format them in UTC so the
-// day never shifts in a zone west of Greenwich.
-const shortDay = new Intl.DateTimeFormat("en-GB", {
-  weekday: "short",
-  day: "numeric",
-  month: "short",
-  timeZone: "UTC",
-});
-
-export function postponedLabel(iso: string): string {
-  return `Postponed from ${shortDay.format(new Date(`${iso}T00:00:00Z`)).replace(",", "")}`;
-}
 
 export function TaskRow({ task, onSubmit }: { task: PrescribedTask; onSubmit?: SubmitFor }) {
   // An off-plan cell is the record itself; undoing it would leave an empty
