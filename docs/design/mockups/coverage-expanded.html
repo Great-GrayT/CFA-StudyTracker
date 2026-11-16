@@ -1,0 +1,60 @@
+<h2>Coverage: tile with all 10 sections, and its expanded view</h2>
+<p class="subtitle">Left: the tile shows all 10 sections at once, no scroll (10 rows × 16px fit beside the plan tile). Right: ⤢ opens a large panel: sections open into modules (51 rows); the header row stays pinned while the list scrolls inside the panel, not the page.</p>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+ .ce{font:12px/1.5 Archivo,system-ui;display:grid;grid-template-columns:minmax(220px,300px) 1fr;gap:14px;--line:#8884;--mute:color-mix(in srgb,CanvasText 68%,Canvas);--bad:#c0353a;--ok:#167a4c}
+ @media (max-width:760px){.ce{grid-template-columns:1fr}}
+ .t{border:1px solid var(--line);border-radius:10px;padding:12px;min-width:0}
+ .t h3{font-size:13px;margin:0}.t p{color:var(--mute);margin:0 0 8px;font-size:12px}
+ .cov{display:grid;grid-template-columns:70px 1fr 34px;gap:5px 8px;align-items:center}
+ .stack{position:relative;display:flex;height:10px;border-radius:3px;background:#8881}
+ .stack i{display:block;height:100%}
+ .st1{background:#b9d0fb}.st2{background:#7ea4f4}.st3{background:#4d82ee}.st4{background:#1f56c9}
+ .tick{position:absolute;top:-3px;bottom:-3px;width:2px;background:CanvasText}
+ .d{font-size:11.5px;text-align:right}.bad{color:var(--bad)}.ok{color:var(--ok)}.mu{color:var(--mute)}
+ .panel{max-height:330px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+ table{width:100%;border-collapse:collapse}
+ th{position:sticky;top:0;background:Canvas;text-align:left;font-weight:500;color:var(--mute);padding:6px 8px;border-bottom:1px solid var(--line)}
+ td{padding:4px 8px;border-bottom:1px solid #8882;white-space:nowrap}
+ tr.sec td{font-weight:600;background:#8880}
+ .s{display:inline-block;width:12px;height:12px;border-radius:50%;border:1.5px solid #2f6fed;vertical-align:middle;margin-right:4px}
+ .s.d2{background:var(--ok);border-color:var(--ok)}.s.x{border-style:dashed;border-color:var(--bad)}
+ .tools{display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap}
+ .tools span{border:1px solid var(--line);border-radius:12px;padding:2px 9px;font-size:11.5px}
+ .tools .on{background:#2f6fed;color:#fff;border-color:#2f6fed}
+</style>
+<div class="ce">
+ <div class="t"><h3>Coverage</h3><p>Modules past each step. Tick = plan today. Right = modules ahead (+) or behind (−).</p>
+  <div class="cov">
+   <span>Quant</span><div class="stack"><i class="st1" style="width:29%"></i><i class="st2" style="width:14%"></i><div class="tick" style="left:43%"></div></div><span class="d mu">0</span>
+   <span>Economics</span><div class="stack"><div class="tick" style="left:0"></div></div><span class="d mu">0</span>
+   <span class="bad">FSA</span><div class="stack"><i class="st1" style="width:20%"></i><div class="tick" style="left:40%"></div></div><span class="d bad">−1</span>
+   <span>Corporate</span><div class="stack"><div class="tick" style="left:0"></div></div><span class="d mu">0</span>
+   <span>Equity</span><div class="stack"><div class="tick" style="left:0"></div></div><span class="d mu">0</span>
+   <span>Fixed inc.</span><div class="stack"><div class="tick" style="left:0"></div></div><span class="d mu">0</span>
+   <span>Derivatives</span><div class="stack"><div class="tick" style="left:0"></div></div><span class="d mu">0</span>
+   <span>Alternatives</span><div class="stack"><div class="tick" style="left:0"></div></div><span class="d mu">0</span>
+   <span>Portfolio</span><div class="stack"><div class="tick" style="left:0"></div></div><span class="d mu">0</span>
+   <span class="ok">Ethics</span><div class="stack"><i class="st1" style="width:22%"></i><i class="st2" style="width:11%"></i><div class="tick" style="left:22%"></div></div><span class="d ok">+1</span>
+  </div>
+ </div>
+ <div class="t"><h3>Coverage, expanded</h3><p>Desktop: large panel over the page. Phone: full-screen sheet. Sort and filter at top; list scrolls inside.</p>
+  <div class="tools"><span class="on">Curriculum order</span><span>Most behind first</span><span>Only behind</span></div>
+  <div class="panel"><table>
+   <tr><th>Module</th><th>1 Read</th><th>2 Questions</th><th>3 Review</th><th>4 Review Q</th><th>Mock</th></tr>
+   <tr class="sec"><td>▾ Quant · 2 of 7 past step 1</td><td></td><td></td><td></td><td></td><td class="mu">—</td></tr>
+   <tr><td>Basics of multiple regression</td><td><span class="s d2"></span>12 Nov</td><td><span class="s d2"></span>15 Nov</td><td><span class="s"></span>4 Jan</td><td><span class="s"></span>11 Jan</td><td></td></tr>
+   <tr><td>Evaluating regression fit</td><td><span class="s d2"></span>14 Nov</td><td class="bad"><span class="s x"></span>due 15 Nov · 61%</td><td><span class="s"></span>6 Jan</td><td><span class="s"></span>13 Jan</td><td></td></tr>
+   <tr><td>Model misspecification</td><td><span class="s"></span>19 Nov</td><td><span class="s"></span>21 Nov</td><td><span class="s"></span>8 Jan</td><td><span class="s"></span>15 Jan</td><td></td></tr>
+   <tr><td>Extensions of MR</td><td><span class="s"></span>23 Nov</td><td><span class="s"></span>25 Nov</td><td><span class="s"></span>10 Jan</td><td><span class="s"></span>17 Jan</td><td></td></tr>
+   <tr><td>Time-series analysis</td><td><span class="s"></span>27 Nov</td><td><span class="s"></span>30 Nov</td><td><span class="s"></span>12 Jan</td><td><span class="s"></span>19 Jan</td><td></td></tr>
+   <tr><td>Machine learning</td><td><span class="s"></span>2 Dec</td><td><span class="s"></span>4 Dec</td><td><span class="s"></span>14 Jan</td><td><span class="s"></span>21 Jan</td><td></td></tr>
+   <tr><td>Big data projects</td><td><span class="s"></span>5 Dec</td><td><span class="s"></span>7 Dec</td><td><span class="s"></span>16 Jan</td><td><span class="s"></span>23 Jan</td><td></td></tr>
+   <tr class="sec"><td>▸ Economics · 0 of 2</td><td></td><td></td><td></td><td></td><td class="mu">—</td></tr>
+   <tr class="sec"><td>▸ FSA · 1 of 5</td><td></td><td></td><td></td><td></td><td class="mu">—</td></tr>
+   <tr class="sec"><td>▸ Corporate · 0 of 4</td><td></td><td></td><td></td><td></td><td class="mu">—</td></tr>
+   <tr class="sec"><td>▸ Equity · 0 of 6</td><td></td><td></td><td></td><td></td><td class="mu">—</td></tr>
+   <tr class="sec"><td>▸ 5 more sections</td><td></td><td></td><td></td><td></td><td></td></tr>
+  </table></div>
+ </div>
+</div>

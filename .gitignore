@@ -25,6 +25,8 @@ apps/frontend/tsconfig.tsbuildinfo
 /CFA_Level_II_2027_Curriculum_Deep_Research.md
 /Mark_Meldrum_L2_2026_Inventory.md
 /UWorld_CFA_L2_Qbank_Inventory.md
+/Kaplan_CFA_L2_Qbank_Inventory.md
+/CFA_L2_Premium_Pack_Inventory.md
 
 # Scratch state from the brainstorming tool: a local server pid, its port and
 # token, and throwaway HTML. Machine-local, never useful to another checkout.

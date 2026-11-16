@@ -1,0 +1,45 @@
+<h2>Performance: question scores and the extra work they caused</h2>
+<p class="subtitle">Top: the Performance tile on the Pace page (gains an Extras column). Bottom: what ⤢ opens, per module, with the loop history behind every extra task.</p>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+ .pf{font:12px/1.5 Archivo,system-ui;--line:#8884;--mute:color-mix(in srgb,CanvasText 68%,Canvas);--bad:#c0353a;--ok:#167a4c;--amb:#9a6408}
+ .t{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px;min-width:0}
+ .t h3{font-size:13px;margin:0}.t p{color:var(--mute);margin:0 0 8px;font-size:12px}
+ .pr{display:grid;grid-template-columns:70px 1fr 1fr 1fr 110px;gap:6px 10px;align-items:center}
+ .h{color:var(--mute)}
+ .cell{display:flex;align-items:center;gap:6px;white-space:nowrap}
+ .meter{position:relative;flex:1;min-width:40px;height:8px;background:#8882;border-radius:4px}
+ .meter i{position:absolute;left:0;top:0;bottom:0;border-radius:4px}
+ .meter s{position:absolute;top:-3px;bottom:-3px;width:1.5px;background:CanvasText}
+ .na{color:var(--mute)}.bad{color:var(--bad)}.ok{color:var(--ok)}
+ a{color:inherit;text-underline-offset:2px;text-decoration-color:#8886}
+ .wrap{overflow:auto;max-height:300px;border:1px solid var(--line);border-radius:8px}
+ table{width:100%;border-collapse:collapse}
+ th{position:sticky;top:0;background:Canvas;text-align:left;font-weight:500;color:var(--mute);padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+ td{padding:5px 8px;border-bottom:1px solid #8882;vertical-align:top}
+ .loop{color:var(--mute);font-size:11.5px}
+ @media (max-width:760px){.pr{grid-template-columns:60px 1fr 1fr;}.pr .hide{display:none}}
+</style>
+<div class="pf">
+ <div class="t"><h3>Performance</h3><p>Accuracy per section and step. Tick = bar to clear (80% questions, 75% mocks). Extras = tasks the engine added because a bar was missed.</p><span style="position:absolute"></span>
+  <div class="pr">
+   <span class="h">Section</span><span class="h">Initial Q</span><span class="h">Review Q</span><span class="h hide">Mocks</span><span class="h">Extras</span>
+   <span>Quant</span><span class="cell"><span class="meter"><i style="width:79%;background:var(--amb)"></i><s style="left:80%"></s></span>79% · 104 q</span><span class="na cell">not yet</span><span class="na cell hide">not yet</span><a class="bad" href="#">2 tasks · 1.2 h</a>
+   <span class="bad">FSA</span><span class="cell"><span class="meter"><i style="width:64%;background:var(--bad)"></i><s style="left:80%"></s></span>64% · 30 q</span><span class="na cell">not yet</span><span class="na cell hide">not yet</span><a class="bad" href="#">1 task · 0.6 h</a>
+   <span>Ethics</span><span class="cell"><span class="meter"><i style="width:84%;background:var(--ok)"></i><s style="left:80%"></s></span>84% · 50 q</span><span class="na cell">not yet</span><span class="na cell hide">not yet</span><span class="na">none</span>
+   <span class="na">7 more</span><span class="na">not started</span><span></span><span class="hide"></span><span></span>
+  </div>
+  <p style="margin:10px 0 0">Total: 3 extra tasks · 1.8 h added this plan · 14 extra questions</p>
+ </div>
+
+ <div class="t"><h3>Performance, expanded</h3><p>Every module that has questions. Each extra task shows why it exists. Rows link to the module in Syllabus; extras link to the task on Today or Plan → Calendar.</p>
+  <div class="wrap"><table>
+   <tr><th>Module</th><th>Step</th><th>Answered</th><th>Correct</th><th>Accuracy</th><th>Enough?</th><th>Extras and why</th></tr>
+   <tr><td>QM · Basics of MR</td><td>2</td><td>40</td><td>34</td><td class="ok">85%</td><td class="ok">yes, 140 of 120 min</td><td class="na">passed first try</td></tr>
+   <tr><td>QM · Evaluating fit</td><td>2</td><td>40</td><td>24</td><td class="bad">61%</td><td class="ok">yes</td><td><a class="bad" href="#">+40 q UWorld, due 18 Nov</a><div class="loop">round 1 top-up: (24+n)/(40+n) ≥ 80% → n = 40</div></td></tr>
+   <tr><td>QM · Model misspec.</td><td>2</td><td>24</td><td>20</td><td class="ok">83%</td><td class="bad">no, 80 of 110 min</td><td><a class="bad" href="#">+10 q UWorld, due 20 Nov</a><div class="loop">adequacy top-up: 30 min short at 3 min/q</div></td></tr>
+   <tr><td>FSA · Intercorporate inv.</td><td>2</td><td>30</td><td>19</td><td class="bad">64%</td><td class="bad">no</td><td><a class="bad" href="#">+25 q Kaplan, due 19 Nov</a><div class="loop">80% top-up, UWorld bank used up → next package</div></td></tr>
+   <tr><td>Ethics · Code and Standards</td><td>2</td><td>50</td><td>42</td><td class="ok">84%</td><td class="ok">yes</td><td class="na">passed first try</td></tr>
+  </table></div>
+ </div>
+</div>
