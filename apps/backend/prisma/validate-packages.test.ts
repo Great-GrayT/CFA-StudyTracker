@@ -186,6 +186,37 @@ describe("validatePackageFile", () => {
   });
 });
 
+function withMock(extra: Record<string, unknown>, kind = "mock_session"): PackageFile {
+  const base = basePackageFile();
+  const r = corruptResource(base);
+  r.kind = kind;
+  Object.assign(r, extra);
+  return base;
+}
+
+describe("session kinds", () => {
+  test("mock_session without topicMix is rejected", () => {
+    expect(validatePackageFile(withMock({ questionCount: 44 })).join(" ")).toMatch(/topicMix/);
+  });
+
+  test("mock_session whose topicMix does not sum to questionCount is rejected", () => {
+    const errs = validatePackageFile(withMock({ questionCount: 44, topicMix: { "1": 10, "2": 10 } }));
+    expect(errs.join(" ")).toMatch(/topicMix/);
+  });
+
+  test("mock_session with a consistent topicMix is accepted", () => {
+    expect(validatePackageFile(withMock({ questionCount: 44, topicMix: { "1": 20, "2": 24 } }))).toEqual([]);
+  });
+
+  test("checkpoint without questionCount is rejected", () => {
+    expect(validatePackageFile(withMock({}, "checkpoint")).join(" ")).toMatch(/questionCount/);
+  });
+
+  test("quiz without questionCount is accepted", () => {
+    expect(validatePackageFile(withMock({}, "quiz"))).toEqual([]);
+  });
+});
+
 describe("isLevelFile", () => {
   test("accepts a curriculum level file", () => {
     const level = { id: "II", version: "2027", topics: [{ order: 1, readings: [] }] };

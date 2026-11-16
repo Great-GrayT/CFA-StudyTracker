@@ -147,6 +147,24 @@ describe("seedPackages", () => {
     expect(row!.durationSeconds).toBe(1860);
   });
 
+  test("duration, title and topicMix in the file are loaded", async () => {
+    await seedTinyLevel();
+    const withMix = mkdtempSync(join(tmpdir(), "seedpkg-mix-"));
+    const pf = packageFile(1024);
+    pf.units[0].resources[0].durationSeconds = 1493;
+    pf.units[0].resources[0].title = "Session title";
+    pf.units[0].resources[0].topicMix = { "1": 4 };
+    writeFileSync(join(withMix, "package-test.json"), JSON.stringify(pf));
+    writeFileSync(join(withMix, "crosswalk-test.json"), JSON.stringify(crosswalkFile()));
+    await seedPackages(withMix);
+    rmSync(withMix, { recursive: true, force: true });
+
+    const row = await db.packageResource.findFirst({ where: { ref: "qm/lm1/lecture/1" } });
+    expect(row!.durationSeconds).toBe(1493);
+    expect(row!.title).toBe("Session title");
+    expect(row!.topicMix).toEqual({ "1": 4 });
+  });
+
   test("seeding twice creates no duplicate rows", async () => {
     await seedTinyLevel();
     const first = await seedPackages(dir);

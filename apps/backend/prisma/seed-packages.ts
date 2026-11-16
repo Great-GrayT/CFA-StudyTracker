@@ -53,10 +53,9 @@ function filesMatching(dir: string, pattern: RegExp): string[] {
 /**
  * The resource facts a seed file owns, and may therefore overwrite on a reseed.
  *
- * `durationSeconds` is deliberately absent. It is measured by hand against the
- * provider's own player and lives nowhere else, while the seed file always
- * carries null. Including it here would silently destroy that measurement on
- * the next reseed, with no error and no way to notice.
+ * Optional measurements (`durationSeconds`, `stmtCount`, `title`, `topicMix`) are
+ * written only when the file carries them. Undefined leaves the column alone on
+ * update, so a duration measured by hand survives a reseed from a file without one.
  */
 function resourceFacts(r: ResourceFile, editionId: string, unitId: string | null) {
   return {
@@ -71,6 +70,10 @@ function resourceFacts(r: ResourceFile, editionId: string, unitId: string | null
     vignetteCount: r.vignetteCount ?? null,
     calcCount: r.calcCount ?? null,
     exhibitCount: r.exhibitCount ?? null,
+    durationSeconds: r.durationSeconds,
+    stmtCount: r.stmtCount,
+    title: r.title,
+    topicMix: r.topicMix,
     sourceNote: r.sourceNote ?? null,
   };
 }

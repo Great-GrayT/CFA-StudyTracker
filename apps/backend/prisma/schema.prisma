@@ -494,6 +494,7 @@ model PackageResource {
   calcCount     Int?
   stmtCount     Int?
   exhibitCount  Int?
+  topicMix      Json?
   sourceNote    String?
   edition       PackageEdition @relation(fields: [editionId], references: [id])
   unit          PackageUnit?   @relation(fields: [unitId], references: [id])

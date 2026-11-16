@@ -81,6 +81,18 @@ const RESOURCE_KIND_RULES: Record<
     required: new Set(["externalId", "sizeKb", "questionCount"]),
     forbidden: new Set(),
   },
+  mock_session: {
+    required: new Set(["externalId", "sizeKb", "questionCount", "topicMix"]),
+    forbidden: new Set(["exhibitCount"]),
+  },
+  quiz: {
+    required: new Set(["externalId", "sizeKb"]),
+    forbidden: new Set(["exhibitCount"]),
+  },
+  checkpoint: {
+    required: new Set(["externalId", "sizeKb", "questionCount"]),
+    forbidden: new Set(["exhibitCount"]),
+  },
 };
 
 function isValidDriveId(id: string): boolean {
@@ -116,6 +128,15 @@ function validateResource(resource: ResourceFile, unitRef: string): string[] {
     if (field in resource && resource[field] !== null && resource[field] !== undefined) {
       errors.push(
         `unit ${unitRef} (kind ${resource.kind}): forbidden field ${field} is present`
+      );
+    }
+  }
+
+  if (resource.kind === "mock_session" && resource.topicMix && resource.questionCount != null) {
+    const sum = Object.values(resource.topicMix).reduce((a, b) => a + b, 0);
+    if (sum !== resource.questionCount) {
+      errors.push(
+        `unit ${unitRef}: topicMix sums to ${sum} but questionCount is ${resource.questionCount}`,
       );
     }
   }

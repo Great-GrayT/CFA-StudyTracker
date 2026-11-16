@@ -9,7 +9,10 @@ export type ResourceKind =
   | "formula_sheet"
   | "worksheet"
   | "question_set"
-  | "answer_set";
+  | "answer_set"
+  | "mock_session"
+  | "quiz"
+  | "checkpoint";
 
 export interface ResourceFile {
   ref: string;
@@ -24,6 +27,10 @@ export interface ResourceFile {
   pageCount?: number;
   wordCount?: number;
   exhibitCount?: number;
+  stmtCount?: number;
+  title?: string;
+  /** Curriculum topic order (as string) to question count. */
+  topicMix?: Record<string, number>;
 }
 
 export interface LosRefinement {
