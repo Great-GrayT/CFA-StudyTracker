@@ -297,6 +297,72 @@ const SEMINAR_DEDUP_FIXTURE = [
 
 const SEM_IN_MODULE = "1EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE";
 
+const LENGTH_FIXTURE = [
+  "# Example Provider Inventory",
+  "",
+  "| Metric | Value |",
+  "|---|---|",
+  "| Total files | 6 (6 videos, 0 documents) |",
+  "",
+  "### Video types and counts",
+  "",
+  "| Type | Count |",
+  "|---|---|",
+  "| Video | 2 |",
+  "| Review | 1 |",
+  "| Seminar | 1 |",
+  "| Intro video | 2 |",
+  "",
+  "## 3. Getting started",
+  "",
+  "- [Example Orientation One.mp4](https://drive.google.com/file/d/1pppppppppppppppppppppppppppppppp/view) (0:09:07, 41 MB): watch first.",
+  "- [Example Orientation Two.mp4](https://drive.google.com/file/d/1PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP/view) (0:20:01, 74 MB): watch first.",
+  "",
+  "## 4. Topic by topic",
+  "",
+  "### Ethics",
+  "",
+  "#### LM1: Example Ethics One (notes p.4, ~5 pages)",
+  "",
+  "| File | Type | Length | Size |",
+  "|---|---|---|---|",
+  "| [Example ET LM1 Video.mp4](https://drive.google.com/file/d/1uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu/view) | Video | 0:19:50 | 65 MB |",
+  "| [Example ET LM2 Review.mp4](https://drive.google.com/file/d/1vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv/view) | Review | 24:53 | 68 MB |",
+  "",
+  "#### LM2: Example Ethics Two (notes p.9, ~55 pages)",
+  "",
+  "| File | Type | Length | Size |",
+  "|---|---|---|---|",
+  "| [Example ET LM2 Video.mp4](https://drive.google.com/file/d/1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/view) | Video | 1:00:00 | 900 MB |",
+  "",
+  "### Seminars index",
+  "",
+  "| Seminar | Topic / LM folder | Length | Size |",
+  "|---|---|---|---|",
+  "| [Example Seminar - Topic](https://drive.google.com/file/d/1AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/view) | Ethics | 1:01:06 | 143 MB |",
+  "",
+].join("\n");
+
+describe("extractMeldrum video lengths", () => {
+  it("reads durations, orientation bullets with a length, and files by their own LM", () => {
+    const { data, problems } = extractMeldrum(LENGTH_FIXTURE);
+    expect(problems).toEqual([]);
+    const orient = data!.editionResources.filter((r) => r.kind === "orientation");
+    expect(orient.map((r) => r.durationSeconds)).toEqual([547, 1201]);
+    expect(orient.map((r) => r.sizeKb)).toEqual([41 * 1024, 74 * 1024]);
+
+    const lm1 = data!.units.find((u) => u.ref === "et/lm1")!;
+    const lm2 = data!.units.find((u) => u.ref === "et/lm2")!;
+    expect(lm1.resources.map((r) => r.durationSeconds)).toEqual([1190]);
+    const review = lm2.resources.find((r) => r.kind === "review")!;
+    expect(review.durationSeconds).toBe(1493);
+    expect(lm2.resources.find((r) => r.kind === "lecture")!.durationSeconds).toBe(3600);
+
+    const seminar = data!.editionResources.find((r) => r.kind === "seminar")!;
+    expect(seminar.durationSeconds).toBe(3666);
+  });
+});
+
 describe("extractMeldrum", () => {
   it("a module's resources carry its facts", () => {
     const { data, problems } = extractMeldrum(FIXTURE);

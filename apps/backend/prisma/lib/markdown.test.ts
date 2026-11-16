@@ -2,6 +2,7 @@ import { describe, test, expect } from "vitest";
 import {
   parseCount,
   parseSizeKb,
+  parseLength,
   driveId,
   parseTable,
   parseTableAfter,
@@ -235,5 +236,17 @@ Final line 2`;
     );
 
     expect(result).toEqual(["Final line 1", "Final line 2"]);
+  });
+});
+
+describe("parseLength", () => {
+  test.each([
+    ["0:24:53", 1493],
+    ["24:53", 1493],
+    ["1:01:06", 3666],
+    ["n/a", null],
+    ["", null],
+  ])("parseLength(%j) is %j", (input, expected) => {
+    expect(parseLength(input)).toBe(expected);
   });
 });

@@ -50,6 +50,13 @@ export function parseSizeKb(text: string): number | null {
   return Math.round(num * factor);
 }
 
+/** "0:24:53" and "24:53" both mean 1493 seconds. Anything else, including "n/a", is null. */
+export function parseLength(text: string): number | null {
+  const m = (text ?? "").replace(/\*\*/g, "").trim().match(/^(?:(\d+):)?(\d{1,3}):(\d{2})$/);
+  if (!m) return null;
+  return (m[1] ? parseInt(m[1], 10) * 3600 : 0) + parseInt(m[2], 10) * 60 + parseInt(m[3], 10);
+}
+
 export function driveId(urlOrMarkdown: string): string | null {
   const fileMatch = urlOrMarkdown.match(/\/file\/d\/([^\/]+)\/view/);
   if (fileMatch) {

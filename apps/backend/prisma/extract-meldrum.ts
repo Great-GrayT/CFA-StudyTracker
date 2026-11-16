@@ -4,6 +4,7 @@ import { realpathSync } from "node:fs";
 import {
   parseCount,
   parseSizeKb,
+  parseLength,
   driveId,
   parseTable,
   linkTarget,
@@ -32,6 +33,7 @@ interface ResourceInfo {
   fileName: string;
   fileType: string;
   sizeKb: number;
+  durationSeconds: number | null;
   externalId: string | null;
   sourceTableLM?: number;
 }
@@ -166,10 +168,14 @@ function parseTypeHistogram(
 
 function extractOrientationVideos(
   markdown: string
-): { fileName: string; sizeKb: number; externalId: string }[] {
+): { fileName: string; sizeKb: number; durationSeconds: number | null; externalId: string }[] {
   const lines = sectionLines(markdown, /## .*[Gg]etting.*[Ss]tart/, /##/);
-  const videos: { fileName: string; sizeKb: number; externalId: string }[] =
-    [];
+  const videos: {
+    fileName: string;
+    sizeKb: number;
+    durationSeconds: number | null;
+    externalId: string;
+  }[] = [];
 
   for (const line of lines) {
     if (line.includes(".mp4")) {
@@ -181,13 +187,16 @@ function extractOrientationVideos(
         const id = driveId(url);
 
         if (id) {
-          const sizeMatch = line.match(/\((\d+(?:\.\d+)?)\s+(MB|GB|KB)\)/);
+          const sizeMatch = line.match(
+            /\((?:(\d+:\d{2}(?::\d{2})?),\s*)?(\d+(?:\.\d+)?)\s+(MB|GB|KB)\)/,
+          );
           if (sizeMatch) {
-            const sizeKb = parseSizeKb(sizeMatch[1] + " " + sizeMatch[2]);
+            const sizeKb = parseSizeKb(sizeMatch[2] + " " + sizeMatch[3]);
             if (sizeKb !== null) {
               videos.push({
                 fileName,
                 sizeKb,
+                durationSeconds: sizeMatch[1] ? parseLength(sizeMatch[1]) : null,
                 externalId: id,
               });
             }
@@ -207,6 +216,7 @@ function extractSeminarIndex(
   topicSlug?: string;
   lmNumber?: number;
   sizeKb: number;
+  durationSeconds: number | null;
   externalId: string;
 }[] {
   const lines = sectionLines(markdown, /Seminars index/, /## /);
@@ -223,6 +233,7 @@ function extractSeminarIndex(
     topicSlug?: string;
     lmNumber?: number;
     sizeKb: number;
+    durationSeconds: number | null;
     externalId: string;
   }[] = [];
 
@@ -246,6 +257,8 @@ function extractSeminarIndex(
       continue;
     }
 
+    const durationSeconds = parseLength(row["Length"] || "");
+
     const topicParts = topicCell.split("/").map((s) => s.trim());
     const topicSlug = topicToSlug(topicParts[0]);
 
@@ -256,6 +269,7 @@ function extractSeminarIndex(
         topicSlug,
         lmNumber: parseInt(lmMatch![1], 10),
         sizeKb,
+        durationSeconds,
         externalId: id,
       });
     } else {
@@ -263,6 +277,7 @@ function extractSeminarIndex(
         fileName: link.text,
         topicSlug,
         sizeKb,
+        durationSeconds,
         externalId: id,
       });
     }
@@ -361,6 +376,7 @@ function extractModules(
             const fileCell = row["File"] || "";
             const typeCell = row["Type"] || "";
             const sizeCell = row["Size"] || "";
+            const durationSeconds = parseLength(row["Length"] || "");
 
             const link = linkTarget(fileCell);
             if (link.text && link.url) {
@@ -372,6 +388,7 @@ function extractModules(
                   fileName: link.text,
                   fileType: typeCell,
                   sizeKb,
+                  durationSeconds,
                   externalId: id,
                   sourceTableLM: moduleInfo.lmNumber,
                 });
@@ -469,6 +486,9 @@ export function extractMeldrum(markdown: string): ExtractResult<PackageFile> {
         externalId: resource.externalId!,
         sizeKb: resource.sizeKb,
       };
+      if (resource.durationSeconds !== null) {
+        resourceFile.durationSeconds = resource.durationSeconds;
+      }
 
       if (lmFromFile !== null && lmFromFile !== resource.sourceTableLM) {
         resourceFile.sourceNote = `LM${resource.sourceTableLM} folder`;
@@ -507,12 +527,16 @@ export function extractMeldrum(markdown: string): ExtractResult<PackageFile> {
 
   // Add orientation videos
   for (let i = 0; i < orientationVideos.length; i++) {
-    editionResources.push({
+    const orientation: ResourceFile = {
       ref: `orientation/${i + 1}`,
       kind: "orientation",
       externalId: orientationVideos[i].externalId,
       sizeKb: orientationVideos[i].sizeKb,
-    });
+    };
+    if (orientationVideos[i].durationSeconds !== null) {
+      orientation.durationSeconds = orientationVideos[i].durationSeconds!;
+    }
+    editionResources.push(orientation);
     totalParsedVideos++;
   }
 
@@ -531,12 +555,14 @@ export function extractMeldrum(markdown: string): ExtractResult<PackageFile> {
       topicSeminarCounts[seminar.topicSlug!] =
         (topicSeminarCounts[seminar.topicSlug!] || 0) + 1;
 
-      editionResources.push({
+      const seminarRes: ResourceFile = {
         ref: `${seminar.topicSlug}/seminar/${topicSeminarCounts[seminar.topicSlug!]}`,
         kind: "seminar",
         externalId: seminar.externalId,
         sizeKb: seminar.sizeKb,
-      });
+      };
+      if (seminar.durationSeconds !== null) seminarRes.durationSeconds = seminar.durationSeconds;
+      editionResources.push(seminarRes);
       totalParsedVideos++;
     }
     // Skip module-level seminars - they're already counted in the module tables
