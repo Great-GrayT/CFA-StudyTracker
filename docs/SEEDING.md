@@ -277,16 +277,30 @@ without one.
 
 ### The files
 
-Four gitignored files in `prisma/seed-data/`, built by three scripts:
+Ten gitignored files in `prisma/seed-data/` (five packages, five crosswalks), built by these scripts:
 
 ```bash
 # one per provider, from its gitignored research document
 pnpm --filter backend exec tsx prisma/extract-meldrum.ts "<doc>.md" prisma/seed-data/package-mm-l2-2026.json
 pnpm --filter backend exec tsx prisma/extract-uworld.ts  "<doc>.md" prisma/seed-data/package-uworld-l2-2025.json
 
+pnpm --filter backend exec tsx prisma/extract-kaplan.ts  "<doc>.md" prisma/seed-data/package-kaplan-l2-2026.json
+pnpm --filter backend exec tsx prisma/extract-premium.ts "<doc>.md" prisma/seed-data/package-premium-l2-2026.json
+
+# synthetic CFA Institute LES package: hours apportioned from Meldrum core runtime
+pnpm --filter backend exec tsx prisma/build-les.ts prisma/seed-data/package-mm-l2-2026.json \
+  prisma/seed-data/crosswalk-mm-l2-2026.json prisma/seed-data/level-2.json \
+  prisma/seed-data/package-cfa-les-2027.json prisma/seed-data/crosswalk-cfa-les-2027.json
+
 # one crosswalk per provider, proposed then reviewed BY HAND once
 pnpm --filter backend exec tsx prisma/propose-crosswalk.ts ...
 ```
+
+Hand edits after `propose` (the proposer only matches exact titles): Kaplan R1
+fans out to Quant readings 1 to 4, R2 to R4 map to 5 to 7, R5 to R39 to 8 to 42,
+R40 to the Code (43), each Standard unit to its own reading (44 to 50), R42 to
+Application (51). Premium's Guidance for Standards I-VII unit fans out to 44 to
+50. The LES crosswalk is generated, one unit per reading, and needs no review.
 
 Each extractor refuses to write a file whose counts disagree with the
 document's own stated totals, so a silently truncated parse cannot reach the
@@ -305,7 +319,7 @@ The validator takes `--level <path>` when a crosswalk is staged somewhere other
 than beside its level file. Without it the tool cannot tell which curriculum to
 check against and says so rather than guessing.
 
-Expected on a correct load: 2 editions, 88 units, 230 resources, 100 mappings,
+Expected on a correct load: 5 editions, 232 units, 461 resources, 253 mappings,
 40 outcome refinements.
 
 ### Three things worth knowing

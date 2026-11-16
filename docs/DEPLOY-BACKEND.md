@@ -150,7 +150,7 @@ Expected on a clean load:
 
 ```
 Seed complete: 2 level(s), 20 topic(s), 153 reading(s), 722 LOS.
-Catalogue seed complete: 2 edition(s), 88 unit(s), 230 resource(s), 100 mapping(s), 40 outcome refinement(s).
+Catalogue seed complete: 5 edition(s), 232 unit(s), 461 resource(s), 253 mapping(s), 40 outcome refinement(s).
 ```
 
 ### Verify

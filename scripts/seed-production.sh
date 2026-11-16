@@ -46,6 +46,12 @@ REQUIRED=(
   package-uworld-l2-2025.json
   crosswalk-mm-l2-2026.json
   crosswalk-uworld-l2-2025.json
+  package-kaplan-l2-2026.json
+  package-premium-l2-2026.json
+  package-cfa-les-2027.json
+  crosswalk-kaplan-l2-2026.json
+  crosswalk-premium-l2-2026.json
+  crosswalk-cfa-les-2027.json
 )
 
 echo "Checking local seed data..."
