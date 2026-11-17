@@ -230,6 +230,18 @@ function slotsAllowedBy(preference: string, due: Slot[]): Slot[] {
   return due;
 }
 
+// The day's slot list, per plan, local date and schedule. Building it costs a state read and a
+// projection, so once it is known and every due slot is sent a sweep tick skips the plan outright.
+const DAY_SLOTS_MAX = 2000;
+const daySlotCache = new Map<string, DaySlot[]>();
+const daySlotKey = (planId: string, localDate: string, schedule: unknown) =>
+  `${planId}|${localDate}|${JSON.stringify(schedule)}`;
+function rememberDaySlots(key: string, slots: DaySlot[]) {
+  daySlotCache.delete(key);
+  daySlotCache.set(key, slots);
+  if (daySlotCache.size > DAY_SLOTS_MAX) daySlotCache.delete(daySlotCache.keys().next().value!);
+}
+
 export async function runCoachForPlan(
   planId: string,
   now: Date,
@@ -277,6 +289,19 @@ export async function runCoachForPlan(
     (s) => anchorWanted.emailSlots.includes(s) || anchorWanted.pushSlots.includes(s),
   );
 
+  // Cheap exit: with the day's list known, a plan whose due slots are all sent costs no more queries.
+  const slotKey = daySlotKey(planId, localDate, schedule);
+  const knownSlots = daySlotCache.get(slotKey);
+  if (knownSlots) {
+    const dueKnown = dueSlots(now, plan.timeZone, [], schedule, knownSlots);
+    const { emailSlots: e, pushSlots: p } = wanted(dueKnown);
+    const open = dueKnown.filter((s) => e.includes(s) || p.includes(s));
+    if (open.length === 0) {
+      skipped.push(...dueKnown);
+      return { sent, skipped, failed, pushSent, pushFailed };
+    }
+  }
+
   const weeklyAvailability = plan.weeklyAvailability as Record<string, number>;
   const streakDays = await computeStreakDays(planId, weeklyAvailability, plan.startDate, yesterday);
 
@@ -318,6 +343,7 @@ export async function runCoachForPlan(
   // The ladder's own list: anchors plus whatever midday and extras today's
   // state earns. Slots already sent are filtered per channel below and again by
   // the claim, so a recomputed list never re-sends.
+  rememberDaySlots(slotKey, slots);
   const due = dueSlots(now, plan.timeZone, [], schedule, slots);
   const { emailSlots, pushSlots } = wanted(due);
 
@@ -549,7 +575,8 @@ export async function buildCoachContext(
   try {
     const projection = await getProjection(planId, localDate);
     facts = ladderFacts(projection, daysToExam, plan.belowPassAccepted);
-  } catch {
+  } catch (err) {
+    console.error(`FUNC-coach: projection failed for plan ${planId}, coaching without engine facts`, err);
     facts = null;
   }
 
