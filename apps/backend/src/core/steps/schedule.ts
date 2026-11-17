@@ -47,6 +47,14 @@ export function gateDate(today: string, exam: string): string {
   return g >= today ? g : addDays(exam, -1);
 }
 
+// Step 3 must be done before the first mock week (week -4) opens, so mocks become eligible.
+// A plan born inside that window has no separate deadline: everything is due at the exam.
+export const MOCK_LEAD_DAYS = 28;
+export function step3Deadline(today: string, exam: string): string {
+  const d = addDays(exam, -MOCK_LEAD_DAYS);
+  return d >= today ? d : exam;
+}
+
 const ratio = (r: number, c: number) => (r <= EPS ? 0 : c <= EPS ? Infinity : r / c);
 
 const exempt = (i: WorkItem) => i.extraReason === "exemption-review" || i.extraReason === "mock-retest";
@@ -59,19 +67,22 @@ export function estimateLoad(p: {
 }): number {
   const k = p.crash ?? 1;
   const gate = gateDate(p.today, p.exam);
-  let r12 = 0, rall = mockDemandMinutes(p.today, p.exam, p.mockSessions, p.mockTrim ?? 0);
+  const d3 = step3Deadline(p.today, p.exam);
+  let r12 = 0, r123 = 0, rall = mockDemandMinutes(p.today, p.exam, p.mockSessions, p.mockTrim ?? 0);
   for (const w of p.work) {
     const m = w.minutes * crashFactor(w, k);
     rall += m;
     if (w.step <= 2) r12 += m;
+    if (w.step <= 3) r123 += m;
   }
-  let c12 = 0, call = 0;
+  let c12 = 0, c123 = 0, call = 0;
   for (const c of p.caps) {
     if (c.date < p.today || c.date >= p.exam) continue;
     call += c.minutes;
     if (c.date <= gate) c12 += c.minutes;
+    if (c.date < d3) c123 += c.minutes;
   }
-  return Math.max(ratio(r12, c12), ratio(rall, call));
+  return Math.max(ratio(r12, c12), ratio(r123, c123), ratio(rall, call));
 }
 
 type Node = {
@@ -87,6 +98,8 @@ function runPasses(p: {
 }): Run {
   const gate = gateDate(p.today, p.exam);
   const gateN = dayNum(gate);
+  const d3N = dayNum(step3Deadline(p.today, p.exam));
+  const examN = dayNum(p.exam);
   const idx = new Map<string, number>();
   p.work.forEach((w, i) => idx.set(w.id, i));
 
@@ -103,13 +116,16 @@ function runPasses(p: {
 
   const capSum = p.days.reduce((a, c) => a + c.minutes, 0);
   const c12 = p.days.reduce((a, c) => a + (c.date <= gate ? c.minutes : 0), 0);
-  let r12 = 0, rall = 0;
+  const d3 = step3Deadline(p.today, p.exam);
+  const c123 = p.days.reduce((a, c) => a + (c.date < d3 ? c.minutes : 0), 0);
+  let r12 = 0, r123 = 0, rall = 0;
   for (const w of p.work) {
     const m = w.minutes * crashFactor(w, p.k);
     rall += m;
     if (w.step <= 2) r12 += m;
+    if (w.step <= 3) r123 += m;
   }
-  const f = Math.max(ratio(r12, c12), ratio(rall, capSum));
+  const f = Math.max(ratio(r12, c12), ratio(r123, c123), ratio(rall, capSum));
   const weekCap = new Map<string, number>();
   for (const c of p.days) { const w = weekStart(c.date); weekCap.set(w, (weekCap.get(w) ?? 0) + c.minutes); }
 
@@ -135,7 +151,7 @@ function runPasses(p: {
       };
     });
     const modS2 = new Map<string, number>(), modS2Fin = new Map<string, string>();
-    let s2Rem = 0, s2Fin: string | null = null, s12Rem = 0;
+    let s2Rem = 0, s2Fin: string | null = null, s12Rem = 0, s3Left = 0;
     const weekUsed = new Map<string, number>();
     const pieces: Piece[] = [];
 
@@ -149,6 +165,7 @@ function runPasses(p: {
       if (nd.total > EPS) {
         if (nd.step === 2) { s2Rem++; modS2.set(nd.item.readingId, (modS2.get(nd.item.readingId) ?? 0) + 1); }
         if (nd.step <= 2) s12Rem++;
+        if (nd.step === 3) s3Left += nd.total;
       }
     });
 
@@ -168,22 +185,31 @@ function runPasses(p: {
     // Unused quota carries forward so a tiny load factor still yields >= 15 min pieces.
     let budget = 0;
     let lo = 0;
-    for (const day of p.days) {
+    for (let di = 0; di < p.days.length; di++) {
+      const day = p.days[di];
       const dN = dayNum(day.date);
       const wk = weekStart(day.date);
       budget += day.minutes * Math.min(ff, 1);
-      let dayLeft = Math.min(day.minutes, budget);
-      const start = dayLeft;
-      while (dayLeft > EPS) {
+      // Today always gets at least one piece, borrowed from later quota.
+      let dayLeft = Math.min(day.minutes, di === 0 && day.date === p.today ? Math.max(budget, MIN_PIECE) : budget);
+      let used = 0;
+      // Step 3 turns urgent once the days left before its deadline are only just enough to
+      // finish it at full capacity: policy delays and the quota throttle then yield to it,
+      // and it goes ahead of step 4.
+      const urgent = d3N < examN && dN < d3N && s3Left > EPS
+        && d3N - dN <= Math.ceil((s3Left * 1.2) / day.minutes) + 1;
+      while (dayLeft > EPS || (urgent && day.minutes - used > EPS)) {
         let pick = -1, take = 0;
         while (lo < prio.length && nodes[prio[lo]].rem <= EPS) lo++;
-        for (let q = lo; q < prio.length; q++) {
+        for (const only3 of urgent ? [true, false] : [false]) {
+         for (let q = lo; q < prio.length && pick < 0; q++) {
           const n = prio[q];
           const nd = nodes[n];
           if (nd.rem <= EPS || nd.pending > 0) continue;
+          if (only3 && nd.step !== 3) continue;
           if (nd.step <= 2 && dN > gateN) continue;
           let limit = Infinity;
-          if (nd.gated && !relax) {
+          if (nd.gated && !relax && !(urgent && nd.step === 3)) {
             if (p.reviewPolicy === "decay-triggered") {
               const fin = modS2Fin.get(nd.item.readingId);
               if (fin !== undefined && dN < dayNum(fin) + DECAY_DAYS) continue;
@@ -197,21 +223,28 @@ function runPasses(p: {
               if (limit <= EPS) continue;
             }
           }
-          const t = Math.min(nd.rem, dayLeft, limit);
-          // Only the piece that finishes an item may be shorter than the minimum.
-          if (t < MIN_PIECE - EPS && t < nd.rem - EPS) continue;
+          const room = only3 ? day.minutes - used : dayLeft;
+          if (room <= EPS) continue;
+          let t = Math.min(nd.rem, room, limit);
+          if (t < nd.rem - EPS) {
+            // Never strand a remainder under the minimum: leave at least MIN_PIECE behind.
+            if (nd.rem - t < MIN_PIECE - EPS) t = nd.rem - MIN_PIECE;
+            if (t < MIN_PIECE - EPS) continue;
+          }
           pick = n; take = t;
-          break;
+         }
         }
         if (pick < 0) break;
         const nd = nodes[pick];
         nd.rem -= take;
         dayLeft -= take;
         pieces.push({ date: day.date, n: pick, m: take });
+        if (nd.step === 3) s3Left -= take;
+        used += take;
         if (nd.gated && p.reviewPolicy === "weekly-interleave") weekUsed.set(wk, (weekUsed.get(wk) ?? 0) + take);
         if (nd.rem <= EPS) { nd.rem = 0; finishNode(pick, day.date); }
       }
-      budget -= start - dayLeft;
+      budget -= used;
     }
     return { pieces, nodes, unplaced: nodes.filter((n) => n.rem > EPS), load: f, relaxed: relax };
   }

@@ -85,7 +85,7 @@ describe("schedule", () => {
       r.tasks.filter((t) => t.item.id === "V").map((t) => t.date).sort()[0];
     const lastQ = (r: ReturnType<typeof schedule>) =>
       r.tasks.filter((t) => t.item.id === "Q").map((t) => t.date).sort().slice(-1)[0]!;
-    const wide = { exam: "2026-03-01", caps: caps("2026-01-01", 59, 120) };
+    const wide = { exam: "2026-04-15", caps: caps("2026-01-01", 104, 120) };
 
     it("decay-triggered waits 14 days after step 2", () => {
       const r = schedule(base({ ...wide, work: mk(), reviewPolicy: "decay-triggered" }));
@@ -142,9 +142,8 @@ describe("schedule", () => {
       }));
       const perWeek: Record<number, number> = {};
       for (const t of mockTasks(r)) perWeek[weekOf(t.date)] = (perWeek[weekOf(t.date)] ?? 0) + 1;
-      // Week -4 falls before steps 1-3 finish, so its generic mocks stay unplaced.
-      expect(perWeek).toEqual({ 3: 4, 2: 6, 1: 8 });
-      expect(r.unplaced.every((u) => u.id.startsWith("mock:generic:4:"))).toBe(true);
+      expect(perWeek).toEqual({ 4: 2, 3: 4, 2: 6, 1: 8 });
+      expect(r.unplaced).toEqual([]);
       const lastC = r.tasks.filter((t) => t.item.id === "C").map((t) => t.date).sort().slice(-1)[0]!;
       for (const t of mockTasks(r).filter((x) => x.item.mockRef !== null)) expect(t.date > lastC).toBe(true);
       expect(r.tasks.filter((t) => t.item.kind === "mock-review").length).toBeGreaterThanOrEqual(18);
@@ -193,5 +192,43 @@ describe("schedule mock gate", () => {
     const mocks = r.tasks.filter((t) => t.item.step === 5);
     expect(mocks.length).toBeGreaterThan(0);
     for (const m of mocks) expect(m.date > lastS1).toBe(true);
+  });
+
+  it("today gets work on a light plan", () => {
+    const r = schedule(base({ caps: caps("2026-01-01", 14, 600), work: [item({ minutes: 100 })] }));
+    expect(sumBy(r, "2026-01-01")).toBeGreaterThan(0);
+  });
+
+  it("no piece under 15 min unless the whole item is under 15", () => {
+    for (const mins of [100, 61, 47, 33, 16]) {
+      const r = schedule(base({
+        caps: caps("2026-01-01", 14, 90),
+        work: [item({ minutes: mins }), item({ minutes: 70, step: 2, kind: "questions" }), item({ minutes: 10 })],
+      }));
+      expect(r.unplaced).toEqual([]);
+      for (const t of r.tasks) {
+        if (t.item.minutes >= 15) expect(t.minutes).toBeGreaterThanOrEqual(15 - 1e-6);
+      }
+    }
+  });
+
+  it("step 3 finishes before the first mock week so week -4 mocks place", () => {
+    const exam = addDays("2026-01-01", 120);
+    const w = [1, 2, 3, 4].flatMap((n) => [
+      item({ id: `a${n}`, readingId: `r${n}`, minutes: 1000 }),
+      item({ id: `b${n}`, readingId: `r${n}`, minutes: 1000, step: 2, kind: "questions", after: [`a${n}`] }),
+      item({ id: `c${n}`, readingId: `r${n}`, minutes: 300, step: 3, kind: "review", after: [`b${n}`] }),
+    ]);
+    const sessions: MockSession[] = Array.from({ length: 20 }, (_, i) => ({
+      ref: `s${i}`, packageId: "pp", resourceId: `x${i}`, title: "m", questionCount: 90,
+      topicOrders: [(i % 4) + 1], done: false,
+    }));
+    const r = schedule(base({
+      exam, caps: caps("2026-01-01", 120, 360), work: w, mockTrim: 0, mockSessions: sessions,
+      modules: [1, 2, 3, 4].map((n) => ({ readingId: `r${n}`, topicOrder: n })), reviewPolicy: "decay-triggered",
+    }));
+    expect(r.unplaced).toEqual([]);
+    const s3 = r.tasks.filter((t) => t.item.step === 3).map((t) => t.date).sort().slice(-1)[0]!;
+    expect(s3 < addDays(exam, -28)).toBe(true);
   });
 });

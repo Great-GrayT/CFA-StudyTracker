@@ -19,8 +19,7 @@ const input = (o: Partial<EngineInput> = {}): EngineInput => ({
 describe("planSteps", () => {
   it("fresh plan: feasible, readiness 0, every module windowed, daily sums to tasks", () => {
     const r = planSteps(input());
-    // Step 3 lands late in a fully loaded plan, so the gated generic week -4 mocks stay unplaced.
-    expect(r.unplaced.every((u) => u.id.startsWith("mock:generic:4:"))).toBe(true);
+    expect(r.unplaced).toEqual([]);
     expect(r.metrics.readiness).toBe(0);
     expect(r.windows).toHaveLength(51);
     expect(r.windows[0].steps.map((s) => s.status)).toEqual(["planned", "planned", "planned", "planned"]);
@@ -86,5 +85,14 @@ describe("planSteps", () => {
     const a = planSteps(input());
     const b = planSteps(input());
     expect(JSON.stringify(a.tasks)).toBe(JSON.stringify(b.tasks));
+  });
+
+  it("light 4-module 120-day plan is feasible with all mocks placed", () => {
+    const cat = [1, 2, 3, 4].map((i) => mod(`r${i}`, i, 1));
+    const r = planSteps(input({
+      catalog: cat, caps: caps(TODAY, 120, 360), exam: addDays(TODAY, 120),
+    }));
+    expect(r.fit.feasible).toBe(true);
+    expect(r.unplaced).toEqual([]);
   });
 });

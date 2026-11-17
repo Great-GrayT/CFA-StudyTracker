@@ -114,8 +114,11 @@ export function placeMocks(p: {
       return pick;
     }
     for (const d of cands) {
-      const take = Math.min(rem.get(d)!, left);
-      if (take < MIN_PIECE - EPS && take < left - EPS) continue;
+      let take = Math.min(rem.get(d)!, left);
+      if (take < left - EPS) {
+        if (left - take < MIN_PIECE - EPS) take = left - MIN_PIECE;
+        if (take < MIN_PIECE - EPS) continue;
+      }
       put(d, take);
       if (left <= EPS) break;
     }
