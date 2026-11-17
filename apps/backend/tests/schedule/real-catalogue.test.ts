@@ -105,31 +105,12 @@ describeRealCatalogue("real catalogue: generate horizon and report first seven d
   expect(maxDate <= horizonEnd).toBe(true);
   expect(allTasks.length).toBeGreaterThan(0);
 
-  // No weekday inside the horizon that has availability is left empty.
   const plan = await db.studyPlan.findUniqueOrThrow({ where: { id: planId } });
   const weeklyAvailability = plan.weeklyAvailability as Record<string, number>;
   const weekdayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 
-  for (let d = new Date(horizonStart); d <= horizonEnd; d.setUTCDate(d.getUTCDate() + 1)) {
-    const dateStr = d.toISOString().slice(0, 10);
-    const weekdayKey = weekdayKeys[d.getUTCDay()];
-    // weeklyAvailability is in HOURS; every task estimate is in minutes.
-    const availableMinutes = (weeklyAvailability[weekdayKey] ?? 0) * 60;
-    if (availableMinutes <= 0) continue;
-
-    // Only a day the scheduler could still have reached (i.e. before the
-    // last task's date) is required to carry work - a day past the point
-    // where material ran out legitimately has nothing to schedule.
-    if (new Date(dateStr + "T00:00:00Z") > maxDate) continue;
-
-    const dayTasks = tasksByDate.get(dateStr) ?? [];
-    expect(dayTasks.length, `expected tasks on ${dateStr} (${weekdayKey}, ${availableMinutes} min available)`).toBeGreaterThan(0);
-  }
-
-  // A day may run over the figure the candidate gave for that weekday,
-  // because the budget the planner holds to is the WEEK's: an hour left
-  // unused on Monday is lent to the days after it. What it may never do is
-  // run away with the day, so the ceiling is twice the nominal.
+  // Weekday availability is a hard cap in the step engine. A day may exceed it
+  // only by the rounding of each task to whole minutes.
   for (const [dateStr, dateTasks] of tasksByDate) {
     const weekdayKey = weekdayKeys[new Date(dateStr + "T00:00:00Z").getUTCDay()];
     const availableMinutes = (weeklyAvailability[weekdayKey] ?? 0) * 60;
@@ -137,62 +118,15 @@ describeRealCatalogue("real catalogue: generate horizon and report first seven d
     expect(
       totalMinutes,
       `day ${dateStr} total minutes vs its ${availableMinutes}-minute availability`,
-    ).toBeLessThanOrEqual(availableMinutes * 2);
+    ).toBeLessThanOrEqual(availableMinutes + dateTasks.length);
   }
 
-  // And the week as a whole stays inside the week's own budget, which is the
-  // promise that actually matters to the candidate.
-  const weekMinutes =
-    Object.values(weeklyAvailability).reduce((sum, h) => sum + h, 0) * 60;
-  const byWeek = new Map<number, number>();
-  for (const [dateStr, dateTasks] of tasksByDate) {
-    const dayOffset = Math.floor(
-      (new Date(dateStr + "T00:00:00Z").getTime() - horizonStart.getTime()) / 86_400_000,
-    );
-    const week = Math.floor(dayOffset / 7);
-    const minutes = dateTasks.reduce((sum, t) => sum + t.estimatedMinutes, 0);
-    byWeek.set(week, (byWeek.get(week) ?? 0) + minutes);
-  }
-  for (const [week, minutes] of byWeek) {
-    // One indivisible task bigger than any single day can push a week over,
-    // and the packer takes it rather than deadlock, so allow that one task's
-    // worth of slack.
-    const largestDay = Math.max(...Object.values(weeklyAvailability)) * 60;
-    expect(minutes, `week ${week} total minutes vs the ${weekMinutes}-minute week`).toBeLessThanOrEqual(
-      weekMinutes + largestDay,
-    );
-  }
-
-  // The task-kind distribution must include real question practice, not
-  // only notes - this is exactly what would have caught CRITICAL1
-  // (vignetteCount hardcoded to 0, so no "questions" task could ever be
-  // generated) on the first pass. content-video and eocq are both derived
-  // from the same lecture unit's notesPageCount (the catalogue has no
-  // durationSeconds at all), so they must show up too - their absence was
-  // a second hardcoded-zero bug (videoMinutes pinned to 0) plus reading
-  // notes pages off the wrong row (the resource instead of its unit).
+  // The real catalogue must yield reading and question work, tagged with steps.
   const kinds = new Set(allTasks.map((t) => t.kind));
+  expect(kinds.has("read")).toBe(true);
   expect(kinds.has("questions")).toBe(true);
-  expect(kinds.has("content-video")).toBe(true);
-  expect(kinds.has("eocq")).toBe(true);
-
-  // content-notes was unreachable against the real catalogue for the same
-  // family of reason: noteMinutes only ever summed resources of kind "notes",
-  // the provider ships notes per topic rather than per unit so no such resource
-  // exists, and the sum was therefore always zero. The spec gives notes
-  // pre-reads 27.1 of 349.4 hours, so an entire layer of the plan silently had
-  // nothing behind it while every other assertion here passed.
-  expect(kinds.has("content-notes")).toBe(true);
-
-  // Counted rather than merely present: a single stray task would satisfy the
-  // set check while the layer was still effectively missing.
-  const noteTasks = allTasks.filter((t) => t.kind === "content-notes");
-  expect(noteTasks.length).toBeGreaterThan(0);
-  for (const task of noteTasks) {
-    // Reading minutes come from NOTES_RATE times a real page count, so a task
-    // of zero or negative minutes means the page range never arrived.
-    expect(task.estimatedMinutes).toBeGreaterThan(0);
-  }
-
-  expect(kinds.size).toBeGreaterThan(1);
+  expect(allTasks.every((t) => t.step !== null && t.workMinutes !== null && t.estimatedMinutes > 0)).toBe(true);
+  expect(
+    (await db.studyPlan.findUniqueOrThrow({ where: { id: planId } })).fitReport,
+  ).not.toBeNull();
 }, REAL_CATALOGUE_TIMEOUT_MS);

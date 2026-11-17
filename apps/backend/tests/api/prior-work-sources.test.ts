@@ -30,31 +30,26 @@ async function setup() {
   const videoPkg = await pkgWith("lecture");
   const bankPkg = await pkgWith("question_set");
 
-  // A module whose first pass has both notes and video, found from a real
-  // schedule so the test does not hard-code catalogue shape.
+  // A module that has step 1 reading and step 2 practice, found from a real
+  // dry-run schedule so the test does not hard-code catalogue shape.
   const { generateHorizon } = await import("../../src/lib/FUNC-schedule");
-  await generateHorizon(planId, TODAY, { horizonDays: 30 });
-  const baseline = await db.planTask.findMany({ where: { planId } });
-  const readingId = baseline
-    .map((t) => t.readingIds[0])
-    .find((id) => {
-      const mine = baseline.filter((t) => t.readingIds[0] === id);
-      return mine.some((t) => t.kind === "content-video") && mine.some((t) => t.kind === "content-notes");
-    })!;
+  const plan0 = await generateHorizon(planId, TODAY, { dryRun: true });
+  const readingId = plan0.catalog.find((m) => {
+    const mine = plan0.tasks.filter((t) => t.item.readingId === m.readingId);
+    return mine.some((t) => t.item.step === 1) && mine.some((t) => t.item.step === 2);
+  })!.readingId;
   const reading = await db.reading.findUniqueOrThrow({ where: { id: readingId } });
   return { planId, token: user.token, videoPkg, bankPkg, readingId, topicId: reading.topicId };
 }
 
-/** Rebuild from scratch and return this module's first-pass minutes by kind. */
-async function minutesByKind(planId: string, readingId: string): Promise<Record<string, number>> {
+/** Whole-schedule uncrashed work minutes of this module by step. */
+async function minutesByStep(planId: string, readingId: string): Promise<Record<number, number>> {
   const { generateHorizon } = await import("../../src/lib/FUNC-schedule");
-  await db.planTask.deleteMany({ where: { planId } });
-  await generateHorizon(planId, TODAY, { horizonDays: 30 });
-  const tasks = (await db.planTask.findMany({ where: { planId } })).filter((t) =>
-    t.readingIds.includes(readingId),
-  );
-  const out: Record<string, number> = {};
-  for (const t of tasks) out[t.kind] = (out[t.kind] ?? 0) + t.estimatedMinutes;
+  const r = await generateHorizon(planId, TODAY, { dryRun: true });
+  const out: Record<number, number> = {};
+  for (const t of r.tasks) {
+    if (t.item.readingId === readingId) out[t.item.step] = (out[t.item.step] ?? 0) + t.workMinutes;
+  }
   return out;
 }
 
@@ -71,56 +66,45 @@ describe.runIf(hasRealSeedData())("prior work by material", () => {
     expect(ids("videos")).not.toContain(bankPkg);
   }, 120_000);
 
-  test("notes read keep the video; videos watched keep the notes", async () => {
+  test("declaring notes or videos credits step 1 and leaves the later steps", async () => {
     const { planId, token, videoPkg, readingId, topicId } = await setup();
-    const before = await minutesByKind(planId, readingId);
+    const before = await minutesByStep(planId, readingId);
+    expect(before[1]).toBeGreaterThan(0);
 
     await POST(req(planId, token, { declarations: [{ topicId, readingId, notesFrom: videoPkg }] }));
-    const notesOnly = await minutesByKind(planId, readingId);
-    expect(notesOnly["content-notes"] ?? 0).toBe(0);
-    // The rest of the reading is untouched. Compared as a total: the packer
-    // puts rounding drift on the largest chunk, which can move a few minutes'
-    // label between video and seminar at a slice boundary.
-    const rest = (m: Record<string, number>) => (m["content-video"] ?? 0) + (m["seminar"] ?? 0);
-    expect(Math.abs(rest(notesOnly) - rest(before))).toBeLessThanOrEqual(1);
-    expect(notesOnly["content-video"]).toBeGreaterThan(0);
+    const after = await minutesByStep(planId, readingId);
+    expect(after[1] ?? 0).toBe(0);
+    expect(after[2]).toBeCloseTo(before[2]!, 0);
+    expect(after[3]).toBeCloseTo(before[3]!, 0);
 
     await POST(req(planId, token, { declarations: [{ topicId, readingId, videosFrom: videoPkg }] }));
-    const videoOnly = await minutesByKind(planId, readingId);
-    expect(videoOnly["content-video"] ?? 0).toBe(0);
-    expect(videoOnly["content-notes"]).toBe(before["content-notes"]);
+    expect((await minutesByStep(planId, readingId))[1] ?? 0).toBe(0);
   }, 240_000);
 
-  test("reading the CFA curriculum counts as the notes", async () => {
+  test("reading the CFA curriculum counts as step 1", async () => {
     const { planId, token, readingId, topicId } = await setup();
     await POST(req(planId, token, { declarations: [{ topicId, readingId, notesFrom: "cfai-curriculum" }] }));
-    const after = await minutesByKind(planId, readingId);
-    expect(after["content-notes"] ?? 0).toBe(0);
+    expect((await minutesByStep(planId, readingId))[1] ?? 0).toBe(0);
     const rows = await db.studyLogEntry.findMany({ where: { planId, selfDeclared: true } });
     expect(rows.every((r) => r.packageId === "cfai-curriculum")).toBe(true);
   }, 120_000);
 
-  test("questions from the scheduled bank settle that share of it; from elsewhere only inform mastery", async () => {
+  test("declared questions become step 2 attempts: half the bank at 60% leaves a top-up", async () => {
     const { planId, token, bankPkg, readingId, topicId } = await setup();
-    const practice = (m: Record<string, number>) => (m["questions"] ?? 0) + (m["answer-review"] ?? 0);
     const bank = await db.packageResource.findFirstOrThrow({
       where: { kind: "question_set", unit: { readings: { some: { readingId } } } },
     });
-    const before = practice(await minutesByKind(planId, readingId));
+    const before = (await minutesByStep(planId, readingId))[2]!;
     expect(before).toBeGreaterThan(0);
 
     const half = Math.floor(bank.questionCount! / 2);
     await POST(req(planId, token, {
       declarations: [{ topicId, readingId, questions: { from: bankPkg, answered: half, accuracyPercent: 60 } }],
     }));
-    const after = practice(await minutesByKind(planId, readingId));
-    expect(after).toBeLessThan(before * 0.65);
-    expect(after).toBeGreaterThan(before * 0.35);
-
-    await POST(req(planId, token, {
-      declarations: [{ topicId, readingId, questions: { from: "cfai-curriculum", answered: 40, accuracyPercent: 60 } }],
-    }));
-    expect(practice(await minutesByKind(planId, readingId))).toBe(before);
+    const after = (await minutesByStep(planId, readingId))[2]!;
+    // 60% misses the 80% bar, so step 2 is not done, but the attempts reduce the work still owed.
+    expect(after).toBeGreaterThan(0);
+    expect(after).toBeLessThan(before);
   }, 240_000);
 
   test("confidence is stored on every row the declaration writes", async () => {

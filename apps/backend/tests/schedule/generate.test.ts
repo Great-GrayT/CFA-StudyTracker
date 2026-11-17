@@ -47,9 +47,12 @@ describe("generateHorizon", () => {
   test("yesterday's undone tasks are frozen, not deleted", async () => {
     const { planId } = await setupPlanWithCatalogue();
     await generateHorizon(planId, "2027-01-04");
-    await generateHorizon(planId, "2027-01-05");
+    // The engine spreads work evenly, so the first working day is not necessarily today.
+    const first = await db.planTask.findFirstOrThrow({ where: { planId }, orderBy: { date: "asc" } });
+    const next = new Date(first.date.getTime() + 86_400_000).toISOString().slice(0, 10);
+    await generateHorizon(planId, next);
     const yesterday = await db.planTask.findMany({
-      where: { planId, date: new Date("2027-01-04") },
+      where: { planId, date: first.date },
     });
     expect(yesterday.length).toBeGreaterThan(0);
     expect(yesterday.every((t) => t.frozen)).toBe(true);
@@ -100,104 +103,49 @@ describe("generateHorizon", () => {
     expect(still!.logEntryId).toBe("fake-log-entry");
   });
 
-  test("a candidate's observed pace recalibrates future estimates", async () => {
-    const { planId } = await setupPlanWithCatalogue();
-    await generateHorizon(planId, "2027-01-04");
-
-    const before = await db.planTask.findMany({
-      where: { planId },
-      orderBy: [{ date: "asc" }, { order: "asc" }],
-    });
-    expect(before.length).toBeGreaterThan(0);
-
-    // A single day's availability caps any one task's size, so comparing
-    // one slot's estimatedMinutes before/after can't see calibration at
-    // work (a 4x-bigger reading just becomes four day-sized split pieces
-    // instead of one - each individual piece still ~the same size). The
-    // reading's TOTAL planned minutes, summed across however many pieces
-    // it now takes, is what calibration actually moves.
-    const firstTask = before[0];
-    const firstReadingId = firstTask.readingIds[0];
-    const totalBefore = before
-      .filter((t) => t.readingIds.includes(firstReadingId))
-      .reduce((sum, t) => sum + t.estimatedMinutes, 0);
-
-    // Mark the first task done at 4x its estimate - the calibration
-    // clamp's own ceiling - so the pace signal is unmistakable.
-    await db.planTask.update({
-      where: { id: firstTask.id },
-      data: { status: "done", actualMinutes: firstTask.estimatedMinutes * 4 },
-    });
-
-    await generateHorizon(planId, "2027-01-04");
-
-    const after = await db.planTask.findMany({
-      where: { planId },
-      orderBy: [{ date: "asc" }, { order: "asc" }],
-    });
-    const totalAfter = after
-      .filter((t) => t.readingIds.includes(firstReadingId))
-      .reduce((sum, t) => sum + t.estimatedMinutes, 0);
-
-    // If calibration were discarded (k stuck at its default of 1, as
-    // before this fix), this reading's total planned minutes would stay
-    // exactly what they were the first time. With the observed 4x-slower
-    // pace wired through factorFor, the reading's total must grow.
-    expect(totalAfter).toBeGreaterThan(totalBefore);
-  });
-
   test("changing the weekly hours replans the days ahead and leaves the worked ones alone", async () => {
     // A plan edited mid-week must keep the days already studied exactly as
     // they were and spread the new budget over what is left. Backdating the
     // change would rewrite history the candidate can see in their own log.
     const { planId } = await setupPlanWithCatalogue();
+    // A short runway so the even spread uses weekends too; otherwise the check below proves nothing.
+    await db.studyPlan.update({ where: { id: planId }, data: { examDate: new Date("2027-03-01") } });
 
     await generateHorizon(planId, "2027-01-04");
-    // A day passes, so 2027-01-04 is now behind the candidate.
-    await generateHorizon(planId, "2027-01-05");
+    const first = await db.planTask.findFirstOrThrow({ where: { planId }, orderBy: { date: "asc" } });
+    const iso = (d: Date) => d.toISOString().slice(0, 10);
+    // A day passes, so the first working day is now behind the candidate.
+    const today = iso(new Date(first.date.getTime() + 86_400_000));
+    await generateHorizon(planId, today);
 
     const pastBefore = await db.planTask.findMany({
-      where: { planId, date: new Date("2027-01-04T00:00:00Z") },
+      where: { planId, date: first.date },
       orderBy: { order: "asc" },
     });
     expect(pastBefore.length).toBeGreaterThan(0);
     expect(pastBefore.every((t) => t.frozen)).toBe(true);
 
-    // The busiest day still ahead. Totalling the remaining days instead would
-    // measure the wrong thing: a bigger budget packs the same finite material
-    // into FEWER days, so the tail of the horizon empties and the sum falls
-    // even though every day that still has work got bigger.
-    const busiestDayAhead = async () => {
-      const rows = await db.planTask.findMany({
-        where: { planId, date: { gt: new Date("2027-01-05T00:00:00Z") } },
-      });
-      const byDate = new Map<string, number>();
-      for (const t of rows) {
-        const key = t.date.toISOString().slice(0, 10);
-        byDate.set(key, (byDate.get(key) ?? 0) + t.estimatedMinutes);
-      }
-      return Math.max(0, ...byDate.values());
-    };
-    const busiestBefore = await busiestDayAhead();
+    const isWeekend = (d: Date) => [0, 6].includes(d.getUTCDay());
+    const weekendTasks = async () =>
+      (await db.planTask.findMany({ where: { planId, date: { gte: new Date(`${today}T00:00:00Z`) } } }))
+        .filter((t) => isWeekend(t.date)).length;
+    expect(await weekendTasks()).toBeGreaterThan(0);
 
-    // Three times the hours, from today forward.
+    // Weekends off, from today forward.
     await db.studyPlan.update({
       where: { id: planId },
-      data: {
-        weeklyAvailability: { mon: 6, tue: 6, wed: 6, thu: 6, fri: 6, sat: 3, sun: 3 },
-      },
+      data: { weeklyAvailability: { mon: 2, tue: 2, wed: 2, thu: 2, fri: 2, sat: 0, sun: 0 } },
     });
-    await generateHorizon(planId, "2027-01-05");
+    await generateHorizon(planId, today);
 
     const pastAfter = await db.planTask.findMany({
-      where: { planId, date: new Date("2027-01-04T00:00:00Z") },
+      where: { planId, date: first.date },
       orderBy: { order: "asc" },
     });
     expect(pastAfter.map((t) => `${t.kind}:${t.estimatedMinutes}`)).toEqual(
       pastBefore.map((t) => `${t.kind}:${t.estimatedMinutes}`),
     );
-
-    expect(await busiestDayAhead()).toBeGreaterThan(busiestBefore);
+    expect(await weekendTasks()).toBe(0);
   });
 
   test("a task with a non-pending status survives regeneration even without a logEntryId", async () => {
@@ -291,49 +239,5 @@ describe("generateHorizon", () => {
     const still = await db.planTask.findUnique({ where: { id: testTask.id } });
     expect(still).not.toBeNull();
     expect(still!.timerStartedAt?.getTime()).toBe(timerStartedAt.getTime());
-  });
-
-  // Pinned to effort-return on purpose. orderingStrategy is no longer a
-  // candidate-facing choice, but inside effort-return it is still what reaches
-  // ordering.ts, and that mode is the one this assertion needs: it keeps both
-  // runs on the same packer, so the task COUNT is held constant and only the
-  // sequence moves. Switching planMode instead would change the packer as
-  // well, and a changed row count cannot distinguish a real reorder from a
-  // differently shaped plan, which is the whole point of the check below.
-  test("changing the ordering strategy actually reorders the plan's modules", async () => {
-    const { planId } = await setupPlanWithCatalogue();
-    await db.studyPlan.update({
-      where: { id: planId },
-      data: { planMode: "effort-return" },
-    });
-    await generateHorizon(planId, "2027-01-04");
-
-    const before = await db.planTask.findMany({
-      where: { planId },
-      orderBy: [{ date: "asc" }, { order: "asc" }],
-    });
-    const beforeRefs = before.map((t) => t.readingIds[0] ?? null);
-
-    // Change strategy and regenerate - should not error.
-    await db.studyPlan.update({
-      where: { id: planId },
-      data: { orderingStrategy: "weight" },
-    });
-
-    const result = await generateHorizon(planId, "2027-01-04");
-
-    const after = await db.planTask.findMany({
-      where: { planId },
-      orderBy: [{ date: "asc" }, { order: "asc" }],
-    });
-    const afterRefs = after.map((t) => t.readingIds[0] ?? null);
-
-    // created===0 and an unchanged row count cannot tell a real reorder
-    // apart from no effect at all - regeneration used to treat an occupied
-    // (date, order) slot as "stable" without checking whether the module
-    // assigned there changed. The module sequence itself must differ.
-    expect(afterRefs).not.toEqual(beforeRefs);
-    expect(after.length).toBe(before.length);
-    expect(result.created).toBe(0);
   });
 });

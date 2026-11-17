@@ -131,7 +131,20 @@ function refLabel(ref: string): string {
  */
 const CFA_STUDY_TOOLS = "https://cfaprogram.cfainstitute.org/studytools";
 
+// Step-engine tasks name their resources directly; the verb comes from the resource kind.
+const RESOURCE_ACTIONS: Record<string, string> = {
+  lecture: "Watch",
+  eocq: "Watch",
+  seminar: "Watch",
+  review: "Watch",
+  notes: "Read",
+  question_set: "Questions",
+  answer_set: "Review answers",
+  mock_session: "Sit",
+};
+
 const ACTIONS: Record<string, string> = {
+  read: "Read",
   "content-notes": "Read",
   "content-video": "Watch",
   eocq: "Watch",
@@ -223,6 +236,14 @@ export async function getPrescription(
   });
   const packageNameById = new Map(offPlanPackages.map((p) => [p.id, p.name]));
 
+  // Engine tasks carry resourceIds; one query resolves them all.
+  const resourceIdSet = [...new Set(tasks.flatMap((t) => t.resourceIds))];
+  const namedResources = await db.packageResource.findMany({
+    where: { id: { in: resourceIdSet } },
+    include: { unit: true, edition: { include: { package: true } } },
+  });
+  const namedById = new Map(namedResources.map((r) => [r.id, r]));
+
   const byDate = new Map<string, PrescribedTask[]>();
 
   for (const task of tasks) {
@@ -247,7 +268,24 @@ export async function getPrescription(
     const materials: PrescribedMaterial[] = [];
     const action = ACTIONS[task.kind] ?? "Study";
 
-    if (task.kind === "content-notes") {
+    if (task.resourceIds.length > 0) {
+      // Resolved from the engine's own picks, so a task never names a package the plan did not choose.
+      let remaining = task.questionTarget;
+      for (const id of task.resourceIds) {
+        const res = namedById.get(id);
+        if (!res) continue;
+        const isQuestions = res.kind === "question_set";
+        const base = res.title ?? (res.unit ? `${refLabel(res.unit.ref)} ${res.kind.replace("_", " ")}` : res.kind.replace("_", " "));
+        materials.push({
+          action: RESOURCE_ACTIONS[res.kind] ?? action,
+          label: base,
+          packageName: res.edition.package.name,
+          url: driveUrl(res.externalId, res.sourceUrl),
+          questionCount: isQuestions ? (remaining ?? res.questionCount) : null,
+        });
+        remaining = null;
+      }
+    } else if (task.kind === "content-notes") {
       for (const ur of candidateUnits) {
         const start = ur.unit.notesPageStart;
         const count = ur.unit.notesPageCount;

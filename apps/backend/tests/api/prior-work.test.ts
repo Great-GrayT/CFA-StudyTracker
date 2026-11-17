@@ -195,31 +195,25 @@ describe("prior work declared at onboarding", () => {
   });
 
   // The reason this intake exists: a candidate who arrives having already read
-  // a topic area should get question-only days for it, not be told to read it
-  // again.
-  test("a declared reading yields question-only days for that material", async () => {
+  // a topic area is not told to read it again; step 1 is credited and only the
+  // later steps remain.
+  test("a declared reading removes step 1 for that material and keeps the later steps", async () => {
     const { planId, token, topicId } = await ownedPlan();
+    const before = await generateHorizon(planId, "2027-01-04", { dryRun: true });
     await POST_PRIOR_WORK(
       priorWorkRequest(planId, token, {
         declarations: [{ topicId, read: true, questionsAnswered: 0, accuracyPercent: null }],
       }),
     );
-    await generateHorizon(planId, "2027-01-04");
+    const after = await generateHorizon(planId, "2027-01-04", { dryRun: true });
 
-    const declaredReadings = await db.reading.findMany({
-      where: { topicId },
-      select: { id: true },
-    });
-    const declaredIds = new Set(declaredReadings.map((r) => r.id));
-
-    const tasks = await db.planTask.findMany({
-      where: { planId },
-      orderBy: [{ date: "asc" }, { order: "asc" }],
-    });
-    const forDeclared = tasks.filter((t) => declaredIds.has(t.readingIds[0] ?? ""));
-
-    expect(forDeclared.length).toBeGreaterThan(0);
-    const practice = new Set(["questions", "answer-review", "eocq"]);
-    expect(forDeclared.every((t) => practice.has(t.kind))).toBe(true);
+    const declaredIds = new Set(
+      (await db.reading.findMany({ where: { topicId }, select: { id: true } })).map((r) => r.id),
+    );
+    const step1 = (r: typeof after) =>
+      r.tasks.filter((t) => declaredIds.has(t.item.readingId) && t.item.step === 1);
+    expect(step1(before).length).toBeGreaterThan(0);
+    expect(step1(after)).toHaveLength(0);
+    expect(after.tasks.some((t) => declaredIds.has(t.item.readingId) && t.item.step === 3)).toBe(true);
   });
 });

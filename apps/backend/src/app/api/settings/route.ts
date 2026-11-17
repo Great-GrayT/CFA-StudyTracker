@@ -49,8 +49,7 @@ export async function GET(req: Request): Promise<Response> {
     }),
   ]);
 
-  // The derived figures (what ratio the calendar actually supports, where the
-  // injection cap currently sits, which readings were written off) exist only
+  // The derived figures (whether the plan fits the calendar and how) exist only
   // as the output of a generation, so this asks for one without writing it.
   // A plan that cannot be projected still renders: the constants are the part
   // the candidate came here to change, and they do not depend on it.
@@ -74,14 +73,11 @@ export async function GET(req: Request): Promise<Response> {
       defaults: DEFAULT_TUNING,
       modes: PLAN_MODES,
       policies: REVIEW_POLICIES,
-      requestedQuestionMultiple: parsed.tuning.firstPassQuestionMultiple,
-      effectiveQuestionMultiple: null,
-      calendarTooShort: false,
-      injectionCap: null,
-      reviewReason: null,
-      coverageProjection: null,
-      writeOffs: [],
-      underPractised: [],
+      stepPriority: plan.stepPriority,
+      lesReadingHours: plan.lesReadingHours,
+      belowPassAccepted: plan.belowPassAccepted,
+      // Filled from a dry run below; null when the plan cannot be projected.
+      fit: null,
     };
 
     try {
@@ -89,14 +85,7 @@ export async function GET(req: Request): Promise<Response> {
         timeZone: plan.timeZone ?? "UTC",
       }).format(new Date());
       const projection = await generateHorizon(plan.id, today, { dryRun: true });
-      planner.requestedQuestionMultiple = projection.requestedQuestionMultiple;
-      planner.effectiveQuestionMultiple = projection.effectiveQuestionMultiple;
-      planner.calendarTooShort = projection.calendarTooShort;
-      planner.injectionCap = projection.injectionCap;
-      planner.reviewReason = projection.reviewReason;
-      planner.coverageProjection = projection.coverageProjection;
-      planner.writeOffs = projection.writeOffs;
-      planner.underPractised = projection.underPractised;
+      planner.fit = projection.fit;
     } catch (err) {
       // A plan with no catalogue attached, or a prerequisite cycle in the
       // seed, must not take the settings screen down with it. The candidate

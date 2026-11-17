@@ -1,63 +1,46 @@
-// Videos watched before tasks could be ticked come from the study log. A low
-// star rating keeps the notes: the video is credited, the notes are not.
+// Reading declared before the plan existed settles step 1 by confidence: 3 or more
+// credits it whole, 2 or less keeps a half-length replacement.
 import { beforeEach, describe, expect, test } from "vitest";
 import { resetDb } from "../helpers/test-db";
 import { hasRealSeedData, setupPlanWithRealCatalogue } from "../helpers/fixtures";
 import { generateHorizon } from "../../src/lib/FUNC-schedule";
 import { db } from "../../src/lib/db";
 
-const HORIZON = { horizonDays: 30 };
+const TODAY = "2027-01-04";
 
-const minutesOf = (tasks: { kind: string; estimatedMinutes: number }[], kind: string) =>
-  tasks.filter((t) => t.kind === kind).reduce((s, t) => s + t.estimatedMinutes, 0);
+const step1Minutes = (r: Awaited<ReturnType<typeof generateHorizon>>, readingId: string) =>
+  r.tasks
+    .filter((t) => t.item.readingId === readingId && t.item.step === 1)
+    .reduce((s, t) => s + t.workMinutes, 0);
 
-async function planWithLog(log: { questionsAnswered: number }) {
+async function declare(confidence: number) {
   const { planId } = await setupPlanWithRealCatalogue();
   const plan = await db.studyPlan.findUniqueOrThrow({ where: { id: planId } });
-  await generateHorizon(planId, "2027-01-04", HORIZON);
-
-  // First module, in plan order, that has both notes and a video to watch.
-  const baseline = await db.planTask.findMany({ where: { planId }, orderBy: [{ date: "asc" }, { order: "asc" }] });
-  const readingId = baseline
-    .map((t) => t.readingIds[0])
-    .find((id) => {
-      const mine = baseline.filter((t) => t.readingIds[0] === id);
-      return mine.some((t) => t.kind === "content-video") && mine.some((t) => t.kind === "content-notes");
-    });
-  expect(readingId).toBeDefined();
-  const before = baseline.filter((t) => t.readingIds.includes(readingId!));
-
+  const before = await generateHorizon(planId, TODAY, { dryRun: true });
+  const readingId = before.catalog.find((m) => step1Minutes(before, m.readingId) > 0)!.readingId;
   const los = await db.lOS.findFirstOrThrow({ where: { readingId } });
   await db.studyLogEntry.create({
     data: {
-      userId: plan.userId,
-      planId,
-      losId: los.id,
-      confidence: 1,
-      questionsAnswered: log.questionsAnswered,
+      userId: plan.userId, planId, losId: los.id, confidence, selfDeclared: true, declaredWatched: true,
       date: new Date("2027-01-03T00:00:00Z"),
     },
   });
-  // Rebuild from scratch so the log is the only thing that differs.
-  await db.planTask.deleteMany({ where: { planId } });
-  await generateHorizon(planId, "2027-01-04", HORIZON);
-  const after = (await db.planTask.findMany({ where: { planId } })).filter((t) =>
-    t.readingIds.includes(readingId!),
-  );
-  return { before, after };
+  const after = await generateHorizon(planId, TODAY, { dryRun: true });
+  return { base: step1Minutes(before, readingId), now: step1Minutes(after, readingId) };
 }
 
-describe.runIf(hasRealSeedData())("videos watched before the plan could record them", () => {
+describe.runIf(hasRealSeedData())("reading declared before the plan could record it", () => {
   beforeEach(resetDb);
 
-  test("a logged study session with no questions credits the video and keeps the notes whole", async () => {
-    const { before, after } = await planWithLog({ questionsAnswered: 0 });
-    expect(minutesOf(after, "content-video")).toBe(0);
-    expect(minutesOf(after, "content-notes")).toBe(minutesOf(before, "content-notes"));
+  test("a confident declaration credits step 1 whole", async () => {
+    const { base, now } = await declare(4);
+    expect(base).toBeGreaterThan(0);
+    expect(now).toBe(0);
   }, 120_000);
 
-  test("a logged practice session leaves the video on the plan", async () => {
-    const { before, after } = await planWithLog({ questionsAnswered: 6 });
-    expect(minutesOf(after, "content-video")).toBe(minutesOf(before, "content-video"));
+  test("a low-confidence declaration keeps half of step 1", async () => {
+    const { base, now } = await declare(1);
+    expect(now).toBeGreaterThan(0);
+    expect(now).toBeCloseTo(base / 2, 0);
   }, 120_000);
 });

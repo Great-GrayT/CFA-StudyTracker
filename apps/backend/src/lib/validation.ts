@@ -126,7 +126,11 @@ export const patchPlanSchema = z.object({
   // them. An unrecognised value is a 400 rather than a silent fallback: a
   // candidate who picked a mode from a list is entitled to get that mode or an
   // error, never a different one.
-  planMode: z.enum(["effort-return", "curriculum-strict", "curriculum-topic"]).optional(),
+  planMode: z
+    .enum(["effort-return", "curriculum-strict", "curriculum-topic"])
+    // effort-return is gone; a client that still sends it gets the default order.
+    .transform((m) => (m === "effort-return" ? ("curriculum-topic" as const) : m))
+    .optional(),
   reviewPolicy: z
     .enum(["decay-triggered", "after-coverage", "weekly-interleave", "fixed-date"])
     .optional(),

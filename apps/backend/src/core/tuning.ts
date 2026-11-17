@@ -1,13 +1,15 @@
 // Pure tuning parser. No DB, no HTTP, no framework.
 // Every constant the planner reads is the candidate's to set, so every
 // constant arrives here as untrusted JSON and leaves as a complete Tuning.
+// The step engine fixes its own rates; only the order, the review policy and
+// the answer-review reading speed remain tunable.
 //
 // parseTuning never throws. A planner that refuses to generate because one
 // field in a settings form was out of range is worse than a planner that
 // generates with the default and says which field it ignored, so a bad field
 // costs the candidate that field and nothing else.
 
-export type PlanMode = "effort-return" | "curriculum-strict" | "curriculum-topic";
+export type PlanMode = "curriculum-strict" | "curriculum-topic";
 
 export type ReviewPolicy =
   | "decay-triggered"
@@ -15,11 +17,10 @@ export type ReviewPolicy =
   | "weekly-interleave"
   | "fixed-date";
 
-export const PLAN_MODES: readonly PlanMode[] = [
-  "effort-return",
-  "curriculum-strict",
-  "curriculum-topic",
-];
+export const PLAN_MODES: readonly PlanMode[] = ["curriculum-strict", "curriculum-topic"];
+
+// The old engine's mode. Clients may still send it; it means curriculum-topic now.
+const LEGACY_MODE = "effort-return";
 
 export const REVIEW_POLICIES: readonly ReviewPolicy[] = [
   "decay-triggered",
@@ -32,32 +33,8 @@ export type Tuning = {
   planMode: PlanMode;
   reviewPolicy: ReviewPolicy;
   reviewStartDate: string | null;
-
-  // First pass
-  firstPassQuestionMultiple: number;
-  questionMultipleFloor: number;
-  minNewUnitReadMinutes: number;
   /** Words a minute when reading worked solutions; sizes answer review. */
   answerReviewWordsPerMinute: number;
-
-  // Review phase
-  reviewQuestionMultiple: number;
-  coverageDeadlineWeeks: number;
-  weeklyInterleaveShare: number;
-  reviewInjectionCapShare: number;
-
-  // Mastery
-  masteryWeightAccuracy: number;
-  masteryWeightCoverage: number;
-  masteryWeightConfidence: number;
-  masteryHalfLifeDays: number;
-  masteryBar: number;
-  readingWriteOffBar: number;
-
-  // Evidence triggers
-  confidenceTriggerValue: number;
-  accuracyFloor: number;
-  accuracyMinSample: number;
 };
 
 export type RejectedField = {
@@ -71,59 +48,12 @@ export const DEFAULT_TUNING: Tuning = {
   planMode: "curriculum-topic",
   reviewPolicy: "decay-triggered",
   reviewStartDate: null,
-
-  firstPassQuestionMultiple: 2.0,
-  questionMultipleFloor: 0.5,
-  minNewUnitReadMinutes: 15,
-  // Measured on the UWorld L2 banks (about 273 explanation words per
-  // question), 200 makes review about 46% of answering time.
   answerReviewWordsPerMinute: 200,
-
-  reviewQuestionMultiple: 4.0,
-  coverageDeadlineWeeks: 6,
-  weeklyInterleaveShare: 0.2,
-  reviewInjectionCapShare: 0.35,
-
-  masteryWeightAccuracy: 0.6,
-  masteryWeightCoverage: 0.25,
-  masteryWeightConfidence: 0.15,
-  masteryHalfLifeDays: 45,
-  masteryBar: 0.75,
-  readingWriteOffBar: 0.85,
-
-  confidenceTriggerValue: 1,
-  accuracyFloor: 0.5,
-  accuracyMinSample: 12,
 };
 
 export const TUNING_RANGES: Record<string, { min: number; max: number }> = {
-  firstPassQuestionMultiple: { min: 0.5, max: 6.0 },
-  questionMultipleFloor: { min: 0.2, max: 2.0 },
-  minNewUnitReadMinutes: { min: 5, max: 60 },
   answerReviewWordsPerMinute: { min: 100, max: 400 },
-
-  reviewQuestionMultiple: { min: 1.0, max: 10.0 },
-  coverageDeadlineWeeks: { min: 1, max: 20 },
-  weeklyInterleaveShare: { min: 0.05, max: 0.5 },
-  reviewInjectionCapShare: { min: 0.1, max: 0.8 },
-
-  masteryWeightAccuracy: { min: 0, max: 1 },
-  masteryWeightCoverage: { min: 0, max: 1 },
-  masteryWeightConfidence: { min: 0, max: 1 },
-  masteryHalfLifeDays: { min: 7, max: 365 },
-  masteryBar: { min: 0.3, max: 0.95 },
-  readingWriteOffBar: { min: 0.5, max: 0.98 },
-
-  confidenceTriggerValue: { min: 1, max: 3 },
-  accuracyFloor: { min: 0.2, max: 0.8 },
-  accuracyMinSample: { min: 5, max: 100 },
 };
-
-const WEIGHT_FIELDS = [
-  "masteryWeightAccuracy",
-  "masteryWeightCoverage",
-  "masteryWeightConfidence",
-] as const;
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -180,7 +110,9 @@ export function parseTuning(raw: unknown): {
 
   if ("planMode" in raw) {
     const given = raw.planMode;
-    if (typeof given === "string" && (PLAN_MODES as readonly string[]).includes(given)) {
+    if (given === LEGACY_MODE) {
+      tuning.planMode = DEFAULT_TUNING.planMode;
+    } else if (typeof given === "string" && (PLAN_MODES as readonly string[]).includes(given)) {
       tuning.planMode = given as PlanMode;
     } else {
       rejected.push({
@@ -236,22 +168,6 @@ export function parseTuning(raw: unknown): {
       reason: "the fixed-date policy needs a date, so the policy fell back",
     });
     tuning.reviewPolicy = DEFAULT_TUNING.reviewPolicy;
-  }
-
-  // Normalise last, after clamping, so the candidate may express the weights
-  // in whatever units they find natural (6, 2.5, 1.5 reads as 0.60, 0.25,
-  // 0.15) and the formula still receives a convex combination.
-  const weightSum = WEIGHT_FIELDS.reduce((sum, f) => sum + tuning[f], 0);
-  if (weightSum <= 0) {
-    rejected.push({
-      field: "masteryWeights",
-      given: WEIGHT_FIELDS.map((f) => tuning[f]),
-      usedInstead: null,
-      reason: "all three mastery weights were zero, so there was nothing to normalise",
-    });
-    for (const f of WEIGHT_FIELDS) tuning[f] = DEFAULT_TUNING[f];
-  } else {
-    for (const f of WEIGHT_FIELDS) tuning[f] = tuning[f] / weightSum;
   }
 
   return { tuning, rejected };

@@ -41,6 +41,8 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const WEEKDAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
 
 const KIND_LABELS: Record<string, string> = {
+  read: "Reading",
+  "answer-review": "Answer review",
   "content-notes": "Notes",
   "content-video": "Lecture",
   eocq: "End-of-chapter questions",

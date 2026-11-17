@@ -91,29 +91,25 @@ describe("plan mode, review policy and tuning over the API", () => {
 
   test("PATCH stores an out of range constant as its clamped value and reports it", async () => {
     const { planId, token } = await ownedPlan();
-    const res = await PATCH_PLAN(patchRequest(planId, token, { tuning: { masteryBar: 1.4 } }));
+    const res = await PATCH_PLAN(patchRequest(planId, token, { tuning: { answerReviewWordsPerMinute: 900 } }));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.rejectedTuning.map((r: { field: string }) => r.field)).toContain("masteryBar");
+    expect(body.rejectedTuning.map((r: { field: string }) => r.field)).toContain("answerReviewWordsPerMinute");
   });
 
-  test("one bad constant does not cost the candidate the good ones in the same request", async () => {
+  test("PATCH maps the removed effort-return mode to curriculum-topic instead of rejecting it", async () => {
     const { planId, token } = await ownedPlan();
-    const res = await PATCH_PLAN(
-      patchRequest(planId, token, {
-        tuning: { firstPassQuestionMultiple: 3, masteryBar: 1.4 },
-      }),
-    );
+    const res = await PATCH_PLAN(patchRequest(planId, token, { planMode: "effort-return" }));
     expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.tuning.firstPassQuestionMultiple).toBe(3);
-    expect(body.tuning.masteryBar).toBe(0.75);
+    expect(await db.studyPlan.findUniqueOrThrow({ where: { id: planId } })).toMatchObject({
+      planMode: "curriculum-topic",
+    });
   });
 
   test("PATCH rejects a tuning field that is not a number at all", async () => {
     const { planId, token } = await ownedPlan();
     const res = await PATCH_PLAN(
-      patchRequest(planId, token, { tuning: { masteryHalfLifeDays: "soon" } }),
+      patchRequest(planId, token, { tuning: { answerReviewWordsPerMinute: "soon" } }),
     );
     expect(res.status).toBe(400);
   });
@@ -157,36 +153,26 @@ describe("plan mode, review policy and tuning over the API", () => {
       planMode: "curriculum-topic",
       reviewPolicy: "decay-triggered",
     });
-    expect(body.planner.ranges.masteryBar).toEqual({ min: 0.3, max: 0.95 });
-    expect(body.planner.defaults.masteryBar).toBe(0.75);
-    expect(body.planner.modes).toEqual([
-      "effort-return",
-      "curriculum-strict",
-      "curriculum-topic",
-    ]);
+    expect(body.planner.ranges.answerReviewWordsPerMinute).toEqual({ min: 100, max: 400 });
+    expect(body.planner.defaults.answerReviewWordsPerMinute).toBe(200);
+    expect(body.planner.modes).toEqual(["curriculum-strict", "curriculum-topic"]);
     expect(body.planner.policies).toEqual([
       "decay-triggered",
       "after-coverage",
       "weekly-interleave",
       "fixed-date",
     ]);
-    expect(body.planner).toHaveProperty("requestedQuestionMultiple");
-    expect(body.planner).toHaveProperty("effectiveQuestionMultiple");
-    expect(body.planner).toHaveProperty("calendarTooShort");
-    expect(body.planner).toHaveProperty("injectionCap");
-    expect(body.planner).toHaveProperty("reviewReason");
-    expect(body.planner).toHaveProperty("writeOffs");
-    expect(body.planner).toHaveProperty("underPractised");
+    expect(body.planner.fit).toMatchObject({ feasible: expect.any(Boolean) });
+    expect(body.planner.lesReadingHours).toBe(200);
   });
 
   test("GET settings reflects a candidate's saved overrides", async () => {
     const { planId, token } = await ownedPlan();
     await PATCH_PLAN(
-      patchRequest(planId, token, { tuning: { masteryHalfLifeDays: 90, masteryBar: 0.6 } }),
+      patchRequest(planId, token, { tuning: { answerReviewWordsPerMinute: 250 } }),
     );
     const body = await (await GET_SETTINGS(settingsRequest(token))).json();
-    expect(body.planner.tuning.masteryHalfLifeDays).toBe(90);
-    expect(body.planner.tuning.masteryBar).toBe(0.6);
+    expect(body.planner.tuning.answerReviewWordsPerMinute).toBe(250);
   });
 
   test("a user with no active plan still gets a settings page rather than an error", async () => {

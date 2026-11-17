@@ -76,9 +76,11 @@ describe("PATCH /api/plans/:id/tasks/:taskId", () => {
     await patch(user, planId, tasks[0]!.id, { status: "done", confidence: 3, actualMinutes: 30 });
     const res = await patch(user, planId, tasks[0]!.id, { status: "pending" });
     expect(res.status).toBe(200);
-    const row = await db.planTask.findUniqueOrThrow({ where: { id: tasks[0]!.id } });
-    expect(row.status).toBe("pending");
-    expect(row.actualMinutes).toBeNull();
+    // The rebuild after an undo may replace the now-pending row with a fresh plan,
+    // so check that nothing keeps the recorded state rather than that the row survives.
+    const row = await db.planTask.findUnique({ where: { id: tasks[0]!.id } });
+    expect(row === null || (row.status === "pending" && row.actualMinutes === null)).toBe(true);
+    expect(await db.planTask.count({ where: { planId, OR: [{ status: { not: "pending" } }, { actualMinutes: { not: null } }] } })).toBe(0);
   });
 
   test("a task dated after today in the plan's zone cannot be submitted", async () => {

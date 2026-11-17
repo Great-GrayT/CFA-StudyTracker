@@ -1,7 +1,7 @@
 // Long-range projection of a plan: the whole span to the exam, bucketed into
 // periods, with each period's minutes split by stage of studying.
 //
-// Writes nothing. It runs generateHorizon in dry-run mode over the full span
+// Writes nothing. It reads the whole-schedule result of generateHorizon in dry-run mode
 // rather than reimplementing the pipeline, because a long-range view computed
 // independently would eventually contradict the fourteen day horizon it sits
 // above, and the contradiction would be invisible until a candidate noticed
@@ -9,6 +9,7 @@
 
 import { db } from "./db";
 import { generateHorizon } from "./FUNC-schedule";
+import type { FitReport } from "../core/steps";
 
 /**
  * The five stages a minute of study can belong to.
@@ -37,19 +38,12 @@ export type CampaignPeriod = {
 export type Campaign = {
   periods: CampaignPeriod[];
   examDate: string;
-  coverageProjection: { date: string; slackDays: number } | null;
-  requestedQuestionMultiple: number;
-  budgetQuestionMultiple: number;
-  calendarTooShort: boolean;
+  fit: FitReport;
   planMode: string;
   reviewPolicy: string;
 };
 
-// Task kinds the first pass emits for reading. The review phase emits "review"
-// and nothing else for its reading, which is what makes the two separable from
-// the task rows alone.
-const FIRST_PASS_READING = new Set(["content-notes", "content-video", "seminar"]);
-const QUESTION_KINDS = new Set(["questions", "answer-review", "eocq"]);
+// Stage by engine step: steps 1 and 3 are reading, 2 and 4 are questions.
 
 function toISODate(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -134,28 +128,19 @@ export async function projectCampaign(
     return index < periods.length ? index : -1;
   };
 
-  for (const day of projection.days) {
-    const index = indexFor(day.date);
+  for (const task of projection.tasks) {
+    const index = indexFor(task.date);
     if (index < 0) continue;
     const bucket = periods[index].minutes;
-
-    for (const task of day.tasks) {
-      const minutes = task.estimatedMinutes;
-      if (task.kind === "review") {
-        bucket.reviewReading += minutes;
-      } else if (FIRST_PASS_READING.has(task.kind)) {
-        bucket.firstPassReading += minutes;
-      } else if (QUESTION_KINDS.has(task.kind)) {
-        // Question tasks carry no phase marker of their own. A day that holds
-        // review reading is a day the review phase was active on, so its
-        // questions belong to review. This is an attribution at the day level
-        // rather than the task level, which is the resolution the chart shows
-        // anyway.
-        const dayHasReview = day.tasks.some((t) => t.kind === "review");
-        if (dayHasReview) bucket.reviewQuestions += minutes;
-        else bucket.firstPassQuestions += minutes;
-      }
-    }
+    const minutes = Math.round(task.minutes);
+    const { step, kind } = task.item;
+    if (kind === "mock" || kind === "mock-review") {
+      // Planned mocks; logged ones are added below from their own table.
+      bucket.mocks += minutes;
+    } else if (step === 1 && kind === "read") bucket.firstPassReading += minutes;
+    else if (step === 3) bucket.reviewReading += minutes;
+    else if (step === 2) bucket.firstPassQuestions += minutes;
+    else if (step === 4) bucket.reviewQuestions += minutes;
   }
 
   for (const [date, minutes] of mockMinutesByDate) {
@@ -166,10 +151,7 @@ export async function projectCampaign(
   return {
     periods,
     examDate,
-    coverageProjection: projection.coverageProjection,
-    requestedQuestionMultiple: projection.requestedQuestionMultiple,
-    budgetQuestionMultiple: projection.effectiveQuestionMultiple,
-    calendarTooShort: projection.calendarTooShort,
+    fit: projection.fit,
     planMode: projection.planMode,
     reviewPolicy: projection.reviewPolicy,
   };

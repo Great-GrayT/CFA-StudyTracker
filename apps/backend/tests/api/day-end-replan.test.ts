@@ -88,6 +88,12 @@ test("a rebuild after the day has closed never adds work to the closed day", asy
   const tomorrow = new Date(Date.UTC(y!, m! - 1, d! + 1)).toISOString().slice(0, 10);
   const onToday = () =>
     db.planTask.count({ where: { planId, date: new Date(`${today}T00:00:00Z`) } });
+  // A short runway makes the engine's even spread dense enough to use every day,
+  // including today; on a long one it skips days and the control below proves nothing.
+  await db.studyPlan.update({
+    where: { id: planId },
+    data: { examDate: new Date(Date.UTC(y!, m! - 1, d! + 45)) },
+  });
 
   // The day has closed: the horizon was built from tomorrow.
   await scheduleModule.generateHorizon(planId, tomorrow);

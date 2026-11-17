@@ -465,6 +465,8 @@ export async function setupPlanWithCatalogue(): Promise<{ planId: string }> {
           ref: `topic${i + 1}/lm${j + 1}/lecture/1`,
           kind: "lecture",
           pageCount: 20,
+          // The step engine sizes reading from runtime, so a lecture needs a duration.
+          durationSeconds: 3600,
           externalId: `lex${i}${j}`,
         },
       });
@@ -636,20 +638,12 @@ export async function setupPlanWithRealCatalogue(): Promise<{ planId: string }> 
  * weeklyAvailability is > 0 minutes, so a longer lookback would otherwise
  * always find at least one missed day).
  *
- * `breakRegeneration` makes two of this catalogue's readings prerequisites of
- * each other, so a streak-triggered generateHorizon call genuinely throws on
- * the cycle (synchronously, inside sequenceUnits, before its transaction
- * opens) instead of being told to by a mock.
- *
- * It used to corrupt orderingStrategy, relying on ordering.ts to reject an
- * unknown strategy. The plan mode replaced that field as the ordering lever,
- * and parseTuning deliberately clamps an unrecognised mode to the default
- * rather than throwing, so that lever stopped breaking anything. Corrupting
- * weeklyAvailability was tried next and is too blunt: the coach computes a
- * streak BEFORE it regenerates, so a null there throws in plannedHoursFor and
- * escapes runCoachForPlan rather than being the caught regeneration failure
- * this test is about. A prerequisite cycle fails in exactly one place, which
- * is the point.
+ * `breakRegeneration` makes one weekday of weeklyAvailability non-numeric, so a
+ * streak-triggered generateHorizon call genuinely throws (the engine refuses
+ * NaN capacity, before its transaction opens) instead of being told to by a
+ * mock. A null availability is too blunt: the coach computes a streak BEFORE
+ * it regenerates, so null throws in plannedHoursFor and escapes
+ * runCoachForPlan rather than being the caught regeneration failure.
  */
 export async function setupPlanWithTasks(
   opts: Partial<{
@@ -692,6 +686,7 @@ export async function setupPlanWithTasks(
           ref: `${key}/t${i}/r${rOrder}/lecture`,
           kind: "lecture",
           pageCount: 20,
+          durationSeconds: 3600,
           externalId: `coach-${key}-${i}-${rOrder}`,
         },
       });
@@ -730,13 +725,12 @@ export async function setupPlanWithTasks(
   });
 
   if (opts.breakRegeneration) {
-    const [first, second] = await db.reading.findMany({
-      where: { topic: { levelId: "II" } },
-      orderBy: { id: "asc" },
-      take: 2,
+    // A weekday that is not a number makes the engine refuse to plan, which is
+    // the one failure that happens before the transaction opens.
+    await db.studyPlan.update({
+      where: { id: planId },
+      data: { weeklyAvailability: { mon: 120, tue: "soon", wed: 120, thu: 120, fri: 120, sat: 60, sun: 60 } },
     });
-    await db.reading.update({ where: { id: first.id }, data: { prereqRefs: [second.id] } });
-    await db.reading.update({ where: { id: second.id }, data: { prereqRefs: [first.id] } });
   }
 
   // Independent of the pacing engine, so the sender tests' day shape

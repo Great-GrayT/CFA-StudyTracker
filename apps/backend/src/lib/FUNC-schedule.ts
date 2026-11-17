@@ -1,666 +1,51 @@
+// Loads a plan's rows, runs the pure step engine over the whole span to the exam,
+// and writes only the next horizon (14 days) as PlanTask rows. Step state is derived
+// from history on every call, so undo, edits and self-states can never drift.
 import { db } from "./db";
-import type {
-  EffortConstants,
-  ResourceInput,
-} from "../core/effort";
-import { DEFAULT_EFFORT_CONSTANTS, estimateModule, estimateResource } from "../core/effort";
-import type { TopicEstimate } from "../core/allocation";
-import { allocate, weightImpliedMinutes } from "../core/allocation";
-import type { Strategy } from "../core/ordering";
-import type { SequencableGroup } from "../core/sequence";
-import { sequenceUnits } from "../core/sequence";
-import type {
-  PackableGroup,
-  Calendar,
-  PlannedDay,
-  PlannedTask,
-} from "../core/packing";
-import { packDays } from "../core/packing";
-import type { FactorKey, FactorTree } from "../core/calibration";
-import { factorFor, updateFactor } from "../core/calibration";
 import { parseTuning } from "../core/tuning";
-import type { MasteryObservation } from "../core/mastery";
-import { isEligibleToJump, masteryOfUnit } from "../core/mastery";
-import type { UnderPractised, WriteOff } from "../core/pairing";
+import { OFF_PLAN } from "../core/task-credit";
+import { buildCatalog } from "../core/steps/catalog";
+import { addDays, diffDays } from "../core/steps/dates";
+import { deriveDoneOn } from "../core/steps/done-on";
 import {
-  packFirstPass,
-  questionMinutesOf,
-  readingMinutesOf,
-  reconcile,
-  solveQuestionMultiple,
-} from "../core/pairing";
-import { packReview, projectCoverageDate, reviewPhaseStart, reviewQueue } from "../core/review";
-import { countsForCalibration, creditedMinutes, OFF_PLAN } from "../core/task-credit";
-import {
-  answerReviewMinutes,
-  questionPaceAnchor,
-  reviewQuestionMinutes,
-} from "../core/question-pace";
+  planSteps,
+  type DayCap, type FitReport, type Metrics, type MockSession, type ModuleWindow, type ScheduledTask,
+} from "../core/steps";
+import type { Declaration, HistoryTask, MockResult } from "../core/steps/state";
+import type { ModuleCatalog } from "../core/steps/types";
+import type { WorkItem } from "../core/steps/work";
 
 const HORIZON_DAYS = 14;
 
-// The resource kinds effort.ts's estimator actually knows how to price.
-// The catalogue also carries administrative kinds (e.g. "update" changelog
-// notes, "orientation" welcome videos) that are not study content at all;
-// estimateResource throws on anything outside this set by design (it is a
-// pure function with no business silently guessing at an unknown kind), so
-// this composition layer must filter them out before they ever reach it.
-const KNOWN_EFFORT_KINDS = new Set([
-  "lecture",
-  "eocq",
-  "review",
-  "seminar",
-  "notes",
-  "question_set",
-  "answer_set",
-]);
-
-// The resource kinds that count as reading and as questions, for working out
-// what a candidate has already done. Mirrors readingMinutesOf and
-// questionMinutesOf in core/pairing.ts, which own the split; these are the
-// TASK kinds the packers emit rather than the resource kinds the estimator
-// prices. "review" is absent from both on purpose: it belongs to the review
-// phase and settles no first-pass debt.
-const READING_TASK_KINDS = new Set(["content-notes", "content-video", "seminar"]);
-const QUESTION_TASK_KINDS = new Set(["questions", "answer-review", "eocq"]);
-type ReadingTaskKind = "content-notes" | "content-video" | "seminar";
-
-/**
- * Minutes of reading and of questions already completed, per unit.
- *
- * Settled in ESTIMATED minutes, deliberately, not in the minutes the candidate
- * actually spent. A debt here is a quantity of MATERIAL that happens to be
- * denominated in minutes, and the estimate is what says how much material a
- * task covered. Actual minutes say how long it took, which is a statement about
- * pace, and pace is calibration's job.
- *
- * Crediting actual minutes conflates the two, and the test for pace
- * recalibration caught it: a task estimated at 60 minutes that took 240 settled
- * 240 minutes of debt against a reading holding 180, so one slow session marked
- * a whole reading finished. Going slowly is not covering more ground.
- */
-async function loadWorkDone(
-  planId: string,
-  readings: Array<{ id: string; los: Array<{ id: string }> }>,
-): Promise<{
-  readingDoneByRef: Map<string, number>;
-  questionsDoneByRef: Map<string, number>;
-  declaredReadRefs: Set<string>;
-  readingDoneByKindByRef: Map<string, Partial<Record<ReadingTaskKind, number>>>;
-  watchedRefs: Set<string>;
-  notesReadRefs: Set<string>;
-  declaredQuestionsByRef: Map<string, number>;
-  questionDoneByKindByRef: Map<string, Partial<Record<"questions" | "eocq", number>>>;
-}> {
-  const [done, declared, studied, contentPackages, banks] = await Promise.all([
-    db.planTask.findMany({
-      where: { planId, status: { in: ["done", "partial"] } },
-      select: { kind: true, readingIds: true, estimatedMinutes: true, actualMinutes: true, status: true },
-    }),
-    // A candidate who told us at onboarding that they have read a topic area
-    // has settled its reading debt as surely as a completed task would, and
-    // telling them to read it again is the fastest way to lose their trust in
-    // the schedule. Minutes are unknown, so the caller credits the unit's whole
-    // reading rather than a figure nobody measured.
-    db.studyLogEntry.findMany({
-      where: { planId, selfDeclared: true },
-      select: { losId: true, declaredRead: true, declaredWatched: true, packageId: true, questionsAnswered: true },
-    }),
-    // Sessions the candidate logged before tasks could be ticked. A session
-    // on the content package, or an untagged one with no questions answered,
-    // was spent on the module's material: count its video as watched. The
-    // star rating does not matter here; a low one keeps the notes, which are
-    // never credited from a log.
-    db.studyLogEntry.findMany({
-      // Rows a task record wrote are that task's evidence, already credited
-      // by its own kind; counting them here would read notes as a video.
-      where: { planId, selfDeclared: false, taskId: null },
-      select: { losId: true, packageId: true, questionsAnswered: true },
-    }),
-    db.planPackage.findMany({ where: { planId, roles: { has: "content" } }, select: { packageId: true } }),
-    // Which packages hold a question bank for which reading, so declared
-    // questions settle a bank only when they were answered in it.
-    db.packageUnitReading.findMany({
-      where: { unit: { resources: { some: { kind: "question_set" } } } },
-      select: { readingId: true, unit: { select: { edition: { select: { packageId: true } } } } },
-    }),
-  ]);
-
-  const readingByLos = new Map<string, string>();
-  for (const reading of readings) {
-    for (const los of reading.los) readingByLos.set(los.id, reading.id);
-  }
-  // Notes and videos are declared apart. Both together is the whole first
-  // pass, seminar included, which is what the original "I have read it" meant.
-  const bankPackages = new Set(banks.map((b) => `${b.readingId}|${b.unit.edition.packageId}`));
-  const notesReadRefs = new Set<string>();
-  const watchedDeclared = new Set<string>();
-  const declaredQuestionsByRef = new Map<string, number>();
-  for (const row of declared) {
-    const ref = readingByLos.get(row.losId);
-    if (!ref) continue;
-    if (row.declaredRead) notesReadRefs.add(ref);
-    if (row.declaredWatched) watchedDeclared.add(ref);
-    if (row.questionsAnswered > 0 && row.packageId && bankPackages.has(`${ref}|${row.packageId}`)) {
-      declaredQuestionsByRef.set(ref, (declaredQuestionsByRef.get(ref) ?? 0) + row.questionsAnswered);
-    }
-  }
-  const declaredReadRefs = new Set([...notesReadRefs].filter((ref) => watchedDeclared.has(ref)));
-
-  const contentIds = new Set(contentPackages.map((p) => p.packageId));
-  const watchedRefs = new Set<string>(watchedDeclared);
-  for (const row of studied) {
-    const onContent = row.packageId ? contentIds.has(row.packageId) : row.questionsAnswered === 0;
-    const ref = readingByLos.get(row.losId);
-    if (onContent && ref) watchedRefs.add(ref);
-  }
-
-  const readingDoneByRef = new Map<string, number>();
-  const questionsDoneByRef = new Map<string, number>();
-  const readingDoneByKindByRef = new Map<string, Partial<Record<ReadingTaskKind, number>>>();
-  const questionDoneByKindByRef = new Map<string, Partial<Record<"questions" | "eocq", number>>>();
-
-  for (const task of done) {
-    const minutes = creditedMinutes(task);
-    if (minutes <= 0) continue;
-    const target = READING_TASK_KINDS.has(task.kind)
-      ? readingDoneByRef
-      : QUESTION_TASK_KINDS.has(task.kind)
-        ? questionsDoneByRef
-        : null;
-    if (!target) continue;
-
-    // A task can span several readings (an ethics task covers seven modules),
-    // so split its minutes evenly rather than crediting each in full.
-    const refs = task.readingIds.length > 0 ? task.readingIds : [];
-    const share = refs.length > 0 ? minutes / refs.length : 0;
-    for (const ref of refs) {
-      target.set(ref, (target.get(ref) ?? 0) + share);
-      if (target === readingDoneByRef) {
-        const byKind = readingDoneByKindByRef.get(ref) ?? {};
-        const kind = task.kind as ReadingTaskKind;
-        byKind[kind] = (byKind[kind] ?? 0) + share;
-        readingDoneByKindByRef.set(ref, byKind);
-      } else {
-        // Answer review is part of the bank's practice block.
-        const kind = task.kind === "eocq" ? "eocq" : "questions";
-        const byKind = questionDoneByKindByRef.get(ref) ?? {};
-        byKind[kind] = (byKind[kind] ?? 0) + share;
-        questionDoneByKindByRef.set(ref, byKind);
-      }
-    }
-  }
-
-  return {
-    readingDoneByRef,
-    questionsDoneByRef,
-    declaredReadRefs,
-    readingDoneByKindByRef,
-    watchedRefs,
-    notesReadRefs,
-    declaredQuestionsByRef,
-    questionDoneByKindByRef,
-  };
-}
-
-/**
- * Logged work as mastery observations, grouped by unit.
- *
- * `available` has to be a question COUNT, since `answered` is one, but the
- * catalogue records question minutes per resource. Inverting the effort model
- * recovers the count exactly: estimateResource prices a set at
- * count * (Q_BASE + (Q_CALC - Q_BASE) * calcShare), so dividing by that same
- * per-question figure gives the count back, using the candidate's own
- * calibrated constants rather than a second guess at them.
- *
- * Question stock is recorded per unit, not per outcome, so each outcome gets
- * its unit's stock divided pro rata. That is an approximation and it is the
- * honest one available: the provider does not tag questions by outcome.
- */
-async function loadMasteryObservations(
-  planId: string,
-  readings: Array<{ id: string; los: Array<{ id: string }> }>,
-  packable: PackableGroup[],
-  effortConstants: EffortConstants,
-): Promise<Map<string, MasteryObservation[]>> {
-  const logs = await db.studyLogEntry.findMany({
-    where: { planId },
-    select: {
-      losId: true,
-      confidence: true,
-      questionsAnswered: true,
-      questionsCorrect: true,
-      date: true,
-    },
-    orderBy: { date: "asc" },
-  });
-
-  // Latest row per outcome wins for confidence and date; counts accumulate.
-  type Agg = { answered: number; correct: number; confidence: number | null; lastTouch: Date | null };
-  const byLos = new Map<string, Agg>();
-  for (const row of logs) {
-    const prev = byLos.get(row.losId) ?? { answered: 0, correct: 0, confidence: null, lastTouch: null };
-    byLos.set(row.losId, {
-      answered: prev.answered + row.questionsAnswered,
-      correct: prev.correct + row.questionsCorrect,
-      confidence: row.confidence,
-      lastTouch: row.date,
-    });
-  }
-
-  const losByReading = new Map(readings.map((r) => [r.id, r.los.map((l) => l.id)]));
-  const result = new Map<string, MasteryObservation[]>();
-
-  for (const g of packable) {
-    const losIds = losByReading.get(g.ref) ?? [];
-    if (losIds.length === 0) continue;
-
-    // The bank's count is known now; inverting minutes through the rate
-    // stopped being exact once the rate was anchored to exam pace.
-    const questionMinutes = questionMinutesOf(g);
-    const perQuestion =
-      effortConstants.Q_BASE +
-      (effortConstants.Q_CALC - effortConstants.Q_BASE) * g.calculationShare;
-    const unitQuestions =
-      g.questionCount ?? (perQuestion > 0 ? questionMinutes / perQuestion : 0);
-
-    result.set(
-      g.ref,
-      losIds.map((losId) => {
-        const agg = byLos.get(losId);
-        return {
-          losId,
-          answered: agg?.answered ?? 0,
-          correct: agg?.correct ?? 0,
-          available: unitQuestions / losIds.length,
-          confidence: agg?.confidence ?? null,
-          lastTouch: agg?.lastTouch ?? null,
-          questionMinutes: questionMinutes / losIds.length,
-        };
-      }),
-    );
-  }
-
-  return result;
-}
-
-/**
- * Minutes of real study per study day, measured rather than estimated: the
- * minutes the candidate actually recorded, over the number of distinct days
- * they recorded anything on.
- *
- * Per STUDY day, not per calendar day, because the coverage projection then
- * walks only the days the calendar says are available, and dividing by
- * calendar days here would discount the rest days twice.
- *
- * Zero when nothing is logged yet, which the review throttle reads as "no
- * projection possible" rather than "stopped".
- */
-function realisedPace(
-  completed: Array<{ date: Date; estimatedMinutes: number; actualMinutes: number | null }>,
-): number {
-  if (completed.length === 0) return 0;
-
-  let minutes = 0;
-  const days = new Set<string>();
-  for (const task of completed) {
-    minutes += task.actualMinutes ?? task.estimatedMinutes;
-    days.add(task.date.toISOString().slice(0, 10));
-  }
-
-  return days.size > 0 ? minutes / days.size : 0;
-}
-
-/** A calendar with every day's minutes scaled, for splitting a day between phases. */
-function scaleCalendar(cal: Calendar, share: number): Calendar {
-  return {
-    ...cal,
-    weeklyAvailability: Object.fromEntries(
-      Object.entries(cal.weeklyAvailability).map(([day, minutes]) => [
-        day,
-        Math.max(0, Math.floor(minutes * share)),
-      ]),
-    ),
-  };
-}
-
-/** Merge two phases' days by date, first pass before review on any given day. */
-function mergeDays(first: PlannedDay[], review: PlannedDay[]): PlannedDay[] {
-  const byDate = new Map<string, PlannedDay>();
-  for (const day of first) {
-    byDate.set(day.date, { date: day.date, tasks: [...day.tasks] });
-  }
-  for (const day of review) {
-    const existing = byDate.get(day.date);
-    if (existing) {
-      existing.tasks.push(...day.tasks);
-    } else {
-      byDate.set(day.date, { date: day.date, tasks: [...day.tasks] });
-    }
-  }
-  return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
-}
-
-/**
- * Derive the calibration factor tree from completed PlanTask rows in date order.
- */
-function deriveFactorTree(completedTasks: Array<{
-  status: string;
-  estimatedMinutes: number;
-  actualMinutes: number | null;
-}>): FactorTree {
-  const tree: FactorTree = {
-    global: { kObs: 1.0, n: 0 },
-    byProviderKind: {},
-    byProviderKindTopic: {},
-  };
-
-  for (const task of completedTasks) {
-    if (countsForCalibration(task) && task.actualMinutes! > 0) {
-      tree.global = updateFactor(tree.global, {
-        estimated: task.estimatedMinutes,
-        actual: task.actualMinutes!,
-      });
-    }
-  }
-
-  return tree;
-}
-
-/** Per-reading question-practice shape, read straight from its question_set
- * resources (not the answer_set mirror, which duplicates the same counts). */
-type ReadingQuestionProfile = {
-  vignetteCount: number;
-  calculationShare: number;
-  /** Questions in this reading's own banks. */
-  questionCount: number;
-  /** This reading's own practice, pre-trim: answering at anchored exam pace plus reviewing the answers. */
-  questionMinutes: number;
-  /** Share of questionMinutes that is answering; the rest is answer review. */
-  answeringShare: number;
+type StepKey = 1 | 2 | 3 | 4 | 5;
+export const DEFAULT_STEP_PRIORITY: Record<StepKey, string[]> = {
+  1: ["mm-l2", "kaplan-l2", "cfa-les"],
+  2: ["uw-l2-2025", "kaplan-l2", "premium-l2", "cfa-les"],
+  3: ["mm-l2", "kaplan-l2", "cfa-les"],
+  4: ["premium-l2", "kaplan-l2", "uw-l2-2025", "cfa-les"],
+  5: ["premium-l2", "cfa-les", "kaplan-l2"],
 };
 
-/** Raw (pre-trim) eocq/seminar minutes for a topic, carried separately from
- * the single "otherMinutes" bucket allocate() trims, so the two can be
- * split back out honestly once trimming is done. */
-type TopicOtherRaw = {
-  eocqRaw: number;
-  seminarRaw: number;
-};
+const iso = (d: Date) => d.toISOString().slice(0, 10);
+const WEEKDAY = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 
-/** Raw (pre-trim) lecture(video)/review minutes for a topic. Both share
- * allocate()'s "reviewMinutes" trim tier (2nd priority), so they need the
- * same post-trim proportional split as eocq/seminar above. */
-type TopicReviewRaw = {
-  lectureRaw: number;
-  reviewRaw: number;
-};
-
-/**
- * Build TopicEstimate by estimating effort from catalogue resources linked to readings.
- * Also returns, per reading, its question-practice shape (vignetteCount,
- * calculationShare) and, per topic, the raw eocq/seminar split that
- * "otherMinutes" otherwise flattens.
- */
-async function buildTopicEstimates(
-  levelId: string,
-  totalPlanMinutes: number,
-  tree: FactorTree,
-  answerReviewWordsPerMinute: number,
-  constants: EffortConstants = DEFAULT_EFFORT_CONSTANTS,
-): Promise<{
-  estimates: TopicEstimate[];
-  readingProfiles: Map<string, ReadingQuestionProfile>;
-  topicOtherRaw: Map<string, TopicOtherRaw>;
-  topicReviewRaw: Map<string, TopicReviewRaw>;
-}> {
-  const topics = await db.topic.findMany({ where: { levelId } });
-
-  // Anchor the calc-share question rate to exam pace across this level's
-  // banks, so topics differ by calculation load but average 3.0 min/q.
-  const banks = await db.packageResource.findMany({
-    where: { kind: "question_set", unit: { readings: { some: { reading: { topic: { levelId } } } } } },
-    select: { questionCount: true, calcCount: true },
-  });
-  const anchor = questionPaceAnchor(
-    banks.map((b) => ({ questionCount: b.questionCount ?? 0, calcCount: b.calcCount ?? 0 })),
-    constants,
-  );
-  const pacedConstants: EffortConstants = {
-    ...constants,
-    Q_BASE: constants.Q_BASE * anchor,
-    Q_CALC: constants.Q_CALC * anchor,
-  };
-
-  const estimates: TopicEstimate[] = [];
-  const readingProfiles = new Map<string, ReadingQuestionProfile>();
-  const topicOtherRaw = new Map<string, TopicOtherRaw>();
-  const topicReviewRaw = new Map<string, TopicReviewRaw>();
-
-  for (const topic of topics) {
-    const readings = await db.reading.findMany({
-      where: { topicId: topic.id },
-    });
-
-    const weightMid = (topic.examWeightMin + topic.examWeightMax) / 2;
-    const topicCap = weightImpliedMinutes(weightMid, totalPlanMinutes);
-
-    let totalTopicMinutes = 0;
-    let noteMinutes = 0;
-    let reviewMinutes = 0;
-    let questionMinutes = 0;
-    let otherMinutes = 0;
-    let eocqRaw = 0;
-    let seminarRaw = 0;
-    let lectureRaw = 0;
-    let reviewRaw = 0;
-
-    // For each reading, estimate effort from its linked resources
-    for (const reading of readings) {
-      const unitReadings = await db.packageUnitReading.findMany({
-        where: { readingId: reading.id },
-        include: {
-          unit: {
-            include: {
-              resources: true,
-              edition: { include: { package: true } },
-            },
-          },
-        },
-      });
-
-      const resourceInputs: ResourceInput[] = [];
-      const resourceKeys: FactorKey[] = [];
-
-      let readingQuestionCount = 0;
-      let readingCalcCount = 0;
-      let readingVignetteCount = 0;
-      // Null until a file reports a count, so one unmeasured file sends the
-      // whole reading to the one-third fallback rather than a wrong subtraction.
-      let questionWords: number | null = 0;
-      let answerWords: number | null = 0;
-
-      for (const ur of unitReadings) {
-        const provider = ur.unit.edition.package.slug ?? ur.unit.edition.package.id;
-
-        // Notes pages live on the UNIT (notesPageCount), not the resource -
-        // the provider inventory records one page range per lecture unit,
-        // shared by every resource in it. Reading it off the resource row
-        // (which never carries it) silently zeroed every real lecture.
-        const unitNotesPages = ur.unit.notesPageCount ?? undefined;
-
-        // eocq and review also need "how long is the lecture", and the
-        // inventory never records actual video duration (measured by hand,
-        // kept out of the reseedable file - see seed-packages.ts). The
-        // lecture's own computed minutes (from notesPages, the same
-        // formula effort.ts's "lecture" case uses) is the best proxy for
-        // that: it's a measurement of the same lecture, just in pages
-        // instead of seconds. Computed at k=1 - this is an input to other
-        // resources' estimates, not a final estimate of its own.
-        const unitLectureMinutes =
-          unitNotesPages !== undefined
-            ? estimateResource({ kind: "lecture", notesPages: unitNotesPages }, constants, 1)
-            : undefined;
-
-        // Reading the notes is its own task, and nothing in the catalogue
-        // represents it. The provider ships one notes PDF per topic, so there is
-        // no per-unit `notes` RESOURCE to find; what the inventory does record,
-        // per unit, is which pages of those notes cover it. That page range is
-        // exactly the input the effort model's "notes" case wants.
-        //
-        // Without this the notes layer could never produce a task: noteMinutes
-        // only ever summed `byKind["notes"]`, no resource had that kind, so it
-        // was always zero and `content-notes` was unreachable. The spec gives
-        // notes pre-reads 27.1 of 349.4 hours, and that whole layer had nothing
-        // behind it.
-        //
-        // Using the same pages for both a video task and a reading task is not
-        // double counting: the model rates them differently on purpose
-        // (PAGE_RATE 6.0 min/page to watch the lecture covering those pages,
-        // NOTES_RATE 2.5 to read them yourself) because they are two distinct
-        // activities over the same material.
-        //
-        // Pushed as an ordinary input so it goes through the same exam-weight
-        // factor and the same module cap as everything else. It is added once
-        // per unit rather than once per resource, since the page range belongs
-        // to the unit.
-        if (unitNotesPages !== undefined) {
-          resourceInputs.push({ kind: "notes", notesPages: unitNotesPages });
-          resourceKeys.push({ provider, kind: "notes", topic: topic.id });
-        }
-
-        for (const res of ur.unit.resources) {
-          if (!KNOWN_EFFORT_KINDS.has(res.kind)) continue;
-          // Answering runs at exam pace; the explanations become their own
-          // answer-review task (they turned 8 questions into 85 minutes when
-          // priced as practice), so only their size is taken here.
-          if (res.kind === "answer_set") {
-            answerWords = answerWords === null || !res.wordCount ? null : answerWords + res.wordCount;
-            continue;
-          }
-          if (res.kind === "question_set") {
-            questionWords = questionWords === null || !res.wordCount ? null : questionWords + res.wordCount;
-          }
-
-          const input: ResourceInput = { kind: res.kind };
-
-          if (res.kind === "lecture" && unitNotesPages !== undefined) {
-            input.notesPages = unitNotesPages;
-          }
-
-          if (
-            (res.kind === "eocq" || res.kind === "review") &&
-            unitLectureMinutes !== undefined
-          ) {
-            input.lectureMinutes = unitLectureMinutes;
-          }
-
-          // A directly measured duration, if one ever exists, overrides the
-          // notes-pages proxy above - it's the real number, not a stand-in.
-          if (
-            (res.kind === "lecture" || res.kind === "eocq" || res.kind === "review") &&
-            res.durationSeconds
-          ) {
-            input.lectureMinutes = Math.round(res.durationSeconds / 60);
-          }
-
-          if (res.questionCount) {
-            input.questionCount = res.questionCount;
-            input.calcCount = res.calcCount ?? 0;
-          }
-
-          if (res.wordCount) {
-            input.answerWords = res.wordCount;
-            input.exhibitCount = res.exhibitCount ?? 0;
-            input.calcCount = res.calcCount ?? 0;
-          }
-
-          resourceInputs.push(input);
-          resourceKeys.push({ provider, kind: res.kind, topic: topic.id });
-
-          // question_set only: answer_set mirrors the same vignette/calc
-          // counts for its explanations, so counting both would double them.
-          if (res.kind === "question_set") {
-            readingQuestionCount += res.questionCount ?? 0;
-            readingCalcCount += res.calcCount ?? 0;
-            readingVignetteCount += res.vignetteCount ?? 0;
-          }
-        }
-      }
-
-      readingProfiles.set(reading.id, {
-        vignetteCount: readingVignetteCount,
-        calculationShare:
-          readingQuestionCount > 0 ? readingCalcCount / readingQuestionCount : 0.5,
-        questionCount: readingQuestionCount,
-        questionMinutes: 0,
-        answeringShare: 1,
-      });
-
-      // Weight-implied cap for this reading is its share of the topic cap
-      const readingCap = topicCap / Math.max(1, readings.length);
-
-      const est = estimateModule(
-        {
-          ref: reading.id,
-          resources: resourceInputs,
-          weightImpliedMinutes: readingCap,
-        },
-        pacedConstants,
-        (_r, i) => factorFor(tree, resourceKeys[i]),
-      );
-
-      totalTopicMinutes += est.total;
-      // "lecture" is video (content-video), not notes. The "notes" kind is
-      // synthesised per unit from its notes page range just above, since the
-      // provider ships notes per topic rather than per unit.
-      noteMinutes += est.byKind["notes"] ?? 0;
-      lectureRaw += est.byKind["lecture"] ?? 0;
-      reviewRaw += est.byKind["review"] ?? 0;
-      reviewMinutes += (est.byKind["lecture"] ?? 0) + (est.byKind["review"] ?? 0);
-      // Answer review rides with answering in every budget, so the week is
-      // planned for both; packers split the two only when emitting tasks.
-      const answering = est.byKind["question_set"] ?? 0;
-      const reviewing =
-        answering > 0
-          ? answerReviewMinutes(
-              { answerWords: answerWords || null, questionWords: questionWords || null },
-              answering,
-              answerReviewWordsPerMinute,
-            )
-          : 0;
-      questionMinutes += answering + reviewing;
-      const profile = readingProfiles.get(reading.id);
-      if (profile) {
-        profile.questionMinutes = answering + reviewing;
-        profile.answeringShare = answering + reviewing > 0 ? answering / (answering + reviewing) : 1;
-      }
-      eocqRaw += est.byKind["eocq"] ?? 0;
-      seminarRaw += est.byKind["seminar"] ?? 0;
-      otherMinutes += (est.byKind["eocq"] ?? 0) + (est.byKind["seminar"] ?? 0);
-    }
-
-    estimates.push({
-      key: topic.id,
-      weightMid,
-      estimateMinutes: totalTopicMinutes,
-      noteMinutes,
-      reviewMinutes,
-      questionMinutes,
-      otherMinutes,
-      moduleCount: readings.length,
-    });
-    topicOtherRaw.set(topic.id, { eocqRaw, seminarRaw });
-    topicReviewRaw.set(topic.id, { lectureRaw, reviewRaw });
+// Plan packages not named in a step's list go last, so a custom or test package still takes part.
+function resolvePriority(raw: unknown, planSlugs: string[]): Record<StepKey, string[]> {
+  const src = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const out = {} as Record<StepKey, string[]>;
+  for (const k of [1, 2, 3, 4, 5] as StepKey[]) {
+    const given = src[String(k)];
+    const base = Array.isArray(given) && given.every((x) => typeof x === "string")
+      ? (given as string[]) : DEFAULT_STEP_PRIORITY[k];
+    out[k] = [...base, ...planSlugs.filter((s) => !base.includes(s))];
   }
-
-  return { estimates, readingProfiles, topicOtherRaw, topicReviewRaw };
+  return out;
 }
 
 /** A task represents real work the candidate already did, so regeneration
  * must never delete or silently overwrite it: a logged study entry, a
  * status that moved off "pending", recorded actual minutes, or a timer
- * that's currently running. logEntryId alone used to be the only guard. */
+ * that's currently running. */
 function isProtectedWork(task: {
   logEntryId: string | null;
   status: string;
@@ -677,7 +62,7 @@ function isProtectedWork(task: {
 
 /**
  * The earliest missed day whose work a cell carries: same kind, a shared
- * reading. The packer reshapes work freely, so overlap is the only honest
+ * reading. The engine reshapes work freely, so overlap is the only honest
  * link between a missed cell and the cells that now owe its material.
  */
 export function missedOrigin(
@@ -693,666 +78,364 @@ export function missedOrigin(
   return earliest;
 }
 
-function readingIdsEqual(a: string[], b: string[]): boolean {
-  if (a.length !== b.length) return false;
-  return a.every((v, i) => v === b[i]);
+type Planned = {
+  date: string; kind: string; step: number; round: number; extraReason: string | null;
+  mockRef: string | null; resourceIds: string[]; packageId: string | null; readingIds: string[];
+  estimatedMinutes: number; workMinutes: number; questionCount: number | null; requiresConfidence: boolean;
+};
+
+const sameArr = (a: string[], b: string[]) => a.length === b.length && a.every((v, i) => v === b[i]);
+
+function taskMatchesPlan(e: {
+  kind: string; step: number | null; round: number | null; extraReason: string | null; mockRef: string | null;
+  resourceIds: string[]; packageId: string | null; readingIds: string[]; estimatedMinutes: number;
+  workMinutes: number | null; questionCount: number | null; requiresConfidence: boolean;
+}, p: Planned): boolean {
+  return e.kind === p.kind && e.step === p.step && e.round === p.round && e.extraReason === p.extraReason
+    && e.mockRef === p.mockRef && sameArr(e.resourceIds, p.resourceIds) && e.packageId === p.packageId
+    && sameArr(e.readingIds, p.readingIds) && e.estimatedMinutes === p.estimatedMinutes
+    && e.workMinutes === p.workMinutes && e.questionCount === p.questionCount
+    && e.requiresConfidence === p.requiresConfidence;
 }
 
-/** Whether an existing row already reflects the freshly planned task for
- * its slot, so an occupied (date, order) slot is "stable" only when its
- * CONTENT matches - not merely because a row of any kind sits there. */
-function taskMatchesPlan(
-  existing: {
-    kind: string;
-    resourceId: string | null;
-    readingIds: string[];
-    estimatedMinutes: number;
-    requiresConfidence: boolean;
-    questionTarget: number | null;
-    vignetteFrom: number | null;
-    vignetteTo: number | null;
-    mode: string | null;
-    splitOf: string | null;
-    splitIndex: number | null;
-    splitCount: number | null;
-  },
-  planned: PlannedTask,
-): boolean {
-  return (
-    existing.kind === planned.kind &&
-    (existing.resourceId ?? null) === (planned.resourceId ?? null) &&
-    readingIdsEqual(existing.readingIds, planned.readingIds ?? []) &&
-    existing.estimatedMinutes === planned.estimatedMinutes &&
-    existing.requiresConfidence === planned.requiresConfidence &&
-    (existing.questionTarget ?? null) === (planned.questionTarget ?? null) &&
-    (existing.vignetteFrom ?? null) === (planned.vignetteFrom ?? null) &&
-    (existing.vignetteTo ?? null) === (planned.vignetteTo ?? null) &&
-    (existing.mode ?? null) === (planned.mode ?? null) &&
-    (existing.splitOf ?? null) === (planned.splitOf ?? null) &&
-    (existing.splitIndex ?? null) === (planned.splitIndex ?? null) &&
-    (existing.splitCount ?? null) === (planned.splitCount ?? null)
-  );
+// Pieces of one WorkItem share its question count; cumulative rounding keeps the sum exact.
+function toPlanned(tasks: ScheduledTask[]): Planned[] {
+  const done = new Map<string, { work: number; q: number }>();
+  return tasks.map((t) => {
+    const it = t.item;
+    let questionCount: number | null = null;
+    if (it.questions && it.minutes > 0) {
+      const acc = done.get(it.id) ?? { work: 0, q: 0 };
+      acc.work += t.workMinutes;
+      const cum = Math.round(it.questions * Math.min(1, acc.work / it.minutes));
+      questionCount = cum - acc.q;
+      acc.q = cum;
+      done.set(it.id, acc);
+    }
+    return {
+      date: t.date, kind: it.kind, step: it.step, round: it.round, extraReason: it.extraReason,
+      mockRef: it.mockRef ?? null, resourceIds: it.resourceIds, packageId: it.packageId || null,
+      readingIds: [it.readingId], estimatedMinutes: Math.max(1, Math.round(t.minutes)),
+      workMinutes: Math.max(1, Math.round(t.workMinutes)), questionCount,
+      requiresConfidence: it.kind === "read" && it.step === 1,
+    };
+  });
 }
+
+export type HorizonResult = {
+  created: number; frozen: number; kept: number; deleted: number;
+  planMode: string; reviewPolicy: string;
+  rejectedTuning: Array<{ field: string; reason: string }>;
+  /** Effective planning date (never before the day the horizon was last built for). */
+  today: string; exam: string;
+  /** The whole schedule to the exam, not only the 14 persisted days. */
+  tasks: ScheduledTask[];
+  fit: FitReport; windows: ModuleWindow[]; metrics: Metrics; unplaced: WorkItem[]; load: number;
+  relaxedPolicy: boolean;
+  catalog: ModuleCatalog[];
+};
 
 /**
- * Main function: generate a 14-day horizon of tasks for a plan.
- * Freezes yesterday's tasks, regenerates the unfrozen window (preserving
- * protected rows), and writes new PlanTask rows. The freeze/delete/write
- * sequence runs inside one transaction so a crash mid-regeneration can
- * never leave a plan half-deleted.
+ * Plan a plan: freeze yesterday, replan everything from today with the step engine,
+ * write the next `horizonDays` of it. The freeze/delete/write sequence runs in one
+ * transaction so a crash can never leave a plan half-regenerated.
  */
 export async function generateHorizon(
   planId: string,
   today: string,
   opts: {
-    /** Days to plan. Defaults to the rolling horizon the app writes. */
     horizonDays?: number;
-    /**
-     * Plan without writing. Nothing is frozen, deleted or created, and the
-     * dated days come back on `days` for a caller that wants to read the shape
-     * of a plan rather than install it. The campaign projection uses this so
-     * there is exactly one pipeline, and a long-range view cannot contradict
-     * the horizon it sits above.
-     */
+    /** Plan without writing; the full result comes back for projections. */
     dryRun?: boolean;
   } = {},
-): Promise<{
-  created: number;
-  frozen: number;
-  kept: number;
-  deleted: number;
-  planMode: string;
-  reviewPolicy: string;
-  requestedQuestionMultiple: number;
-  effectiveQuestionMultiple: number;
-  calendarTooShort: boolean;
-  writeOffs: WriteOff[];
-  underPractised: UnderPractised[];
-  injectionCap: number;
-  reviewReason: string;
-  coverageProjection: { date: string; slackDays: number } | null;
-  rejectedTuning: Array<{ field: string; reason: string }>;
-  days: PlannedDay[];
-}> {
+): Promise<HorizonResult> {
   const plan = await db.studyPlan.findUniqueOrThrow({ where: { id: planId } });
 
-  // Never plan earlier than the day the horizon was last built for. Once the
-  // day has closed at the debrief the sweep builds from tomorrow, and a later
-  // rebuild "from today" (recording a forgotten task, say) must not put fresh
-  // work back onto the closed day.
-  if (plan.horizonGeneratedFor && plan.horizonGeneratedFor > today) {
-    today = plan.horizonGeneratedFor;
-  }
+  // A later rebuild "from today" must not put fresh work back onto a day the
+  // debrief has already closed.
+  if (plan.horizonGeneratedFor && plan.horizonGeneratedFor > today) today = plan.horizonGeneratedFor;
 
-  // Every constant the engine reads, with the candidate's overrides clamped
-  // into range. The columns hold the two choices; the json column holds the
-  // numbers. Nothing below reads plan.tuning directly.
   const parsed = parseTuning({
     ...(plan.tuning && typeof plan.tuning === "object" && !Array.isArray(plan.tuning)
-      ? (plan.tuning as Record<string, unknown>)
-      : {}),
+      ? (plan.tuning as Record<string, unknown>) : {}),
     planMode: plan.planMode,
     reviewPolicy: plan.reviewPolicy,
-    reviewStartDate: plan.reviewStartDate
-      ? plan.reviewStartDate.toISOString().slice(0, 10)
-      : null,
+    reviewStartDate: plan.reviewStartDate ? iso(plan.reviewStartDate) : null,
   });
   const tuning = parsed.tuning;
-
+  const exam = iso(plan.examDate);
   const horizonDays = Math.max(1, Math.floor(opts.horizonDays ?? HORIZON_DAYS));
-  const todayDate = new Date(today + "T00:00:00Z");
+  const todayDate = new Date(`${today}T00:00:00Z`);
   const horizonEnd = new Date(todayDate);
   horizonEnd.setUTCDate(horizonEnd.getUTCDate() + horizonDays - 1);
 
-  // Derive calibration factor from completed tasks, and actually use it:
-  // every estimate below is scaled by the candidate's own observed pace
-  // instead of staying frozen at seed values forever.
-  const completedTasks = await db.planTask.findMany({
-    // An off-plan session's estimate is its own minutes, so its ratio is
-    // always 1 and would only dilute the real pace.
-    where: { planId, status: "done", OR: [{ insertedBecause: null }, { insertedBecause: { not: OFF_PLAN } }] },
-    orderBy: { date: "asc" },
-    select: { date: true, status: true, estimatedMinutes: true, actualMinutes: true },
-  });
-
-  const factorTree = deriveFactorTree(completedTasks);
-
-  // Calculate total plan minutes from weekly availability and exam date
-  const weeklyAvailability = plan.weeklyAvailability as Record<string, number>;
-  const weekTotal = Object.values(weeklyAvailability).reduce(
-    (sum, val) => sum + val,
-    0,
-  );
-  const weeksUntilExam = Math.ceil(
-    (plan.examDate.getTime() - todayDate.getTime()) / (7 * 24 * 60 * 60 * 1000),
-  );
-  // weeklyAvailability is in HOURS (the onboarding question is "how many hours
-  // a week?"), and every estimate downstream of this is in minutes. Without
-  // the conversion the whole plan was budgeted at 560 minutes instead of
-  // 33,600 for a 20 hour week, so allocation trimmed every topic to a few
-  // minutes, the packer found nothing that fit a day, and generateHorizon
-  // returned "created: 0". That is why no plan had a single task and the
-  // Today screen had nothing but outcome text to show.
-  const totalPlanMinutes = Math.max(1, weekTotal * 60 * weeksUntilExam);
-
-  // Build effort estimates and allocate by topic
-  const { estimates: topicEstimates, readingProfiles, topicOtherRaw, topicReviewRaw } =
-    await buildTopicEstimates(
-      plan.levelId,
-      totalPlanMinutes,
-      factorTree,
-      tuning.answerReviewWordsPerMinute,
-    );
-  const allocationResult = allocate(topicEstimates, totalPlanMinutes);
-
-  // Get all readings and build SchedulableGroup objects
+  // ---- catalogue ------------------------------------------------------------
   const readings = await db.reading.findMany({
-    where: { topic: { levelId: plan.levelId } },
-    include: { topic: true, los: { select: { id: true } } },
+    where: { topic: { levelId: plan.levelId } }, include: { topic: true },
+  });
+  const planPackages = await db.planPackage.findMany({ where: { planId }, include: { package: true } });
+  let pkgs = planPackages.map((p) => p.package);
+  // A plan with no packages attached still gets planned, from every catalogue on the level.
+  if (pkgs.length === 0) {
+    pkgs = await db.studyPackage.findMany({ where: { editions: { some: { levelId: plan.levelId } } } });
+  }
+  const slugOf = new Map(pkgs.map((p) => [p.id, p.slug ?? p.id]));
+  const planSlugs = [...slugOf.values()];
+  const priority = resolvePriority(plan.stepPriority, planSlugs);
+
+  const unitRows = await db.packageUnit.findMany({
+    where: { edition: { levelId: plan.levelId, packageId: { in: [...slugOf.keys()] } } },
+    select: {
+      id: true, notesPageCount: true, edition: { select: { packageId: true } },
+      readings: { select: { readingId: true } },
+      resources: {
+        select: { id: true, unitId: true, kind: true, durationSeconds: true, questionCount: true, wordCount: true },
+      },
+    },
+  });
+  const catalog = buildCatalog({
+    readings: readings.map((r) => ({
+      id: r.id, topicId: r.topicId, order: r.order, topicOrder: r.topic.order,
+      examWeightMin: r.topic.examWeightMin, examWeightMax: r.topic.examWeightMax,
+    })),
+    units: unitRows.map((u) => ({
+      id: u.id, packageSlug: slugOf.get(u.edition.packageId)!, packageId: u.edition.packageId,
+      notesPageCount: u.notesPageCount, readingIds: u.readings.map((x) => x.readingId),
+    })),
+    resources: unitRows.flatMap((u) => u.resources),
+    planPackageSlugs: planSlugs, priority, lesHours: plan.lesReadingHours,
   });
 
-  const groups: SequencableGroup[] = [];
-  for (const reading of readings) {
-    const budget = allocationResult.byTopic.get(reading.topicId);
-    if (!budget || budget.minutes <= 0) continue;
+  // ---- mocks ---------------------------------------------------------------
+  const mockExams = await db.mockExam.findMany({
+    where: { planId }, include: { topicScores: true }, orderBy: { date: "asc" },
+  });
+  const doneRef = new Map<string, string>();
+  for (const m of mockExams) if (m.sessionRef && !doneRef.has(m.sessionRef)) doneRef.set(m.sessionRef, iso(m.date));
+  const mockRes = await db.packageResource.findMany({
+    where: { kind: "mock_session", edition: { levelId: plan.levelId, packageId: { in: [...slugOf.keys()] } } },
+    select: { id: true, ref: true, title: true, questionCount: true, topicMix: true, edition: { select: { packageId: true } } },
+  });
+  const rank = (packageId: string) => {
+    const i = priority[5].indexOf(slugOf.get(packageId) ?? "");
+    return i < 0 ? 99 : i;
+  };
+  const mockSessions: MockSession[] = mockRes
+    .sort((a, b) => rank(a.edition.packageId) - rank(b.edition.packageId)
+      || a.ref.localeCompare(b.ref, undefined, { numeric: true }))
+    .map((r) => ({
+      ref: r.ref, packageId: r.edition.packageId, resourceId: r.id, title: r.title ?? r.ref,
+      questionCount: r.questionCount ?? 0,
+      topicOrders: r.topicMix && typeof r.topicMix === "object" && !Array.isArray(r.topicMix)
+        ? Object.keys(r.topicMix as Record<string, unknown>).map(Number).filter(Number.isFinite) : [],
+      done: doneRef.has(r.ref), doneOn: doneRef.get(r.ref) ?? null,
+    }));
+  const mockResults: MockResult[] = mockExams.map((m) => ({
+    date: iso(m.date),
+    topicScores: m.topicScores.map((s) => ({ topicId: s.topicId, answered: s.answered, correct: s.correct })),
+  }));
 
-    const readingCountForTopic = readings.filter(
-      (r) => r.topicId === reading.topicId,
-    ).length;
-
-    const weightMid = (reading.topic.examWeightMin + reading.topic.examWeightMax) / 2;
-
-    groups.push({
-      ref: reading.id,
-      readingRefs: [reading.id],
-      prereqRefs: reading.prereqRefs ?? [],
-      phaseBand: reading.phaseBand ?? 1,
-      moduleOrder: reading.order,
-      // The ordinal ordering.ts never had. Taken from the Topic row rather
-      // than parsed out of the ref, because parsing a curriculum position out
-      // of a string identifier is how a planner comes to read Ethics before
-      // Quantitative Methods.
-      topicOrder: reading.topic.order,
-      priorityRank: reading.priorityRank ?? 0,
-      weight: weightMid,
-      estimatedMinutes: Math.max(1, budget.minutes / readingCountForTopic),
-      weightImpliedMinutes: Math.max(
-        1,
-        (weightMid / 100) * totalPlanMinutes / readingCountForTopic,
-      ),
-    });
-  }
-
-  // Sequence by plan mode. effort-return delegates to the old engine, so
-  // switching back to it really does reproduce the old behaviour; the two
-  // curriculum modes run whole topic areas in curriculum order.
-  const ordered =
-    groups.length > 0
-      ? sequenceUnits(groups, tuning.planMode, (plan.orderingStrategy ?? "curriculum") as Strategy)
-      : [];
-
-  // Convert SchedulableGroup to PackableGroup with per-kind breakdown
-  const packable: Array<PackableGroup & { topicOrder: number }> = [];
-  for (const group of ordered) {
-    const reading = readings.find((r) => r.id === group.ref);
-    if (!reading) continue;
-
-    const budget = allocationResult.byTopic.get(reading.topicId);
-    if (!budget) continue;
-
-    const readingCountForTopic = readings.filter(
-      (r) => r.topicId === reading.topicId,
-    ).length;
-
-    // otherMinutes is eocq+seminar folded together for allocation's
-    // trimming purposes; split it back out here, scaled by whatever
-    // fraction of the raw total survived trimming, so eocqMinutes +
-    // seminarMinutes always sums to budget.otherMinutes exactly.
-    const otherRaw = topicOtherRaw.get(reading.topicId) ?? { eocqRaw: 0, seminarRaw: 0 };
-    const otherRawTotal = otherRaw.eocqRaw + otherRaw.seminarRaw;
-    const otherScale = otherRawTotal > 0 ? budget.otherMinutes / otherRawTotal : 0;
-    const eocqShare = otherRaw.eocqRaw * otherScale;
-    const seminarShare = otherRaw.seminarRaw * otherScale;
-
-    // reviewMinutes is lecture(video)+review folded together for
-    // allocation's trimming purposes (same reason/technique as otherMinutes
-    // above); split it back out scaled by whatever fraction survived
-    // trimming, so videoMinutes + reviewMinutes always sums to
-    // budget.reviewMinutes exactly.
-    const reviewRaw = topicReviewRaw.get(reading.topicId) ?? { lectureRaw: 0, reviewRaw: 0 };
-    const reviewRawTotal = reviewRaw.lectureRaw + reviewRaw.reviewRaw;
-    const reviewScale = reviewRawTotal > 0 ? budget.reviewMinutes / reviewRawTotal : 0;
-    const videoShare = reviewRaw.lectureRaw * reviewScale;
-    const reviewShare = reviewRaw.reviewRaw * reviewScale;
-
-    const profile = readingProfiles.get(reading.id) ?? {
-      vignetteCount: 0,
-      calculationShare: 0.5,
-      questionCount: 0,
-      questionMinutes: 0,
-      answeringShare: 1,
+  // ---- history ---------------------------------------------------------------
+  const taskRows = await db.planTask.findMany({
+    where: { planId, status: { in: ["done", "partial"] } },
+    include: { logs: { select: { questionsAnswered: true, questionsCorrect: true } } },
+  });
+  const history: HistoryTask[] = taskRows.map((t) => {
+    // Credit = uncrashed work x share of the estimate actually spent (never above 1);
+    // tasks from before the engine have no workMinutes, so their estimate stands in.
+    const work = t.workMinutes ?? t.estimatedMinutes;
+    const ratio = t.actualMinutes === null
+      ? (t.status === "done" ? 1 : 0)
+      : Math.min(1, t.actualMinutes / Math.max(1, t.estimatedMinutes));
+    return {
+      id: t.id, date: iso(t.date), kind: t.kind, step: t.step, round: t.round, readingIds: t.readingIds,
+      status: t.status as "done" | "partial", minutes: work * ratio, estimateMinutes: work,
+      answered: t.logs.reduce((a, l) => a + l.questionsAnswered, 0),
+      correct: t.logs.reduce((a, l) => a + l.questionsCorrect, 0),
+      answerReviewDone: t.answerReviewDone, packageSlug: t.packageId ? slugOf.get(t.packageId) ?? null : null,
     };
+  });
 
-    // A module's practice is its OWN bank, never its topic's average: the
-    // even split gave an 8-question module the minutes of its 28-question
-    // neighbours. Only allocation's trim (a tight calendar) may shrink it,
-    // and nothing may grow it, since the engine does not invent questions.
-    const topicQuestionRaw =
-      topicEstimates.find((e) => e.key === reading.topicId)?.questionMinutes ?? 0;
-    const questionTrim =
-      topicQuestionRaw > 0 ? Math.min(1, budget.questionMinutes / topicQuestionRaw) : 0;
-
-    packable.push({
-      ...group,
-      noteMinutes: Math.max(0, budget.noteMinutes / readingCountForTopic),
-      videoMinutes: Math.max(0, videoShare / readingCountForTopic),
-      eocqMinutes: Math.max(0, eocqShare / readingCountForTopic),
-      seminarMinutes: Math.max(0, seminarShare / readingCountForTopic),
-      reviewMinutes: Math.max(0, reviewShare / readingCountForTopic),
-      questionMinutes: Math.max(0, profile.questionMinutes * questionTrim),
-      questionCount: profile.questionCount,
-      answeringShare: profile.answeringShare,
-      vignetteCount: profile.vignetteCount,
-      calculationShare: profile.calculationShare,
+  // Prior work declared at onboarding: any read or watch is step 1, answered questions are step 2.
+  const declared = await db.studyLogEntry.findMany({
+    where: { planId, selfDeclared: true, taskId: null },
+    select: {
+      confidence: true, questionsAnswered: true, questionsCorrect: true, declaredRead: true,
+      declaredWatched: true, los: { select: { readingId: true } },
+    },
+  });
+  const byReading = new Map<string, { conf: number | null; read: boolean; answered: number; correct: number }>();
+  for (const d of declared) {
+    const cur = byReading.get(d.los.readingId) ?? { conf: null, read: false, answered: 0, correct: 0 };
+    if (d.declaredRead || d.declaredWatched) {
+      cur.read = true;
+      cur.conf = cur.conf === null ? d.confidence : Math.min(cur.conf, d.confidence);
+    }
+    cur.answered += d.questionsAnswered;
+    cur.correct += d.questionsCorrect;
+    byReading.set(d.los.readingId, cur);
+  }
+  const declarations: Declaration[] = [];
+  for (const [readingId, d] of byReading) {
+    if (d.read) declarations.push({ readingId, step: 1, confidence: d.conf, answered: null, correct: null });
+    if (d.answered > 0) {
+      declarations.push({ readingId, step: 2, confidence: null, answered: d.answered, correct: d.correct });
+    }
+  }
+  for (const s of await db.stepDeclaration.findMany({ where: { planId } })) {
+    declarations.push({
+      readingId: s.readingId, step: s.step as 1 | 2 | 3 | 4, confidence: s.confidence,
+      answered: s.answered, correct: s.correct,
     });
   }
 
-  // Pack into days
-  // packDays budgets a day in MINUTES; StudyPlan.weeklyAvailability is in
-  // hours, which is what onboarding asks for. Passed through unconverted, a
-  // two hour Tuesday became a two minute Tuesday, nothing cleared the 15
-  // minute floor for a task, and every day in the horizon came back empty.
-  const calendar: Calendar = {
-    weeklyAvailability: Object.fromEntries(
-      Object.entries(weeklyAvailability).map(([day, hours]) => [day, hours * 60]),
-    ),
-    startDate: today,
-    horizonDays,
-    holidays: [],
-  };
-
-  // -------------------------------------------------------------------------
-  // Pack. effort-return keeps the original packer untouched, so its output
-  // cannot drift. The curriculum modes run the paired first pass and the
-  // review phase, composed below.
-  // -------------------------------------------------------------------------
-  let plannedDays: PlannedDay[];
-  let solved = { pacing: tuning.firstPassQuestionMultiple, budget: tuning.firstPassQuestionMultiple, requested: tuning.firstPassQuestionMultiple, calendarTooShort: false };
-  let writeOffs: WriteOff[] = [];
-  let underPractised: UnderPractised[] = [];
-  let reviewPhase = { active: false, cap: 0, reason: "not applicable to this plan mode" };
-  let coverageProjection: { date: string; slackDays: number } | null = null;
-
-  if (packable.length === 0) {
-    plannedDays = [];
-  } else if (tuning.planMode === "effort-return") {
-    plannedDays = packDays(packable, calendar, {});
-  } else {
-    const asOf = todayDate;
-
-    // What the candidate has actually done, on plan or off it. Reading and
-    // question minutes come from completed tasks; mastery comes from the log.
-    const {
-      readingDoneByRef,
-      questionsDoneByRef,
-      declaredReadRefs,
-      readingDoneByKindByRef,
-      watchedRefs,
-      notesReadRefs,
-      declaredQuestionsByRef,
-      questionDoneByKindByRef,
-    } = await loadWorkDone(planId, readings);
-    // Declared notes settle the notes, as watched videos settle the video.
-    for (const g of packable) {
-      if (!notesReadRefs.has(g.ref) || g.noteMinutes <= 0) continue;
-      const byKind = readingDoneByKindByRef.get(g.ref) ?? {};
-      const extra = Math.max(0, g.noteMinutes - (byKind["content-notes"] ?? 0));
-      byKind["content-notes"] = (byKind["content-notes"] ?? 0) + extra;
-      readingDoneByKindByRef.set(g.ref, byKind);
-      readingDoneByRef.set(g.ref, (readingDoneByRef.get(g.ref) ?? 0) + extra);
-    }
-    // Questions answered in this bank before the plan settle that share of it,
-    // answer review included, since the two are one block of practice.
-    for (const g of packable) {
-      const answered = declaredQuestionsByRef.get(g.ref) ?? 0;
-      const count = g.questionCount ?? 0;
-      if (answered <= 0 || count <= 0) continue;
-      const share = Math.min(1, answered / count) * g.questionMinutes;
-      questionsDoneByRef.set(g.ref, (questionsDoneByRef.get(g.ref) ?? 0) + share);
-      const byKind = questionDoneByKindByRef.get(g.ref) ?? {};
-      byKind.questions = (byKind.questions ?? 0) + share;
-      questionDoneByKindByRef.set(g.ref, byKind);
-    }
-    // A watched video settles the video only, topping up whatever its ticked
-    // video tasks already settled, never past the video's length.
-    for (const g of packable) {
-      if (!watchedRefs.has(g.ref) || g.videoMinutes <= 0) continue;
-      const byKind = readingDoneByKindByRef.get(g.ref) ?? {};
-      const already = byKind["content-video"] ?? 0;
-      const extra = Math.max(0, g.videoMinutes - already);
-      byKind["content-video"] = already + extra;
-      readingDoneByKindByRef.set(g.ref, byKind);
-      readingDoneByRef.set(g.ref, (readingDoneByRef.get(g.ref) ?? 0) + extra);
-    }
-    // Credit a declared reading in full. The declaration carries no minutes, so
-    // the unit's own reading total is the only honest figure to settle it with.
-    for (const g of packable) {
-      if (declaredReadRefs.has(g.ref)) {
-        readingDoneByRef.set(g.ref, Math.max(readingDoneByRef.get(g.ref) ?? 0, readingMinutesOf(g)));
-      }
-    }
-    const logsByRef = await loadMasteryObservations(planId, readings, packable, DEFAULT_EFFORT_CONSTANTS);
-
-    const totalReadingMinutes = packable.reduce((sum, g) => sum + readingMinutesOf(g), 0);
-    solved = solveQuestionMultiple(totalReadingMinutes, totalPlanMinutes, tuning);
-
-    const reconciled = reconcile(
-      packable,
-      logsByRef,
-      readingDoneByRef,
-      questionsDoneByRef,
-      solved.budget,
-      asOf,
-      tuning,
-      readingDoneByKindByRef,
-      questionDoneByKindByRef,
-    );
-    writeOffs = reconciled.writeOffs;
-    underPractised = reconciled.underPractised;
-
-    const unreadMinutes = reconciled.units.reduce((sum, u) => sum + u.readingDebt, 0);
-    const allCovered = unreadMinutes <= 0;
-    const realisedPacePerDay = realisedPace(completedTasks);
-
-    reviewPhase = reviewPhaseStart(
-      calendar,
-      { unreadMinutes, realisedPacePerDay, allCovered },
-      plan.examDate.toISOString().slice(0, 10),
-      asOf,
-      tuning,
-    );
-    if (realisedPacePerDay > 0 && !allCovered) {
-      coverageProjection = projectCoverageDate(
-        unreadMinutes,
-        realisedPacePerDay,
-        asOf,
-        calendar,
-        plan.examDate.toISOString().slice(0, 10),
-        tuning,
-      );
-    }
-
-    // Only units already read once are eligible for review. Unread material
-    // belongs to the first pass, whatever its mastery says.
-    const covered = new Set(
-      packable
-        .filter((g) => (readingDoneByRef.get(g.ref) ?? 0) >= readingMinutesOf(g) && readingMinutesOf(g) > 0)
-        .map((g) => g.ref),
-    );
-    const queue = reviewQueue(
-      packable
-        .filter((g) => covered.has(g.ref))
-        .map((g) => {
-          const obs = logsByRef.get(g.ref) ?? [];
-          return {
-            ref: g.ref,
-            readingRefs: g.readingRefs,
-            topicOrder: g.topicOrder,
-            moduleOrder: g.moduleOrder,
-            reviewReadMinutes: g.reviewMinutes ?? 0,
-            // Review answers questions already seen, so it runs faster
-            // than first-pass practice; eocq videos keep their length.
-            questionMinutes: reviewQuestionMinutes(g.questionMinutes) + g.eocqMinutes,
-            questionCount: g.questionCount,
-            // eocq videos ride in the same review block and count as
-            // answering, not as reading worked solutions.
-            answeringShare: (() => {
-              const practice = reviewQuestionMinutes(g.questionMinutes);
-              const total = practice + g.eocqMinutes;
-              return total > 0 ? (practice * (g.answeringShare ?? 1) + g.eocqMinutes) / total : 1;
-            })(),
-            mastery: masteryOfUnit(obs, asOf, tuning),
-            eligible: isEligibleToJump(obs, asOf, tuning),
-            vignetteCount: g.vignetteCount,
-            calculationShare: g.calculationShare,
-          };
-        }),
-      tuning.planMode,
-    );
-
-    // Compose the two phases by splitting each day's availability rather than
-    // interleaving inside one packer. The review cap is a share of the day, so
-    // scaling the calendar is exactly what it means, and each phase keeps its
-    // own weekly budget and its own floors.
-    // Reserving the review share when there is nothing to review would simply
-    // lose it. On a brand new plan nothing is covered yet, so a 35% cap turned
-    // every 60 minute day into 39 for the first pass, floor(39/3) fell under
-    // the 15 minute reading floor, and the day came back empty. An empty queue
-    // means no cap.
-    const requestedCap = reviewPhase.active ? Math.min(1, Math.max(0, reviewPhase.cap)) : 0;
-    const cap = queue.length === 0 ? 0 : requestedCap;
-
-    // The reason reaches the settings screen, so it has to say why the cap is
-    // what it IS, not why the policy would have set it. An empty queue
-    // overrides the policy entirely, and reporting "no realised pace yet" when
-    // the real answer is "nothing has been read yet" sends the candidate
-    // looking for a pace problem they do not have.
-    if (queue.length === 0 && requestedCap > 0) {
-      reviewPhase = {
-        active: false,
-        cap: 0,
-        reason: "nothing has been read once yet, so there is nothing to review",
-      };
-    }
-
-    const firstPassDays =
-      cap >= 1
-        ? []
-        : packFirstPass(reconciled.units, scaleCalendar(calendar, 1 - cap), solved.pacing, tuning);
-    const reviewDays = cap <= 0 ? [] : packReview(queue, scaleCalendar(calendar, cap), tuning);
-    reviewPhase = { ...reviewPhase, cap };
-
-    plannedDays = mergeDays(firstPassDays, reviewDays);
-  }
-
-  // Build set of (date, order) tuples that are in the new plan.
-  const newPlanSlots = new Set<string>();
-  for (const day of plannedDays) {
-    const dayDate = new Date(day.date + "T00:00:00Z");
-    for (let order = 0; order < day.tasks.length; order++) {
-      const key = `${dayDate.getTime()}|${order}`;
-      newPlanSlots.add(key);
+  // ---- capacity -----------------------------------------------------------------
+  const avail = plan.weeklyAvailability as Record<string, number>;
+  // A non-numeric weekday would turn every cap into NaN and corrupt the whole schedule, so refuse it.
+  for (const day of WEEKDAY) {
+    if (!Number.isFinite(Number(avail?.[day] ?? 0))) {
+      throw new Error(`weeklyAvailability.${day} must be hours as a number`);
     }
   }
+  const holidays = await db.planHoliday.findMany({ where: { planId } });
+  const windowTasks = await db.planTask.findMany({
+    where: { planId, date: { gte: todayDate, lte: horizonEnd }, frozen: false },
+  });
+  // Work already done on a day uses that day's capacity.
+  const usedByDate = new Map<string, number>();
+  for (const t of windowTasks) {
+    if (t.status !== "done" && t.status !== "partial") continue;
+    const k = iso(t.date);
+    usedByDate.set(k, (usedByDate.get(k) ?? 0) + (t.actualMinutes ?? t.estimatedMinutes));
+  }
+  const caps: DayCap[] = [];
+  const nDays = Math.max(0, diffDays(today, exam));
+  for (let i = 0; i < nDays; i++) {
+    const date = addDays(today, i);
+    const base = Math.max(0, Number(avail[WEEKDAY[new Date(`${date}T00:00:00Z`).getUTCDay()]] ?? 0)) * 60;
+    const hol = holidays.find((h) => iso(h.startDate) <= date && date <= iso(h.endDate));
+    caps.push({ date, minutes: Math.max(0, base - (usedByDate.get(date) ?? 0)), holidayId: hol?.id ?? null });
+  }
 
-  // Freeze, delete and write all happen in one transaction: a crash
-  // between any of these steps must never leave the plan half-regenerated
-  // (rows deleted with their replacements never written, or vice versa).
+  const result = planSteps({
+    today, exam, catalog, history, declarations, mockResults, caps, mockSessions,
+    reviewPolicy: tuning.reviewPolicy, reviewStartDate: tuning.reviewStartDate,
+    order: tuning.planMode === "curriculum-strict" ? "curriculum-strict" : "curriculum-topic",
+    belowPassAccepted: plan.belowPassAccepted,
+    doneOn: deriveDoneOn(catalog, history, declarations, mockResults),
+  });
+
+  // Only the horizon persists. Protected rows keep their slot and new work takes the free orders,
+  // otherwise a recorded task would silently swallow the planned task sharing its order.
+  const plannedWin = toPlanned(result.tasks).filter((p) => p.date <= iso(horizonEnd));
+  const protectedOrders = new Map<string, Set<number>>();
+  for (const t of windowTasks) {
+    if (!isProtectedWork(t)) continue;
+    const k = iso(t.date);
+    if (!protectedOrders.has(k)) protectedOrders.set(k, new Set());
+    protectedOrders.get(k)!.add(t.order);
+  }
+  const slots: Array<{ p: Planned; order: number }> = [];
+  const nextOrder = new Map<string, number>();
+  for (const p of plannedWin) {
+    const taken = protectedOrders.get(p.date);
+    let o = nextOrder.get(p.date) ?? 0;
+    while (taken?.has(o)) o++;
+    nextOrder.set(p.date, o + 1);
+    slots.push({ p, order: o });
+  }
+  const newSlots = new Set(slots.map(({ p, order }) => `${new Date(`${p.date}T00:00:00Z`).getTime()}|${order}`));
+
   const reported = {
-    planMode: tuning.planMode,
-    reviewPolicy: tuning.reviewPolicy,
-    requestedQuestionMultiple: solved.requested,
-    effectiveQuestionMultiple: solved.budget,
-    calendarTooShort: solved.calendarTooShort,
-    writeOffs,
-    underPractised,
-    injectionCap: reviewPhase.cap,
-    reviewReason: reviewPhase.reason,
-    coverageProjection,
+    planMode: tuning.planMode, reviewPolicy: tuning.reviewPolicy,
     rejectedTuning: parsed.rejected.map((r) => ({ field: r.field, reason: r.reason })),
-    days: plannedDays,
+    today, exam, tasks: result.tasks, fit: result.fit, windows: result.windows, metrics: result.metrics,
+    unplaced: result.unplaced, load: result.load, relaxedPolicy: result.relaxedPolicy, catalog,
   };
+  if (opts.dryRun) return { created: 0, frozen: 0, kept: 0, deleted: 0, ...reported };
 
-  if (opts.dryRun) {
-    return { created: 0, frozen: 0, kept: 0, deleted: 0, ...reported };
-  }
-
-  const result = await db.$transaction(async (tx) => {
-    // Marks the day this horizon was built for, which is what the sweep's
-    // day-end rebuild compares against.
-    await tx.studyPlan.update({ where: { id: planId }, data: { horizonGeneratedFor: today } });
-
-    // Freeze tasks before today.
-    let frozenCount = 0;
-    const tasksBeforeToday = await tx.planTask.findMany({
-      where: {
-        planId,
-        date: { lt: todayDate },
-      },
+  const written = await db.$transaction(async (tx) => {
+    await tx.studyPlan.update({
+      where: { id: planId },
+      data: { horizonGeneratedFor: today, fitReport: result.fit as unknown as object },
     });
 
-    for (const task of tasksBeforeToday) {
+    let frozenCount = 0;
+    const before = await tx.planTask.findMany({ where: { planId, date: { lt: todayDate } } });
+    for (const task of before) {
       if (!task.frozen) {
-        await tx.planTask.update({
-          where: { id: task.id },
-          data: { frozen: true },
-        });
+        await tx.planTask.update({ where: { id: task.id }, data: { frozen: true } });
         frozenCount++;
       }
     }
 
-    // Frozen cells left pending were missed. Their material is still owed
-    // (loadWorkDone credits only done and partial), so the plan below already
-    // re-places it; this is only to say which cells carry it.
+    // Frozen cells left pending were missed; their material is still owed (history credits
+    // only done and partial), so the plan below re-places it. This only says which cells carry it.
     const missedCells = await tx.planTask.findMany({
       where: {
-        planId,
-        date: { lt: todayDate },
-        frozen: true,
-        status: "pending",
+        planId, date: { lt: todayDate }, frozen: true, status: "pending",
         OR: [{ insertedBecause: null }, { insertedBecause: { not: OFF_PLAN } }],
       },
       select: { date: true, kind: true, readingIds: true },
     });
-    // A missed cell stays pending forever, so once a later cell of the same
-    // kind and module is worked, the miss is settled; otherwise every future
-    // review of that module would claim to be postponed.
+    // A miss stays pending forever, so once a later cell of the same kind and module is worked it is settled.
     const worked = await tx.planTask.findMany({
       where: { planId, status: { in: ["done", "partial"] } },
       select: { date: true, kind: true, readingIds: true },
     });
     const missed = missedCells.filter(
-      (m) =>
-        !worked.some(
-          (w) => w.date > m.date && w.kind === m.kind && w.readingIds.some((id) => m.readingIds.includes(id)),
-        ),
+      (m) => !worked.some(
+        (w) => w.date > m.date && w.kind === m.kind && w.readingIds.some((id) => m.readingIds.includes(id)),
+      ),
     );
 
-    // Get existing tasks in window for comparison.
     const tasksInWindow = await tx.planTask.findMany({
-      where: {
-        planId,
-        date: { gte: todayDate, lte: horizonEnd },
-        frozen: false,
-      },
+      where: { planId, date: { gte: todayDate, lte: horizonEnd }, frozen: false },
     });
 
-    // Delete tasks that are NOT in the new plan, unless they represent
-    // real work (logEntryId, a non-pending status, recorded actual
-    // minutes, or a running timer) - any of those survives regeneration.
     let deletedCount = 0;
     for (const task of tasksInWindow) {
-      const key = `${task.date.getTime()}|${task.order}`;
-      if (!newPlanSlots.has(key) && !isProtectedWork(task)) {
+      if (!newSlots.has(`${task.date.getTime()}|${task.order}`) && !isProtectedWork(task)) {
         await tx.planTask.delete({ where: { id: task.id } });
         deletedCount++;
       }
     }
 
-    // Write new tasks, and bring any occupied-but-stale slot's content
-    // in line with the fresh plan (an ordering-strategy change, for
-    // instance, reassigns which module lands at a given date/order - an
-    // occupied slot is only "stable" when its content still matches).
     let createdCount = 0;
-    for (const day of plannedDays) {
-      const dayDate = new Date(day.date + "T00:00:00Z");
-
-      for (let order = 0; order < day.tasks.length; order++) {
-        const plannedTask = day.tasks[order];
-        const key = `${dayDate.getTime()}|${order}`;
-        const postponedFrom = missedOrigin(missed, {
-          kind: plannedTask.kind,
-          readingIds: plannedTask.readingIds ?? [],
-        });
-        const existingInWindow = tasksInWindow.find(
-          (t) => `${t.date.getTime()}|${t.order}` === key,
-        );
-
-        if (existingInWindow) {
-          // Never overwrite real work, even if the plan reassigned this slot.
-          if (isProtectedWork(existingInWindow)) continue;
-          if (taskMatchesPlan(existingInWindow, plannedTask)) {
-            // Same content, but a late record can clear (or a new miss set)
-            // the reason it is here.
-            if (existingInWindow.postponedFrom?.getTime() !== postponedFrom?.getTime()) {
-              await tx.planTask.update({ where: { id: existingInWindow.id }, data: { postponedFrom } });
-            }
-            continue;
+    for (const { p, order } of slots) {
+      const date = new Date(`${p.date}T00:00:00Z`);
+      const key = `${date.getTime()}|${order}`;
+      const postponedFrom = missedOrigin(missed, { kind: p.kind, readingIds: p.readingIds });
+      const fields = {
+        kind: p.kind, step: p.step, round: p.round, extraReason: p.extraReason, mockRef: p.mockRef,
+        resourceIds: p.resourceIds, packageId: p.packageId, readingIds: p.readingIds,
+        estimatedMinutes: p.estimatedMinutes, workMinutes: p.workMinutes, questionCount: p.questionCount,
+        questionTarget: p.questionCount, requiresConfidence: p.requiresConfidence,
+      };
+      const existing = tasksInWindow.find((t) => `${t.date.getTime()}|${t.order}` === key);
+      if (existing) {
+        if (isProtectedWork(existing)) continue;
+        if (taskMatchesPlan(existing, p)) {
+          if (existing.postponedFrom?.getTime() !== postponedFrom?.getTime()) {
+            await tx.planTask.update({ where: { id: existing.id }, data: { postponedFrom } });
           }
-
-          await tx.planTask.update({
-            where: { id: existingInWindow.id },
-            data: {
-              kind: plannedTask.kind,
-              resourceId: plannedTask.resourceId,
-              readingIds: plannedTask.readingIds ?? [],
-              estimatedMinutes: plannedTask.estimatedMinutes,
-              requiresConfidence: plannedTask.requiresConfidence,
-              questionTarget: plannedTask.questionTarget,
-              vignetteFrom: plannedTask.vignetteFrom,
-              vignetteTo: plannedTask.vignetteTo,
-              mode: plannedTask.mode,
-              splitOf: plannedTask.splitOf,
-              splitIndex: plannedTask.splitIndex,
-              splitCount: plannedTask.splitCount,
-              postponedFrom,
-            },
-          });
           continue;
         }
-
-        await tx.planTask.create({
-          data: {
-            planId,
-            date: dayDate,
-            order,
-            kind: plannedTask.kind,
-            resourceId: plannedTask.resourceId,
-            readingIds: plannedTask.readingIds ?? [],
-            estimatedMinutes: plannedTask.estimatedMinutes,
-            requiresConfidence: plannedTask.requiresConfidence,
-            questionTarget: plannedTask.questionTarget,
-            vignetteFrom: plannedTask.vignetteFrom,
-            vignetteTo: plannedTask.vignetteTo,
-            mode: plannedTask.mode,
-            splitOf: plannedTask.splitOf,
-            splitIndex: plannedTask.splitIndex,
-            splitCount: plannedTask.splitCount,
-            postponedFrom,
-            status: "pending",
-            frozen: false,
-          },
-        });
-        createdCount++;
+        await tx.planTask.update({ where: { id: existing.id }, data: { ...fields, postponedFrom } });
+        continue;
       }
+      await tx.planTask.create({
+        data: { planId, date, order, ...fields, postponedFrom, status: "pending", frozen: false },
+      });
+      createdCount++;
     }
 
-    // Count kept tasks: ones that exist in the window and match the new plan's slots.
     let keptCount = 0;
     for (const task of tasksInWindow) {
-      const key = `${task.date.getTime()}|${task.order}`;
-      if (newPlanSlots.has(key)) {
-        keptCount++;
-      }
+      if (newSlots.has(`${task.date.getTime()}|${task.order}`)) keptCount++;
     }
-
-    return {
-      created: createdCount,
-      frozen: frozenCount,
-      kept: keptCount,
-      deleted: deletedCount,
-    };
+    return { created: createdCount, frozen: frozenCount, kept: keptCount, deleted: deletedCount };
   }, { timeout: 30000 });
 
-  return { ...result, ...reported };
+  return { ...written, ...reported };
 }

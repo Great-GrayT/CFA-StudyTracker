@@ -82,6 +82,9 @@ describe("projectCampaign", () => {
   test("a logged mock exam lands in the period that contains its date", async () => {
     const { planId } = await setupPlanWithCatalogue();
     const plan = await db.studyPlan.findUniqueOrThrow({ where: { id: planId } });
+    const containing = (c: Awaited<ReturnType<typeof projectCampaign>>) =>
+      c.periods.find((p) => p.start <= "2027-01-20" && p.end >= "2027-01-20")!;
+    const baseline = containing(await projectCampaign(planId, { today: TODAY })).minutes.mocks;
     await db.mockExam.create({
       data: {
         userId: plan.userId,
@@ -91,22 +94,19 @@ describe("projectCampaign", () => {
       },
     });
 
-    const { periods } = await projectCampaign(planId, { today: TODAY });
-    const containing = periods.find((p) => p.start <= "2027-01-20" && p.end >= "2027-01-20");
-    expect(containing).toBeDefined();
-    expect(containing!.minutes.mocks).toBeGreaterThan(0);
-    expect(periods.filter((p) => p.minutes.mocks > 0)).toHaveLength(1);
+    const campaign = await projectCampaign(planId, { today: TODAY });
+    expect(containing(campaign).minutes.mocks - baseline).toBe(180);
   });
 
-  test("reports the ratio the candidate asked for alongside the one the calendar supports", async () => {
+  test("reports the engine's fit alongside the plan mode and review policy", async () => {
     const { planId } = await setupPlanWithCatalogue();
     const campaign = await projectCampaign(planId, { today: TODAY });
 
-    expect(campaign.requestedQuestionMultiple).toBe(2);
-    expect(campaign.budgetQuestionMultiple).toBeGreaterThan(0);
+    // 12 h a week cannot hold ten full mocks in the last 30 days, so the fit is reported, not hidden.
+    expect(typeof campaign.fit.feasible).toBe("boolean");
+    expect(campaign.fit.crash).toBeGreaterThanOrEqual(1);
     expect(campaign.planMode).toBe("curriculum-topic");
     expect(campaign.reviewPolicy).toBe("decay-triggered");
-    expect(typeof campaign.calendarTooShort).toBe("boolean");
   });
 
   test("agrees with the horizon on the days they share", async () => {
@@ -117,11 +117,8 @@ describe("projectCampaign", () => {
     const campaign = await projectCampaign(planId, { today: TODAY, periodDays: 1 });
 
     const horizonByDate = new Map<string, number>();
-    for (const day of horizon.days) {
-      horizonByDate.set(
-        day.date,
-        day.tasks.reduce((sum, t) => sum + t.estimatedMinutes, 0),
-      );
+    for (const t of horizon.tasks) {
+      horizonByDate.set(t.date, (horizonByDate.get(t.date) ?? 0) + Math.round(t.minutes));
     }
 
     let compared = 0;
