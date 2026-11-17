@@ -258,6 +258,7 @@ model StudyPlan {
   tasks              PlanTask[]
   emailSends         EmailSend[]
   stepDeclarations   StepDeclaration[]
+  updatedAt DateTime @default(now()) @updatedAt
 }
 
 // One task on a candidate's daily plan. A single task can span multiple readings
@@ -322,6 +323,8 @@ model PlanTask {
   extraReason       String?
   mockRef           String?
   answerReviewDone  Boolean       @default(false)
+  // Minutes spent reviewing answers, kept apart from actualMinutes so answering credit stays honest.
+  answerReviewMinutes Int?
   resourceIds       String[]      @default([])
   questionCount     Int?
   // Uncrashed minutes of work the task covers; history credit scales this by
@@ -331,6 +334,7 @@ model PlanTask {
   logs              StudyLogEntry[]
   @@index([planId, date])
   @@unique([planId, date, order])
+  updatedAt DateTime @default(now()) @updatedAt
 }
 
 model StudyLogEntry {
@@ -371,6 +375,7 @@ model StudyLogEntry {
   package           StudyPackage? @relation(fields: [packageId], references: [id])
   @@index([planId, losId])
   @@index([taskId])
+  updatedAt DateTime @default(now()) @updatedAt
 }
 
 model MockExam {
@@ -387,6 +392,7 @@ model MockExam {
   plan          StudyPlan     @relation(fields: [planId], references: [id])
   package       StudyPackage? @relation(fields: [packageId], references: [id])
   topicScores   MockTopicScore[]
+  updatedAt DateTime @default(now()) @updatedAt
 }
 
 model MockTopicScore {
@@ -397,6 +403,7 @@ model MockTopicScore {
   correct    Int
   mockExam   MockExam @relation(fields: [mockExamId], references: [id], onDelete: Cascade)
   @@unique([mockExamId, topicId])
+  updatedAt DateTime @default(now()) @updatedAt
 }
 
 // A "did this before" self-state per module and step.
@@ -411,6 +418,7 @@ model StepDeclaration {
   createdAt  DateTime  @default(now())
   plan       StudyPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
   @@unique([planId, readingId, step])
+  updatedAt DateTime @default(now()) @updatedAt
 }
 
 model ProgressSnapshot {
@@ -461,6 +469,7 @@ model PlanHoliday {
   endDate   DateTime
   note      String?
   plan      StudyPlan @relation(fields: [planId], references: [id])
+  updatedAt DateTime @default(now()) @updatedAt
 }
 
 model PlanPackage {

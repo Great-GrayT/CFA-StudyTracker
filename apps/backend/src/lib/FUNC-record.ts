@@ -33,17 +33,19 @@ export async function recordTask(
 ): Promise<{ id: string; status: string; actualMinutes: number | null }> {
   await tx.studyLogEntry.deleteMany({ where: { taskId: task.id } });
 
+  const cap = (n: number) => Math.min(600, Math.max(0, n));
   const updated = await tx.planTask.update({
     where: { id: task.id },
     data:
       input.status === "pending"
-        ? { status: "pending", actualMinutes: null, answerReviewDone: false }
+        ? { status: "pending", actualMinutes: null, answerReviewMinutes: null, answerReviewDone: false }
         : {
             status: input.status,
-            // Review time is part of the sitting. Only a done task takes it: a partial's credit ratio
-            // is spent over estimated, and review minutes would inflate the answering credit.
-            actualMinutes: (input.actualMinutes ?? task.estimatedMinutes)
-              + (input.status === "done" ? (input.answerReviewMinutes ?? 0) : 0),
+            actualMinutes: cap(input.actualMinutes ?? task.estimatedMinutes),
+            // Kept apart so answering time stays the pace sample. Only a done task takes it: a partial's
+            // credit ratio is spent over estimated, and review minutes would inflate it.
+            answerReviewMinutes: input.status === "done" && input.answerReviewMinutes !== undefined
+              ? cap(input.answerReviewMinutes) : null,
             answerReviewDone: input.answerReviewDone ?? false,
           },
   });

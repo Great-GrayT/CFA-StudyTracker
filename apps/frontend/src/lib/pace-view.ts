@@ -300,9 +300,9 @@ export function shortDate(isoDate: string | null): string {
 const REASONS: Record<string, string> = {
   "top-up-80": "Top-up to reach 80%",
   "top-up-adequacy": "Top-up for too little practice time",
-  "package-switch": "Next package, the first one ran out of questions",
   "exemption-review": "Review after an exemption from questions",
   "answer-review-owed": "Answer review you skipped",
+  "mock-retest": "Retest after a weak mock topic",
   "mock-fail": "Mock below the bar",
 };
 /** Plain-language reason for an extra task; unknown slugs read as themselves. */

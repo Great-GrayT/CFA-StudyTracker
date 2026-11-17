@@ -37,11 +37,11 @@ describe("remainingWork", () => {
     expect(w[4].after).toContain(w[3].id);
   });
 
-  it("a bank that runs out continues on the next package as package-switch", () => {
+  it("a bank that runs out continues on the next package without becoming an extra", () => {
     const w = work([mod([bank("uw", 20), bank("kaplan", 100)])]);
     const q = w.filter((i) => i.step === 2 && i.kind === "questions");
     expect(q.map((i) => [i.packageId, i.questions, i.extraReason])).toEqual([
-      ["p-uw", 20, null], ["p-kaplan", 10, "package-switch"],
+      ["p-uw", 20, null], ["p-kaplan", 10, null],
     ]);
   });
 
@@ -80,7 +80,7 @@ describe("remainingWork", () => {
     const q = w.filter((i) => i.step === 2 && i.kind === "questions");
     expect(q[0].packageId).toBe("p-uw");
     expect(q[0].questions).toBe(10);
-    expect(q[1].extraReason).toBe("package-switch");
+    expect(q[1].extraReason).toBe("top-up-80");
   });
 
   it("owed answer review becomes its own item", () => {
@@ -110,7 +110,7 @@ describe("remainingWork", () => {
     const q = (s: number) => w.filter((i) => i.step === s && i.kind === "questions")
       .map((i) => [i.packageId, i.questions, i.extraReason]);
     expect(q(2)).toEqual([["p-uw", 30, null]]);
-    expect(q(4)).toEqual([["p-uw", 10, null], ["p-kaplan", 50, "package-switch"]]);
+    expect(q(4)).toEqual([["p-uw", 10, null], ["p-kaplan", 50, null]]);
   });
 
   it("a fresh round after an exemption never reuses questions from earlier rounds", () => {

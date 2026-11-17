@@ -5,6 +5,7 @@ import { db } from "./db";
 import { generateHorizon, horizonVersion, type HorizonResult } from "./FUNC-schedule";
 import { adequateMinutes } from "../core/steps/catalog";
 import { plannedMinutes } from "../core/steps/metrics";
+import { EXTRA_REASONS } from "../core/steps/work";
 import { gateDate } from "../core/steps/schedule";
 import type { FitReport, ModuleWindow } from "../core/steps";
 import type { StepNo } from "../core/steps/types";
@@ -53,35 +54,68 @@ function stepOf(t: { step: number | null; kind: string }): number {
   return 5;
 }
 
+const CACHE_MAX = 200;
+// Map keeps insertion order, so re-inserting on a hit makes the first key the least recently used.
 const cache = new Map<string, { key: string; value: Projection }>();
+function remember(planId: string, entry: { key: string; value: Projection }) {
+  cache.delete(planId);
+  cache.set(planId, entry);
+  if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value!);
+}
 
-/** Anything a record, declaration, holiday, mock or setting changes moves this string. */
+/**
+ * Anything a record, declaration, holiday, mock or setting changes moves this string. Each table
+ * contributes its row count, newest updatedAt and the sums an edit-in-place moves, so an upsert that
+ * keeps the count (or lands in the same clock tick) still changes the key. Read from the database, so
+ * every server process agrees.
+ */
 async function fingerprint(planId: string, today: string): Promise<string | null> {
-  const plan = await db.studyPlan.findUnique({
-    where: { id: planId },
-    select: {
-      horizonGeneratedFor: true, examDate: true, weeklyAvailability: true, belowPassAccepted: true,
-      stepPriority: true, lesReadingHours: true,
-      _count: { select: { holidays: true, mockExams: true, stepDeclarations: true } },
-    },
-  });
+  const [plan, tasks, logs, decls, holidays, mocks, scores] = await Promise.all([
+    db.studyPlan.findUnique({
+      where: { id: planId },
+      select: {
+        horizonGeneratedFor: true, examDate: true, weeklyAvailability: true, belowPassAccepted: true,
+        stepPriority: true, lesReadingHours: true, updatedAt: true,
+      },
+    }),
+    db.planTask.aggregate({
+      where: { planId, status: { in: ["done", "partial"] } },
+      _count: true, _max: { updatedAt: true }, _sum: { actualMinutes: true, answerReviewMinutes: true },
+    }),
+    db.studyLogEntry.aggregate({
+      where: { planId },
+      _count: true, _max: { updatedAt: true }, _sum: { questionsAnswered: true, questionsCorrect: true, confidence: true },
+    }),
+    db.stepDeclaration.aggregate({
+      where: { planId },
+      _count: true, _max: { updatedAt: true }, _sum: { answered: true, correct: true, confidence: true },
+    }),
+    db.planHoliday.aggregate({ where: { planId }, _count: true, _max: { updatedAt: true } }),
+    db.mockExam.aggregate({ where: { planId }, _count: true, _max: { updatedAt: true }, _sum: { scorePercent: true } }),
+    db.mockTopicScore.aggregate({
+      where: { mockExam: { planId } },
+      _count: true, _max: { updatedAt: true }, _sum: { answered: true, correct: true },
+    }),
+  ]);
   if (!plan) return null;
-  const done = await db.planTask.aggregate({
-    where: { planId, status: { in: ["done", "partial"] } },
-    _count: true, _sum: { actualMinutes: true },
+  const holidayDates = await db.planHoliday.findMany({
+    where: { planId }, select: { startDate: true, endDate: true }, orderBy: { startDate: "asc" },
   });
   return JSON.stringify([
-    horizonVersion(planId), today, plan.horizonGeneratedFor, plan.examDate, plan.weeklyAvailability,
-    plan.belowPassAccepted, plan.stepPriority, plan.lesReadingHours, plan._count, done._count, done._sum.actualMinutes,
+    horizonVersion(planId), today, plan, tasks, logs, decls, holidays, mocks, scores,
+    holidayDates.map((h) => [h.startDate, h.endDate]),
   ]);
 }
 
 export async function getProjection(planId: string, today: string): Promise<Projection> {
   const key = await fingerprint(planId, today);
   const hit = cache.get(planId);
-  if (key && hit && hit.key === key) return hit.value;
+  if (key && hit && hit.key === key) {
+    remember(planId, hit);
+    return hit.value;
+  }
   const value = await buildProjection(planId, today);
-  if (key) cache.set(planId, { key, value });
+  if (key) remember(planId, { key, value });
   return value;
 }
 
@@ -95,8 +129,11 @@ export async function buildProjection(planId: string, today: string): Promise<Pr
     db.planHoliday.findMany({ where: { planId }, orderBy: { startDate: "asc" } }),
     db.planTask.findMany({ where: { planId }, orderBy: [{ date: "asc" }, { order: "asc" }] }),
     db.studyLogEntry.findMany({
-      where: { planId, taskId: { not: null } },
-      select: { questionsAnswered: true, questionsCorrect: true, los: { select: { readingId: true } }, task: { select: { step: true, kind: true } } },
+      where: { planId, OR: [{ taskId: { not: null } }, { selfDeclared: true }] },
+      select: {
+        taskId: true, questionsAnswered: true, questionsCorrect: true,
+        los: { select: { readingId: true } }, task: { select: { step: true, kind: true } },
+      },
     }),
     db.mockExam.findMany({ where: { planId }, select: { topicScores: true } }),
     db.stepDeclaration.findMany({ where: { planId, step: { in: [2, 4] } } }),
@@ -108,27 +145,38 @@ export async function buildProjection(planId: string, today: string): Promise<Pr
 
   // Credited minutes: what the candidate actually spent, never more than a done task was planned to take.
   const credit = (t: (typeof tasks)[number]) =>
-    t.status === "done" ? (t.actualMinutes ?? t.estimatedMinutes) : t.status === "partial" ? (t.actualMinutes ?? 0) : 0;
+    t.status === "done" ? (t.actualMinutes ?? t.estimatedMinutes) + (t.answerReviewMinutes ?? 0)
+      : t.status === "partial" ? (t.actualMinutes ?? 0) : 0;
 
   // ---- extras ----------------------------------------------------------------
+  // Work added by under-performance or owed answer review, one entry per work item. Finished extras
+  // come from the rows (the engine plans only what is still owed); everything still owed comes from
+  // the dry run, which covers the persisted horizon as well, so no piece is counted twice.
   const extras: Projection["extras"] = tasks
-    .filter((t) => t.extraReason !== null)
+    .filter((t) => EXTRA_REASONS.has(t.extraReason ?? "") && (t.status === "done" || t.status === "partial"))
     .map((t) => ({
       taskId: t.id, readingId: t.readingIds[0] ?? "", step: stepOf(t), reason: t.extraReason!,
       questions: t.questionCount, minutes: t.estimatedMinutes, date: iso(t.date),
     }));
-  // The persisted horizon is 14 days; extras planned beyond it exist only in the dry run.
-  const have = new Set(extras.map((e) => `${e.date}|${e.readingId}|${e.step}|${e.reason}`));
+  const owed = new Map<string, Projection["extras"][number]>();
   for (const t of hz.tasks) {
-    if (t.item.extraReason === null) continue;
-    const k = `${t.date}|${t.item.readingId}|${t.item.step}|${t.item.extraReason}`;
-    if (have.has(k)) continue;
-    extras.push({
-      taskId: null, readingId: t.item.readingId, step: t.item.step, reason: t.item.extraReason,
-      questions: t.item.questions ? Math.round(t.item.questions * Math.min(1, t.workMinutes / Math.max(1, t.item.minutes))) : null,
-      minutes: Math.round(t.minutes), date: t.date,
+    const it = t.item;
+    if (!EXTRA_REASONS.has(it.extraReason ?? "")) continue;
+    const e = owed.get(it.id);
+    if (e) { e.minutes += Math.round(t.minutes); continue; }
+    owed.set(it.id, {
+      taskId: null, readingId: it.readingId, step: it.step, reason: it.extraReason!,
+      questions: it.questions ?? null, minutes: Math.round(t.minutes), date: t.date,
     });
   }
+  for (const u of hz.unplaced) {
+    if (!EXTRA_REASONS.has(u.extraReason ?? "") || owed.has(u.id)) continue;
+    owed.set(u.id, {
+      taskId: null, readingId: u.readingId, step: u.step, reason: u.extraReason!,
+      questions: u.questions ?? null, minutes: Math.round(u.minutes), date: null,
+    });
+  }
+  extras.push(...owed.values());
 
   // ---- sections ----------------------------------------------------------------
   const spent = new Map<string, number>(); // readingId|step -> credited minutes
@@ -146,10 +194,15 @@ export async function buildProjection(planId: string, today: string): Promise<Pr
     if (!p) perf.set(topicId, (p = { initial: { answered: 0, correct: 0 }, review: { answered: 0, correct: 0 }, mocks: { answered: 0, correct: 0 } }));
     return p;
   };
+  // Prior-work writes a self-declared log row and a StepDeclaration for the same answers; the
+  // declaration wins, as in the engine, so those answers are counted once.
+  const statedStep = new Set(stated.map((d) => `${d.readingId}|${d.step}`));
   for (const l of logs) {
     const topicId = topicOfReading.get(l.los.readingId);
-    if (!topicId || !l.task) continue;
-    const step = stepOf(l.task);
+    if (!topicId) continue;
+    // A taskId-null selfDeclared row is a step 2 prior-work answer.
+    if (!l.task && statedStep.has(`${l.los.readingId}|2`)) continue;
+    const step = l.task ? stepOf(l.task) : 2;
     const bucket = step === 2 ? "initial" : step === 4 ? "review" : null;
     if (!bucket) continue;
     perfOf(topicId)[bucket].answered += l.questionsAnswered;

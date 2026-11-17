@@ -268,7 +268,12 @@ describe("answer review on a questions task", () => {
     });
     const row = await db.planTask.findUniqueOrThrow({ where: { id: task.id } });
     expect(row.answerReviewDone).toBe(true);
+    expect(row.answerReviewMinutes).toBe(15);
+    expect(row.actualMinutes).toBe(60);
     expect(await db.planTask.count({ where: { planId, extraReason: "answer-review-owed" } })).toBe(0);
+    await patch(user, planId, task.id, { status: "pending" });
+    const undone = await db.planTask.findUniqueOrThrow({ where: { id: task.id } });
+    expect([undone.actualMinutes, undone.answerReviewMinutes]).toEqual([null, null]);
   });
 
   test("more correct than answered is a 400", async () => {

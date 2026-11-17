@@ -2,9 +2,11 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { db } from "../../src/lib/db";
 import { resetDb } from "../helpers/test-db";
 import { readJson } from "../helpers/request";
-import { authedRequest, registerUser, setupPlanWithCatalogue } from "../helpers/fixtures";
+import { addQuestionBank, authedRequest, registerUser, setupPlanWithCatalogue } from "../helpers/fixtures";
 import { GET } from "../../src/app/api/plans/[id]/projection/route";
 import { generateHorizon } from "../../src/lib/FUNC-schedule";
+import { PATCH as PATCH_TASK } from "../../src/app/api/plans/[id]/tasks/[taskId]/route";
+import { POST as POST_DECL } from "../../src/app/api/plans/[id]/declarations/route";
 
 async function ownedPlan() {
   const { planId } = await setupPlanWithCatalogue();
@@ -115,5 +117,54 @@ describe("GET /api/plans/:id/projection", () => {
     expect(mod.performance.s2).toMatchObject({ answered: 24, correct: 12, passed: false });
     expect(mod.performance.s2.adequateMin).toBeGreaterThan(0);
     expect(mod.performance.s4).toBeNull();
+  });
+
+  test("extras: none on a fresh plan, and only the top-up after a 50% step 2 record", async () => {
+    const { planId } = await setupPlanWithCatalogue();
+    await addQuestionBank({ questionsPerUnit: 200 });
+    const user = await registerUser();
+    await db.studyPlan.update({
+      where: { id: planId },
+      data: { userId: user.id, examDate: new Date("2027-04-01"), weeklyAvailability: { mon: 8, tue: 8, wed: 8, thu: 8, fri: 8, sat: 8, sun: 8 } },
+    });
+    await generateHorizon(planId, "2027-01-04");
+    expect((await readJson(await get(user, planId))).extras).toEqual([]);
+
+    const t = await db.planTask.findFirstOrThrow({ where: { planId, date: new Date("2027-01-04") }, orderBy: { order: "asc" } });
+    await db.planTask.update({
+      where: { id: t.id },
+      data: { kind: "questions", step: 2, round: 1, questionCount: 20, estimatedMinutes: 60, workMinutes: 60 },
+    });
+    await db.lOS.create({ data: { readingId: t.readingIds[0]!, text: "Outcome", order: 1 } });
+    await PATCH_TASK(authedRequest(user, `/api/plans/${planId}/tasks/${t.id}`, {
+      status: "done", confidence: 3, questionsAnswered: 20, questionsCorrect: 10, answerReviewDone: true,
+    }, "PATCH"));
+    const p = await readJson(await get(user, planId));
+    expect(p.extras.length).toBeGreaterThan(0);
+    for (const e of p.extras) expect(["top-up-80", "top-up-adequacy"]).toContain(e.reason);
+    expect(new Set(p.extras.map((e: any) => e.reason)).size).toBe(1);
+  });
+
+  test("an edited declaration is not served from the cache", async () => {
+    const { planId, user } = await ownedPlan();
+    const r = (await db.reading.findFirstOrThrow({ where: { topic: { levelId: "II" } }, orderBy: { name: "asc" } })).id;
+    const post = (items: unknown[]) =>
+      POST_DECL(authedRequest(user, `/api/plans/${planId}/declarations`, { items }));
+    await post([{ readingId: r, step: 1 }, { readingId: r, step: 2, answered: 10, correct: 5 }]);
+    const mod = (p: any) => p.sections.flatMap((s: any) => s.modules).find((m: any) => m.readingId === r);
+    const before = mod(await readJson(await get(user, planId)));
+    expect(before.performance.s2.correct).toBe(5);
+    await post([{ readingId: r, step: 2, answered: 10, correct: 9 }]);
+    const after = mod(await readJson(await get(user, planId)));
+    expect(after.performance.s2.correct).toBe(9);
+  });
+
+  test("concurrent replans of one plan serialize instead of colliding", async () => {
+    const { planId } = await ownedPlan();
+    vi.setSystemTime(new Date("2027-01-05T09:00:00Z"));
+    await Promise.all([1, 2, 3].map(() => generateHorizon(planId, "2027-01-05")));
+    const rows = await db.planTask.findMany({ where: { planId, date: { gte: new Date("2027-01-05") } } });
+    const slots = rows.map((r) => `${r.date.getTime()}|${r.order}`);
+    expect(new Set(slots).size).toBe(slots.length);
   });
 });

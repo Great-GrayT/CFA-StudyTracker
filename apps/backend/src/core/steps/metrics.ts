@@ -3,7 +3,7 @@ import { addDays, diffDays } from "./dates";
 import { gateDate, type ScheduledTask } from "./schedule";
 import type { ModuleState } from "./state";
 import type { ModuleCatalog, StepNo } from "./types";
-import type { WorkItem } from "./work";
+import { EXTRA_REASONS, type WorkItem } from "./work";
 
 export type WindowStatus = "done" | "planned" | "overdue" | "in-progress";
 export type ModuleWindow = {
@@ -133,7 +133,11 @@ export function computeMetrics(p: {
   }
   for (const u of p.unplaced) required += u.minutes;
 
-  const extraItems = [...p.work, ...p.unplaced.filter((u) => u.step === 5)].filter((w) => w.extraReason !== null);
+  // Distinct work items, not scheduled pieces: one item split over several days is one extra.
+  const extraItems = [...new Map(
+    [...p.work, ...p.unplaced.filter((u) => u.step === 5)]
+      .filter((w) => EXTRA_REASONS.has(w.extraReason ?? "")).map((w) => [w.id, w]),
+  ).values()];
   return {
     readiness: readiness(p.cat, stOf),
     readinessPlanToday: readiness(p.cat, planToday),

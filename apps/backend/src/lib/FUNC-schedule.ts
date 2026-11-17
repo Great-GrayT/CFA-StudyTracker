@@ -17,6 +17,8 @@ import type { WorkItem } from "../core/steps/work";
 
 const HORIZON_DAYS = 14;
 
+type Db = Pick<typeof db, "$executeRaw" | "studyPlan" | "reading" | "planPackage" | "studyPackage" | "packageUnit" | "mockExam" | "packageResource" | "planTask" | "studyLogEntry" | "stepDeclaration" | "planHoliday">;
+
 // Bumped by every real rebuild so cached projections of the plan are dropped.
 const rebuilds = new Map<string, number>();
 export const horizonVersion = (planId: string) => rebuilds.get(planId) ?? 0;
@@ -154,7 +156,28 @@ export async function generateHorizon(
     dryRun?: boolean;
   } = {},
 ): Promise<HorizonResult> {
-  const plan = await db.studyPlan.findUniqueOrThrow({ where: { id: planId } });
+  if (opts.dryRun) return planAndWrite(db, planId, today, opts);
+  // One writer per plan: the history is read inside the transaction, after the lock, so a
+  // concurrent record or replan can never leave this run writing from a stale picture.
+  const result = await db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${planId}))`;
+    return planAndWrite(tx, planId, today, opts);
+  }, { timeout: 60000, maxWait: 30000 });
+  rebuilds.set(planId, horizonVersion(planId) + 1);
+  return result;
+}
+
+async function planAndWrite(
+  q: Db,
+  planId: string,
+  today: string,
+  opts: {
+    horizonDays?: number;
+    /** Plan without writing; the full result comes back for projections. */
+    dryRun?: boolean;
+  } = {},
+): Promise<HorizonResult> {
+  const plan = await q.studyPlan.findUniqueOrThrow({ where: { id: planId } });
 
   // A later rebuild "from today" must not put fresh work back onto a day the
   // debrief has already closed.
@@ -175,20 +198,20 @@ export async function generateHorizon(
   horizonEnd.setUTCDate(horizonEnd.getUTCDate() + horizonDays - 1);
 
   // ---- catalogue ------------------------------------------------------------
-  const readings = await db.reading.findMany({
+  const readings = await q.reading.findMany({
     where: { topic: { levelId: plan.levelId } }, include: { topic: true },
   });
-  const planPackages = await db.planPackage.findMany({ where: { planId }, include: { package: true } });
+  const planPackages = await q.planPackage.findMany({ where: { planId }, include: { package: true } });
   let pkgs = planPackages.map((p) => p.package);
   // A plan with no packages attached still gets planned, from every catalogue on the level.
   if (pkgs.length === 0) {
-    pkgs = await db.studyPackage.findMany({ where: { editions: { some: { levelId: plan.levelId } } } });
+    pkgs = await q.studyPackage.findMany({ where: { editions: { some: { levelId: plan.levelId } } } });
   }
   const slugOf = new Map(pkgs.map((p) => [p.id, p.slug ?? p.id]));
   const planSlugs = [...slugOf.values()];
   const priority = resolvePriority(plan.stepPriority, planSlugs);
 
-  const unitRows = await db.packageUnit.findMany({
+  const unitRows = await q.packageUnit.findMany({
     where: { edition: { levelId: plan.levelId, packageId: { in: [...slugOf.keys()] } } },
     select: {
       id: true, notesPageCount: true, edition: { select: { packageId: true } },
@@ -212,12 +235,12 @@ export async function generateHorizon(
   });
 
   // ---- mocks ---------------------------------------------------------------
-  const mockExams = await db.mockExam.findMany({
+  const mockExams = await q.mockExam.findMany({
     where: { planId }, include: { topicScores: true }, orderBy: { date: "asc" },
   });
   const doneRef = new Map<string, string>();
   for (const m of mockExams) if (m.sessionRef && !doneRef.has(m.sessionRef)) doneRef.set(m.sessionRef, iso(m.date));
-  const mockRes = await db.packageResource.findMany({
+  const mockRes = await q.packageResource.findMany({
     where: { kind: "mock_session", edition: { levelId: plan.levelId, packageId: { in: [...slugOf.keys()] } } },
     select: { id: true, ref: true, title: true, questionCount: true, topicMix: true, edition: { select: { packageId: true } } },
   });
@@ -241,7 +264,7 @@ export async function generateHorizon(
   }));
 
   // ---- history ---------------------------------------------------------------
-  const taskRows = await db.planTask.findMany({
+  const taskRows = await q.planTask.findMany({
     where: { planId, status: { in: ["done", "partial"] } },
     include: { logs: { select: { questionsAnswered: true, questionsCorrect: true } } },
   });
@@ -249,9 +272,10 @@ export async function generateHorizon(
     // Credit = uncrashed work x share of the estimate actually spent (never above 1);
     // tasks from before the engine have no workMinutes, so their estimate stands in.
     const work = t.workMinutes ?? t.estimatedMinutes;
-    const ratio = t.actualMinutes === null
+    const spent = t.actualMinutes === null ? null : t.actualMinutes + (t.answerReviewMinutes ?? 0);
+    const ratio = spent === null
       ? (t.status === "done" ? 1 : 0)
-      : Math.min(1, t.actualMinutes / Math.max(1, t.estimatedMinutes));
+      : Math.min(1, spent / Math.max(1, t.estimatedMinutes));
     return {
       id: t.id, date: iso(t.date), kind: t.kind, step: t.step, round: t.round, readingIds: t.readingIds,
       status: t.status as "done" | "partial", minutes: work * ratio, estimateMinutes: work,
@@ -262,7 +286,7 @@ export async function generateHorizon(
   });
 
   // Prior work declared at onboarding: any read or watch is step 1, answered questions are step 2.
-  const declared = await db.studyLogEntry.findMany({
+  const declared = await q.studyLogEntry.findMany({
     where: { planId, selfDeclared: true, taskId: null },
     select: {
       confidence: true, questionsAnswered: true, questionsCorrect: true, declaredRead: true,
@@ -287,7 +311,7 @@ export async function generateHorizon(
       declarations.push({ readingId, step: 2, confidence: null, answered: d.answered, correct: d.correct });
     }
   }
-  const stated = await db.stepDeclaration.findMany({ where: { planId } });
+  const stated = await q.stepDeclaration.findMany({ where: { planId } });
   // A self-state row restates the form's log rows (prior-work maps one onto the other), so it wins over them.
   const statedKeys = new Set(stated.map((s) => `${s.readingId}|${s.step}`));
   for (let i = declarations.length - 1; i >= 0; i--) {
@@ -308,8 +332,8 @@ export async function generateHorizon(
       throw new Error(`weeklyAvailability.${day} must be hours as a number`);
     }
   }
-  const holidays = await db.planHoliday.findMany({ where: { planId } });
-  const windowTasks = await db.planTask.findMany({
+  const holidays = await q.planHoliday.findMany({ where: { planId } });
+  const windowTasks = await q.planTask.findMany({
     where: { planId, date: { gte: todayDate, lte: horizonEnd }, frozen: false },
   });
   // Work already done on a day uses that day's capacity.
@@ -317,7 +341,7 @@ export async function generateHorizon(
   for (const t of windowTasks) {
     if (t.status !== "done" && t.status !== "partial") continue;
     const k = iso(t.date);
-    usedByDate.set(k, (usedByDate.get(k) ?? 0) + (t.actualMinutes ?? t.estimatedMinutes));
+    usedByDate.set(k, (usedByDate.get(k) ?? 0) + (t.actualMinutes ?? t.estimatedMinutes) + (t.answerReviewMinutes ?? 0));
   }
   const caps: DayCap[] = [];
   const nDays = Math.max(0, diffDays(today, exam));
@@ -365,7 +389,7 @@ export async function generateHorizon(
   };
   if (opts.dryRun) return { created: 0, frozen: 0, kept: 0, deleted: 0, ...reported };
 
-  const written = await db.$transaction(async (tx) => {
+  const written = await (async (tx: Db) => {
     await tx.studyPlan.update({
       where: { id: planId },
       data: { horizonGeneratedFor: today, fitReport: result.fit as unknown as object },
@@ -446,8 +470,7 @@ export async function generateHorizon(
       if (newSlots.has(`${task.date.getTime()}|${task.order}`)) keptCount++;
     }
     return { created: createdCount, frozen: frozenCount, kept: keptCount, deleted: deletedCount };
-  }, { timeout: 30000 });
+  })(q);
 
-  rebuilds.set(planId, horizonVersion(planId) + 1);
   return { ...written, ...reported };
 }

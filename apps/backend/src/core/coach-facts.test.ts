@@ -52,7 +52,7 @@ describe("ladderFacts", () => {
     expect(ok.belowPass).toBe(true);
   });
   test("extra reason prefers today's", () => {
-    const extras = [{ reason: "package-switch", date: "2027-01-11" }, { reason: "top-up-80", date: "2027-01-10" }];
+    const extras = [{ reason: "mock-retest", date: "2027-01-11" }, { reason: "top-up-80", date: "2027-01-10" }];
     expect(ladderFacts(input({ extras }), 100, false).extraReason).toBe("top-up-80");
   });
 });

@@ -3,12 +3,17 @@ import { EPS, MIN_PER_QUESTION, topUpParts } from "./rules";
 import type { ModuleState } from "./state";
 import type { ModuleCatalog, SourceOption } from "./types";
 
+/** Work added because of under-performance or skipped answer review. Normal supply, such as the next package's bank, is not an extra. */
+export type ExtraReason = "top-up-80" | "top-up-adequacy" | "exemption-review" | "mock-retest" | "answer-review-owed";
+export const EXTRA_REASONS: ReadonlySet<string> = new Set<ExtraReason>([
+  "top-up-80", "top-up-adequacy", "exemption-review", "mock-retest", "answer-review-owed",
+]);
+
 export type WorkItem = {
   id: string; readingId: string; step: 1 | 2 | 3 | 4 | 5; round: number;
   kind: "read" | "questions" | "answer-review" | "review" | "mock" | "mock-review";
   minutes: number; questions?: number; packageId: string; resourceIds: string[]; label: string;
-  extraReason: null | "top-up-80" | "top-up-adequacy" | "package-switch" | "exemption-review"
-    | "mock-retest" | "answer-review-owed";
+  extraReason: ExtraReason | null;
   after: string[]; // ids of items that must finish first
   mockRef?: string | null; // step 5 only; null = generic placeholder
 };
@@ -27,7 +32,7 @@ function questionItems(m: ModuleCatalog, step: 2 | 4, r: QState, retest: string 
   const perT = rate(opts[0]);
   const credited = r.minutes + r.pendingAnswerReview; // owed review gets planned separately
   let need: number;
-  let reason: WorkItem["extraReason"] = null;
+  let reason: ExtraReason | null = null;
   if (r.answered <= 0) {
     need = Math.ceil(Math.max(0, adequate - credited) / perT - EPS);
     if (step === 4 && retest) reason = "mock-retest";
@@ -62,7 +67,7 @@ function questionItems(m: ModuleCatalog, step: 2 | 4, r: QState, retest: string 
   const out: WorkItem[] = [];
   alloc.forEach(({ o, idx, n }, i) => {
     const id = `${m.readingId}:s${step}:r${r.round}:q${i}`;
-    const why = idx > 0 ? "package-switch" : reason;
+    const why = reason;
     out.push({
       id, readingId: m.readingId, step, round: r.round, kind: "questions",
       minutes: n * (o.minutesPerQuestion ?? MIN_PER_QUESTION), questions: n, packageId: o.packageId,
