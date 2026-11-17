@@ -8,6 +8,7 @@ import { DayHeader } from "@/components/today/day-header";
 import { TodaysWork } from "@/components/today/todays-work";
 import { WeekStrip, weekDates } from "@/components/today/week-strip";
 import { StandingPanel } from "@/components/today/standing-panel";
+import { FitBanner } from "@/components/plan/fit-banner";
 import { StudyNext } from "@/components/today/study-next";
 import { OfflineLine, RegionError, regionState } from "@/components/states/region-states";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -220,6 +221,7 @@ export default function TodayPage() {
             />
             {!online ? <OfflineLine /> : null}
           </div>
+          <FitBanner planId={plan.data.id} />
           <TodaysWork
             day={days?.find((d) => d.date === selected)}
             date={selected}

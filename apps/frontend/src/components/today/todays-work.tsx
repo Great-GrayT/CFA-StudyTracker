@@ -11,6 +11,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { DeclareSheet, type DeclareTarget } from "@/components/record/declare-sheet";
+import { stepForTask } from "@/lib/record";
+import { useState } from "react";
 import { useRecord } from "@/components/record/record-provider";
 import { useUndoRecord } from "@/components/record/use-undo-record";
 import { cn } from "@/lib/utils";
@@ -52,6 +55,7 @@ export function TodaysWork({
     date === todayISO ? "Today's work" : `Work for ${shortDay.format(new Date(`${date}T00:00:00Z`))}`;
   // A day not yet lived cannot be recorded against.
   const recordable = date <= todayISO;
+  const [declare, setDeclare] = useState<DeclareTarget | null>(null);
 
   return (
     <section aria-labelledby="todays-work" className="flex flex-col gap-2">
@@ -87,10 +91,18 @@ export function TodaysWork({
       ) : (
         <ul className="border-border border-t">
           {sortCells(day.tasks).map((task) => (
-            <WorkRow key={task.id} task={task} date={date} planId={planId} recordable={recordable} />
+            <WorkRow
+              key={task.id}
+              task={task}
+              date={date}
+              planId={planId}
+              recordable={recordable}
+              onDeclare={setDeclare}
+            />
           ))}
         </ul>
       )}
+      <DeclareSheet planId={planId} target={declare} onOpenChange={(o) => !o && setDeclare(null)} />
     </section>
   );
 }
@@ -100,11 +112,13 @@ function WorkRow({
   date,
   planId,
   recordable,
+  onDeclare,
 }: {
   task: PrescribedTask;
   date: string;
   planId: string;
   recordable: boolean;
+  onDeclare: (t: DeclareTarget) => void;
 }) {
   const record = useRecord();
   const { undo, pending } = useUndoRecord(planId);
@@ -112,6 +126,9 @@ function WorkRow({
   const partial = task.status === "partial";
   const recorded = done || partial;
   const moduleName = [task.topicName, task.moduleTitle].filter(Boolean).join(", ") || "Unassigned work";
+  const step = stepForTask(task);
+  const readingId = task.readingIds[0];
+  const canDeclare = !recorded && !task.offPlan && step !== null && !!readingId;
 
   return (
     <li
@@ -160,6 +177,17 @@ function WorkRow({
       </span>
 
       <span className="flex shrink-0 items-center gap-1">
+        {canDeclare ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-muted-foreground rounded-sm text-[13px] max-md:h-11"
+            onClick={() => onDeclare({ readingId, moduleName, step })}
+            aria-label={`Did this before: ${moduleName}`}
+          >
+            Did this before
+          </Button>
+        ) : null}
         <Materials materials={task.materials} moduleName={moduleName} />
         {recorded ? (
           task.offPlan ? (

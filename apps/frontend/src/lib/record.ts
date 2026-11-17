@@ -1,4 +1,5 @@
 import type { SessionKind } from "./hooks";
+import type { DeclarationItem, StepNo } from "./types";
 
 // Pure half of the Record sheet's presets, so applying one can be tested.
 
@@ -46,4 +47,81 @@ export function resolvePreset(
     }
   }
   return {};
+}
+
+// Self-state and question entry helpers for Record and "Did this before".
+
+type MaterialLike = { action: string; questionCount: number | null };
+
+/**
+ * Questions the package sets for a task, or null when unknown. Answer review
+ * materials carry a count too (the answers to review), which is not a count
+ * to answer, so they are skipped.
+ */
+export function taskQuestionCount(task: { questionCount?: number | null; materials: MaterialLike[] }): number | null {
+  if (task.questionCount) return task.questionCount;
+  const sum = task.materials
+    .filter((m) => m.action !== "Review answers" && m.questionCount)
+    .reduce((s, m) => s + (m.questionCount ?? 0), 0);
+  return sum > 0 ? sum : null;
+}
+
+const WHOLE = /^\d+$/;
+
+/** Message for the answered and correct fields, or null when they can be saved. */
+export function questionsError(answered: string, correct: string): string | null {
+  if ((answered !== "" && !WHOLE.test(answered)) || (correct !== "" && !WHOLE.test(correct))) {
+    return "Use whole numbers for questions.";
+  }
+  const a = Number(answered);
+  if (answered === "" || a === 0) return "Enter how many questions you answered.";
+  if (correct === "") return "Enter how many you got correct.";
+  if (Number(correct) > a) return "Correct answers cannot exceed questions answered.";
+  return null;
+}
+
+const KIND_STEP: Record<string, StepNo> = {
+  read: 1,
+  "content-notes": 1,
+  "content-video": 1,
+  seminar: 1,
+  eocq: 2,
+  questions: 2,
+  "answer-review": 2,
+  review: 3,
+};
+
+/** The step a task belongs to, or null for mocks and anything unmapped. */
+export function stepForTask(task: { kind: string; step?: number | null }): StepNo | null {
+  if (task.step && task.step >= 1 && task.step <= 4) return task.step as StepNo;
+  return KIND_STEP[task.kind] ?? null;
+}
+
+/**
+ * The server's ordering rule, checked early for a clear message. `doneSteps`
+ * holds "readingId|step" for what is already stated or done.
+ */
+export function declarationError(items: { readingId: string; step: StepNo }[], doneSteps: Set<string>): string | null {
+  const has = new Set([...doneSteps, ...items.map((i) => `${i.readingId}|${i.step}`)]);
+  for (const i of items) {
+    if (i.step === 3 && !has.has(`${i.readingId}|1`)) return "Review needs the first read first";
+    if (i.step === 4 && !has.has(`${i.readingId}|2`)) return "Review questions need the initial questions first";
+  }
+  return null;
+}
+
+/** Reads carry a confidence, question steps carry counts; both are optional. */
+export function declarationItem(
+  readingId: string,
+  step: StepNo,
+  f: { confidence: number; answered: string; correct: string },
+): DeclarationItem {
+  const item: DeclarationItem = { readingId, step };
+  if (step === 1 || step === 3) {
+    if (f.confidence >= 1) item.confidence = f.confidence;
+  } else if (f.answered !== "" && WHOLE.test(f.answered)) {
+    item.answered = Number(f.answered);
+    if (f.correct !== "" && WHOLE.test(f.correct)) item.correct = Number(f.correct);
+  }
+  return item;
 }

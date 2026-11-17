@@ -4,19 +4,21 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   useCreateSession,
+  useSubmitTask,
   useCurriculum,
   usePackages,
   usePlan,
   usePlanPackages,
   usePrescription,
   type SessionKind,
+  type TaskSubmission,
 } from "@/lib/hooks";
 import { ApiError, messageForStatus } from "@/lib/api";
 import type { PackageRole } from "@/lib/types";
 import { useIsMobile } from "@/hooks/ui/use-mobile";
 import { cn } from "@/lib/utils";
 import { minutesLabel } from "@/components/day-plan";
-import { resolvePreset } from "@/lib/record";
+import { questionsError, resolvePreset, taskQuestionCount } from "@/lib/record";
 import { useOnline } from "@/hooks/use-online";
 import { useUndoRecord } from "./use-undo-record";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -95,6 +97,7 @@ export function RecordSheet({
   const packages = usePackages();
   const planPackages = usePlanPackages(planId);
   const createSession = useCreateSession(planId);
+  const submitTask = useSubmitTask(planId);
   const undoRecord = useUndoRecord(planId);
 
   const [topicId, setTopicId] = useState("");
@@ -110,6 +113,8 @@ export function RecordSheet({
   const [note, setNote] = useState("");
   const [attach, setAttach] = useState(true);
   const [finished, setFinished] = useState(true);
+  const [reviewed, setReviewed] = useState(false);
+  const [reviewMinutes, setReviewMinutes] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const topics = useMemo(
@@ -177,9 +182,17 @@ export function RecordSheet({
   useEffect(() => {
     setAttach(true);
     setFinished(true);
-    if (matchedTask) setMinutes((m) => m || String(matchedTask.estimatedMinutes));
+    setReviewed(false);
+    setReviewMinutes("");
+    if (matchedTask) {
+      setMinutes((m) => m || String(matchedTask.estimatedMinutes));
+      // A known question count is prefilled and stays editable.
+      const n = taskQuestionCount(matchedTask);
+      if (n) setAnswered((a) => a || String(n));
+    }
   }, [matchedTask]);
   const recordsTask = matchedTask !== undefined && attach;
+  const knownCount = recordsTask ? taskQuestionCount(matchedTask!) : null;
 
   const minutesNum = Number(minutes);
   const minutesValid = Number.isInteger(minutesNum) && minutesNum >= 1 && minutesNum <= 600;
@@ -187,9 +200,14 @@ export function RecordSheet({
   const correctNum = Number(correct) || 0;
   const accuracy = asksQuestions && answeredNum > 0 ? (correctNum / answeredNum) * 100 : null;
   const correctTooHigh = asksQuestions && correctNum > answeredNum;
+  // A planned question task needs its counts; an off-plan one may skip them.
+  const questionsMsg =
+    asksQuestions && (knownCount !== null || answered !== "" || correct !== "") ? questionsError(answered, correct) : null;
+  const reviewMinutesNum = Number(reviewMinutes);
+  const reviewMinutesValid = !reviewed || reviewMinutes === "" || (Number.isInteger(reviewMinutesNum) && reviewMinutesNum >= 1 && reviewMinutesNum <= 600);
   const packageName = [...packageOptions.onPlan, ...packageOptions.rest].find((p) => p.id === packageId)?.name;
-  const busy = createSession.isPending;
-  const ready = !!readingId && minutesValid && !correctTooHigh;
+  const busy = createSession.isPending || submitTask.isPending;
+  const ready = !!readingId && minutesValid && !questionsMsg && reviewMinutesValid;
 
   function undo(taskId: string) {
     void undoRecord.undo(taskId);
@@ -198,11 +216,24 @@ export function RecordSheet({
   async function submit(andNext: boolean) {
     if (!readingId) return setError("Choose a section and module first.");
     if (!minutesValid) return setError("Enter whole minutes between 1 and 600.");
-    if (correctTooHigh) return setError("Correct answers cannot exceed questions answered.");
+    if (questionsMsg) return setError(questionsMsg);
+    if (!reviewMinutesValid) return setError("Enter whole minutes for the answer review.");
     setError(null);
     const taskId = recordsTask ? matchedTask!.id : undefined;
     try {
-      await createSession.mutateAsync({
+      if (taskId) {
+        // Planned work goes through the task, which carries the answer review.
+        await submitTask.mutateAsync({
+          taskId,
+          status: finished ? "done" : "partial",
+          actualMinutes: minutesNum,
+          confidence,
+          ...(asksQuestions ? { questionsAnswered: answeredNum, questionsCorrect: correctNum } : {}),
+          ...(asksQuestions ? { answerReviewDone: reviewed } : {}),
+          ...(asksQuestions && reviewed && reviewMinutes !== "" ? { answerReviewMinutes: reviewMinutesNum } : {}),
+          ...(note.trim() ? { note: note.trim() } : {}),
+        } as TaskSubmission & { taskId: string });
+      } else await createSession.mutateAsync({
         readingId,
         kind,
         minutes: minutesNum,
@@ -211,7 +242,6 @@ export function RecordSheet({
         ...(packageId ? { packageId } : {}),
         ...(asksQuestions ? { questionsAnswered: answeredNum, questionsCorrect: correctNum } : {}),
         ...(note.trim() ? { note: note.trim() } : {}),
-        ...(taskId ? { taskId, finished } : {}),
       });
       // Off-plan records have no Undo: they are deleted from the journal instead.
       toast.success("Recorded", {
@@ -222,6 +252,8 @@ export function RecordSheet({
       setMinutes("");
       setAnswered("");
       setCorrect("");
+      setReviewed(false);
+      setReviewMinutes("");
       setNote("");
       if (andNext) {
         // Same section, package and day: the next session is usually the next module.
@@ -423,7 +455,7 @@ export function RecordSheet({
         {asksQuestions ? (
           <div className="space-y-2">
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Questions answered" id="record-answered">
+              <Field label={knownCount ? "Questions answered (set by your package)" : "Questions answered"} id="record-answered">
                 <Input
                   id="record-answered"
                   type="number"
@@ -447,6 +479,43 @@ export function RecordSheet({
                 />
               </Field>
             </div>
+            {questionsMsg && (answered !== "" || correct !== "") ? (
+              <p className="text-alarm-ink text-[13px]" role="alert">
+                {questionsMsg}
+              </p>
+            ) : null}
+            {recordsTask ? (
+              <div className="space-y-2 pt-1">
+                <div className="flex items-start gap-3">
+                  <Checkbox
+                    id="record-reviewed"
+                    className="mt-0.5"
+                    checked={reviewed}
+                    onCheckedChange={(v) => setReviewed(v === true)}
+                  />
+                  <Label htmlFor="record-reviewed" className="leading-snug font-normal">
+                    Reviewed the answers
+                  </Label>
+                </div>
+                {reviewed ? (
+                  <div className="pl-7">
+                    <Field label="Minutes on the review" id="record-review-minutes">
+                      <Input
+                        id="record-review-minutes"
+                        type="number"
+                        inputMode="numeric"
+                        min={1}
+                        max={600}
+                        className="w-28 tabular-nums"
+                        value={reviewMinutes}
+                        aria-invalid={!reviewMinutesValid}
+                        onChange={(e) => setReviewMinutes(e.target.value)}
+                      />
+                    </Field>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             {/* Live, so the review flag is never a surprise after saving. */}
             {accuracy !== null ? (
               <p

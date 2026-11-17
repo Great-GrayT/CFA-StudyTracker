@@ -279,6 +279,12 @@ export type PrescribedTask = {
   postponedFrom: string | null;
   /** A session the candidate logged themselves, not one the plan asked for. */
   offPlan: boolean;
+  /** Engine step 1 to 4, when the task belongs to one. */
+  step?: number | null;
+  /** Questions the package sets for this task, when known. */
+  questionCount?: number | null;
+  /** Why an extra task was added, null for base work. */
+  extraReason?: string | null;
 };
 
 export type PrescribedDay = {

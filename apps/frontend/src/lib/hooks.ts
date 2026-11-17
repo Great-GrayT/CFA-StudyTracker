@@ -32,6 +32,8 @@ export const keys = {
   mocks: (planId: string) => ["mocks", planId] as const,
   packages: ["packages"] as const,
   projection: (planId: string) => ["projection", planId] as const,
+  declarations: (planId: string) => ["declarations", planId] as const,
+  plannerState: (planId: string) => ["planner-state", planId] as const,
   mockSessions: (planId: string) => ["mock-sessions", planId] as const,
   planPackages: (planId: string) => ["plan-packages", planId] as const,
   holidays: (planId: string) => ["holidays", planId] as const,
@@ -107,10 +109,38 @@ export function useProjection(planId: string | undefined): UseQueryResult<Projec
 
 /** "Did this before": declares steps already done; the server rebuilds the plan. */
 export function useDeclare(planId: string | undefined) {
+  const qc = useQueryClient();
   const invalidate = useInvalidateAfterLog(planId);
   return useMutation({
     mutationFn: (items: DeclarationItem[]) => api.post<unknown>(`plans/${planId}/declarations`, { items }),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      invalidate();
+      if (planId) void qc.invalidateQueries({ queryKey: keys.declarations(planId) });
+    },
+  });
+}
+
+/** Stored "did this before" self-states, for the starting-point screens. */
+export function useDeclarations(planId: string | undefined): UseQueryResult<DeclarationItem[]> {
+  return useQuery({
+    queryKey: keys.declarations(planId ?? ""),
+    queryFn: async () =>
+      (await api.get<{ items: DeclarationItem[] }>(`plans/${encodeURIComponent(planId!)}/declarations`)).items,
+    enabled: !!planId,
+  });
+}
+
+/** Step priority, LES hours and the below-pass consent, from GET settings. */
+export type PlannerState = {
+  stepPriority: Record<string, string[]> | null;
+  lesReadingHours: number | null;
+  belowPassAccepted: boolean;
+};
+export function usePlannerState(planId: string | undefined): UseQueryResult<PlannerState | null> {
+  return useQuery({
+    queryKey: keys.plannerState(planId ?? ""),
+    queryFn: async () => (await api.get<{ planner: PlannerState | null }>("settings")).planner,
+    enabled: !!planId,
   });
 }
 
@@ -140,6 +170,7 @@ export function usePatchPlanSettings(planId: string | undefined) {
         qc.invalidateQueries({ queryKey: ["prescription", planId] }),
         qc.invalidateQueries({ queryKey: ["campaign", planId] }),
         qc.invalidateQueries({ queryKey: keys.projection(planId) }),
+        qc.invalidateQueries({ queryKey: keys.plannerState(planId) }),
       ]);
     },
   });
@@ -329,7 +360,14 @@ export function useDeleteLog(planId: string | undefined) {
 }
 
 /** What recording a task sends; a record also writes the study log. */
-type RecordDetail = { confidence: number; questionsAnswered?: number; questionsCorrect?: number };
+type RecordDetail = {
+  confidence: number;
+  questionsAnswered?: number;
+  questionsCorrect?: number;
+  answerReviewDone?: boolean;
+  answerReviewMinutes?: number;
+  note?: string;
+};
 export type TaskSubmission =
   | ({ status: "done"; actualMinutes?: number } & RecordDetail)
   | ({ status: "partial"; actualMinutes: number } & RecordDetail)

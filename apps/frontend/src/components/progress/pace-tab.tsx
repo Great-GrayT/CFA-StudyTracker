@@ -7,6 +7,7 @@ import { useRecord } from "@/components/record/record-provider";
 import { OfflineLine, RegionError, regionState } from "@/components/states/region-states";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
+import { FitBanner } from "@/components/plan/fit-banner";
 import { VerdictStrip } from "@/components/pace/verdict-strip";
 import { PlanTile } from "@/components/pace/plan-tile";
 import { CoverageTile } from "@/components/pace/coverage-tile";
@@ -44,6 +45,7 @@ export function PaceTab({ plan, ended, online }: { plan: Plan; ended: boolean; o
       ) : null}
       {!online ? <OfflineLine /> : null}
       {state.error ? <RegionError error={state.error} online={online} onRetry={() => void q.refetch()} /> : null}
+      <FitBanner planId={plan.id} />
       <VerdictStrip p={p} />
       {!hasAnyProgress(p) ? (
         <p className="text-muted-foreground flex flex-wrap items-center gap-3 text-[13px]">
