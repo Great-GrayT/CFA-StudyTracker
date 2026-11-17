@@ -17,8 +17,11 @@ import { db } from "./db";
 import { sendMail, type Mail } from "./FUNC-mail";
 import { generateHorizon } from "./FUNC-schedule";
 import { renderCoachMail, type MailData, type MailTask } from "./FUNC-mail-render";
-import { dueSlots, localDateFor, parseSchedule, type Slot } from "../core/slots";
+import { dueSlots, localDateFor, parseSchedule, type DaySlot, type Slot } from "../core/slots";
 import { classify, type CoachInput } from "../core/coach-state";
+import { daySlots, messagesFor } from "../core/coach-ladder";
+import { ladderFacts, type LadderFacts } from "../core/coach-facts";
+import { getProjection } from "./FUNC-projection";
 import { dialogueFor, type DialogueKey, type DialogueVars, type LineContext } from "../core/coach-dialogue";
 import { missedStudyDays, type WeeklyAvailability } from "../core/pace";
 import { holidayFacts } from "../core/holiday";
@@ -245,10 +248,9 @@ export async function runCoachForPlan(
         .map((row) => row.slot as Slot),
     );
 
-  // Deliberately not pre-filtered by what has already gone out, because what
-  // counts as sent now differs per channel. Each channel filters its own list
-  // below, and the atomic claim stays the real guard either way.
-  const due = dueSlots(now, plan.timeZone, [], parseSchedule(plan.coachSchedule));
+  const schedule = parseSchedule(plan.coachSchedule);
+  // Before the first anchor nothing can be due, ladder or not: the cheap exit.
+  const anchorsDue = dueSlots(now, plan.timeZone, [], schedule);
 
   const sent: Slot[] = [];
   const skipped: Slot[] = [];
@@ -256,27 +258,30 @@ export async function runCoachForPlan(
   const pushSent: Slot[] = [];
   const pushFailed: Slot[] = [];
 
-  const emailAlready = sentOn("email");
-  const pushAlready = sentOn("push");
-  const emailSlots = slotsAllowedBy(plan.emailCoach, due).filter((s) => !emailAlready.has(s));
-  const pushSlots = slotsAllowedBy(plan.pushCoach, due).filter((s) => !pushAlready.has(s));
-
-  // Any slot either channel still wants. Everything expensive below
-  // (regenerating the horizon, classifying state, building the mail) runs once
-  // and feeds both channels, so it is gated on the union rather than per
-  // channel.
-  const candidateSlots = due.filter((s) => emailSlots.includes(s) || pushSlots.includes(s));
-  skipped.push(...due.filter((s) => !candidateSlots.includes(s)));
-
-  if (candidateSlots.length === 0) {
+  if (anchorsDue.length === 0 || (plan.emailCoach === "off" && plan.pushCoach === "off")) {
+    skipped.push(...anchorsDue);
     return { sent, skipped, failed, pushSent, pushFailed };
   }
+
+  // Deliberately not pre-filtered by what has already gone out, because what
+  // counts as sent now differs per channel. Each channel filters its own list
+  // below, and the atomic claim stays the real guard either way.
+  const emailAlready = sentOn("email");
+  const pushAlready = sentOn("push");
+  const wanted = (due: Slot[]) => ({
+    emailSlots: slotsAllowedBy(plan.emailCoach, due).filter((s) => !emailAlready.has(s)),
+    pushSlots: slotsAllowedBy(plan.pushCoach, due).filter((s) => !pushAlready.has(s)),
+  });
+  const anchorWanted = wanted(anchorsDue);
+  const anchorCandidates = anchorsDue.filter(
+    (s) => anchorWanted.emailSlots.includes(s) || anchorWanted.pushSlots.includes(s),
+  );
 
   const weeklyAvailability = plan.weeklyAvailability as Record<string, number>;
   const streakDays = await computeStreakDays(planId, weeklyAvailability, plan.startDate, yesterday);
 
   let droppedCount = 0;
-  if (candidateSlots.includes("prescription") && streakDays >= 1) {
+  if (anchorCandidates.includes("prescription") && streakDays >= 1) {
     try {
       const result = await generateHorizon(planId, localDate);
       droppedCount = result.deleted;
@@ -286,7 +291,7 @@ export async function runCoachForPlan(
       // not just the prescription slot. Nothing is claimed, so the next sweep
       // tries again; logged because otherwise this reads as a mute coach.
       console.error(`FUNC-coach: regenerating plan ${planId} failed, sending nothing`, err);
-      return { sent: [], skipped: candidateSlots, failed: [], pushSent: [], pushFailed: [] };
+      return { sent: [], skipped: anchorCandidates, failed: [], pushSent: [], pushFailed: [] };
     }
   }
 
@@ -298,10 +303,10 @@ export async function runCoachForPlan(
       `FUNC-coach: FRONTEND_BASE_URL is not set, refusing to send for plan ${planId}. ` +
         `Every link in the email, unsubscribe included, would be dead.`,
     );
-    return { sent: [], skipped: candidateSlots, failed: [], pushSent: [], pushFailed: [] };
+    return { sent: [], skipped: anchorCandidates, failed: [], pushSent: [], pushFailed: [] };
   }
 
-  const { state, vars, mailData, context, user, emailUnsubscribe } = await buildCoachContext(
+  const { state, vars, mailData, context, user, emailUnsubscribe, slots } = await buildCoachContext(
     plan,
     now,
     localDate,
@@ -309,6 +314,22 @@ export async function runCoachForPlan(
     droppedCount,
     appUrl,
   );
+
+  // The ladder's own list: anchors plus whatever midday and extras today's
+  // state earns. Slots already sent are filtered per channel below and again by
+  // the claim, so a recomputed list never re-sends.
+  const due = dueSlots(now, plan.timeZone, [], schedule, slots);
+  const { emailSlots, pushSlots } = wanted(due);
+
+  // Any slot either channel still wants. Everything expensive below
+  // (classifying state, building the mail) runs once and feeds both channels,
+  // so it is gated on the union rather than per channel.
+  const candidateSlots = due.filter((s) => emailSlots.includes(s) || pushSlots.includes(s));
+  skipped.push(...due.filter((s) => !candidateSlots.includes(s)));
+
+  if (candidateSlots.length === 0) {
+    return { sent, skipped, failed, pushSent, pushFailed };
+  }
 
   // Once the exam has passed the coach signs off, exactly once, and then stops.
   // The uniqueness guard is per local DATE, so without this the sign-off, whose
@@ -418,6 +439,8 @@ export async function runCoachForPlan(
 }
 
 export type CoachContext = {
+  /** The day's send list from the ladder, in time order. */
+  slots: DaySlot[];
   state: ReturnType<typeof classify>;
   vars: DialogueVars;
   mailData: MailData;
@@ -520,7 +543,21 @@ export async function buildCoachContext(
   );
   const planElapsedDays = Math.max(0, Math.round((todayDate.getTime() - planStart) / MS_PER_DAY));
 
+  // Engine facts. A plan the engine cannot project (no catalog yet) reads as
+  // on plan rather than stopping the coach.
+  let facts: LadderFacts | null = null;
+  try {
+    const projection = await getProjection(planId, localDate);
+    facts = ladderFacts(projection, daysToExam, plan.belowPassAccepted);
+  } catch {
+    facts = null;
+  }
+
   const input: CoachInput = {
+    stage: facts?.stage,
+    daysBehind: facts?.daysBehind,
+    belowPass: facts?.belowPass,
+    infeasible: facts?.infeasible,
     streakDays,
     taskMinutes,
     availableMinutes,
@@ -566,6 +603,12 @@ export async function buildCoachContext(
     restDays: holiday.restDays,
     dayOfBlock: holiday.dayOfBlock,
     n: tasksDone,
+    stage: state.stage,
+    daysBehind: state.daysBehind,
+    overdueList: facts?.overdueList ?? "nothing overdue",
+    readiness: facts?.readiness ?? 0,
+    readinessPlan: facts?.readinessPlan ?? 0,
+    extraReason: facts?.extraReason ?? "none",
   };
 
   const mailTasks: MailTask[] = todayTasks.map((t) => ({
@@ -601,10 +644,34 @@ export async function buildCoachContext(
   }
   const context: LineContext = { horizon: state.horizon, phase: state.phase, weather };
 
-  return { state, vars, mailData, context, user, emailUnsubscribe };
+  // Past the exam and on the eve or day the coach does not pile on, so only the
+  // anchors remain (the past sign-off rides the morning one).
+  const quiet = state.horizon === "past" || state.horizon === "exam-eve" || state.horizon === "exam-day";
+  const count = quiet
+    ? 3
+    : messagesFor({
+        stage: state.stage,
+        daysBehind: state.daysBehind,
+        belowPass: state.belowPass,
+        restDay: state.shape === "rest",
+        pastExam: false,
+      });
+  const slots = daySlots({
+    planId,
+    localDate,
+    schedule: parseSchedule(plan.coachSchedule),
+    count,
+    // Four messages are the mock window's midday only there; one day behind
+    // outside it makes the fourth a random extra.
+    midday: state.stage === "mock-window" && count === 4,
+  });
+
+  return { slots, state, vars, mailData, context, user, emailUnsubscribe };
 }
 
 export type CoachPreview = {
+  /** The day's slot list with local times, as the ladder would send it now. */
+  daySlots: Array<{ slot: Slot; time: string }>;
   slot: Slot | null;
   /** The event the coach chose, or null when it would stay quiet. */
   key: DialogueKey | null;
@@ -635,6 +702,8 @@ export async function previewCoach(
   const appUrl = process.env.FRONTEND_BASE_URL ?? "";
   const built = await buildCoachContext(plan, now, localDate, streakDays, 0, appUrl);
 
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const daySlotList = built.slots.map((d) => ({ slot: d.slot, time: `${pad(d.hour)}:${pad(d.minute)}` }));
   const slot = "slot" in target ? target.slot : null;
   const key = "slot" in target ? dialogueFor(target.slot, built.state) : target.key;
   const state = {
@@ -644,8 +713,8 @@ export async function previewCoach(
     tasksDone: built.vars.n,
     taskCount: built.vars.taskCount,
   };
-  if (key === null) return { slot, key, state, message: null };
+  if (key === null) return { daySlots: daySlotList, slot, key, state, message: null };
 
   const rendered = renderCoachMail(key, built.vars, built.mailData, localDate, built.context, "coach-preview");
-  return { slot, key, state, message: rendered };
+  return { daySlots: daySlotList, slot, key, state, message: rendered };
 }

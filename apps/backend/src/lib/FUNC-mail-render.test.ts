@@ -21,6 +21,12 @@ const FULL_VARS: DialogueVars = {
   restDays: 4,
   dayOfBlock: 2,
   n: 2,
+  stage: "steps-3-4",
+  daysBehind: 2,
+  overdueList: "Ethics (step 2)",
+  readiness: 40,
+  readinessPlan: 55,
+  extraReason: "none",
 };
 
 const DATA: MailData = {

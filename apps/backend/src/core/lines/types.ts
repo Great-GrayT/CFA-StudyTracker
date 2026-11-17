@@ -88,7 +88,12 @@ export type DialogueKey =
   // Real study pointed at the wrong material. Separate from every "nothing"
   // state because these candidates worked, and copy that calls them idle is
   // the bug these keys exist to fix.
-  | "N_OFF_PLAN" | "D_OFF_PLAN" | "D_OFF_PLAN_BEHIND";
+  | "N_OFF_PLAN" | "D_OFF_PLAN" | "D_OFF_PLAN_BEHIND"
+  // The message ladder: stage mornings, mock-window midday, behind extras, and the
+  // once-a-day notice that the plan cannot fit
+  | "P_STAGE_REVIEW" | "P_STAGE_MOCK" | "M_MIDDAY_MOCK"
+  | "X_BEHIND_1" | "X_BEHIND_3" | "X_BEHIND_7" | "X_BELOW_PASS"
+  | "D_PLAN_DOES_NOT_FIT";
 
 /**
  * Every key, listed explicitly rather than derived from the assembled table.
@@ -118,6 +123,9 @@ export const ALL_KEYS = [
   "D_DONE", "D_DONE_COMEBACK", "D_OVER",
   "D_REST_BONUS", "D_EXAM_EVE",
   "N_OFF_PLAN", "D_OFF_PLAN", "D_OFF_PLAN_BEHIND",
+  "P_STAGE_REVIEW", "P_STAGE_MOCK", "M_MIDDAY_MOCK",
+  "X_BEHIND_1", "X_BEHIND_3", "X_BEHIND_7", "X_BELOW_PASS",
+  "D_PLAN_DOES_NOT_FIT",
 ] as const satisfies readonly DialogueKey[];
 
 // Fails to compile if the union gains a key that ALL_KEYS does not list.

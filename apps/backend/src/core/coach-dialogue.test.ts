@@ -45,12 +45,18 @@ const FULL_VARS: DialogueVars = {
   restDays: 4,
   dayOfBlock: 2,
   n: 2,
+  stage: "steps-3-4",
+  daysBehind: 2,
+  overdueList: "Ethics (step 2)",
+  readiness: 40,
+  readinessPlan: 55,
+  extraReason: "none",
 };
 
 describe("the content itself", () => {
-  test("there are at least 200 distinct dialogues across 43 states", () => {
+  test("there are at least 200 distinct dialogues across 51 states", () => {
     const total = ALL_DIALOGUE_KEYS.reduce((sum, key) => sum + LINES[key].length, 0);
-    expect(ALL_DIALOGUE_KEYS).toHaveLength(43);
+    expect(ALL_DIALOGUE_KEYS).toHaveLength(51);
     expect(total).toBeGreaterThanOrEqual(200);
   });
 
@@ -318,3 +324,60 @@ function dateSelecting(key: Parameters<typeof lineFor>[0], want: number): string
   }
   throw new Error(`no January date selects variant ${want} of ${key}`);
 }
+
+describe("the ladder", () => {
+  test("midday routes to the mock-window line", () => {
+    expect(dialogueFor("midday", state({ stage: "mock-window" }))).toBe("M_MIDDAY_MOCK");
+  });
+
+  test("extras climb with days behind", () => {
+    const extra = (daysBehind: number) => dialogueFor("extra-1", state({ daysBehind }));
+    expect(extra(1)).toBe("X_BEHIND_1");
+    expect(extra(2)).toBe("X_BEHIND_1");
+    expect(extra(3)).toBe("X_BEHIND_3");
+    expect(extra(6)).toBe("X_BEHIND_3");
+    expect(extra(7)).toBe("X_BEHIND_7");
+    expect(extra(20)).toBe("X_BEHIND_7");
+  });
+
+  test("a below-pass plan outranks the behind ladder", () => {
+    expect(dialogueFor("extra-4", state({ belowPass: true, daysBehind: 9 }))).toBe("X_BELOW_PASS");
+  });
+
+  test("extras and midday stay silent on rest days and near the exam", () => {
+    for (const slot of ["midday", "extra-1"] as const) {
+      expect(dialogueFor(slot, state({ shape: "rest", daysBehind: 5 }))).toBeNull();
+      for (const horizon of ["exam-eve", "exam-day", "past"] as const) {
+        expect(dialogueFor(slot, state({ horizon, daysBehind: 5 }))).toBeNull();
+      }
+    }
+  });
+
+  test("the on-track morning carries the stage", () => {
+    expect(dialogueFor("prescription", state({ stage: "steps-1-2" }))).toBe("P_NORMAL");
+    expect(dialogueFor("prescription", state({ stage: "steps-3-4" }))).toBe("P_STAGE_REVIEW");
+    expect(dialogueFor("prescription", state({ stage: "mock-window" }))).toBe("P_STAGE_MOCK");
+    // A streak still outranks the stage.
+    expect(dialogueFor("prescription", state({ stage: "steps-3-4", streak: "slip", streakDays: 1 }))).toBe("P_SLIP");
+  });
+
+  test("infeasible and not consented replaces the debrief report", () => {
+    expect(dialogueFor("debrief", state({ infeasible: true, logging: "complete" }))).toBe("D_PLAN_DOES_NOT_FIT");
+    expect(dialogueFor("debrief", state({ infeasible: true, horizon: "exam-eve" }))).toBe("D_EXAM_EVE");
+    expect(dialogueFor("debrief", state({ infeasible: false, logging: "complete" }))).toBe("D_DONE");
+  });
+
+  test("tone gets firmer up the ladder: the top rung names the backlog and the exam", () => {
+    const all = (k: DialogueKey) => LINES[k].map((l) => [l.subject, l.opening, l.pressure ?? "", l.close].join(" ")).join(" ");
+    expect(all("X_BEHIND_7")).toMatch(/serious/i);
+    expect(all("X_BEHIND_1")).not.toMatch(/serious/i);
+  });
+
+  test("no ladder line uses an em dash", () => {
+    for (const key of ["P_STAGE_REVIEW", "P_STAGE_MOCK", "M_MIDDAY_MOCK", "X_BEHIND_1", "X_BEHIND_3", "X_BEHIND_7", "X_BELOW_PASS", "D_PLAN_DOES_NOT_FIT"] as const) {
+      for (const l of LINES[key]) {
+        expect([l.subject, l.opening, l.pressure ?? "", l.close].join(" ")).not.toMatch(/\u2014|--/);
+      }
+    }
+  });
+});

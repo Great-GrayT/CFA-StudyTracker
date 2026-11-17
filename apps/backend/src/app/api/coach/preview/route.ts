@@ -8,12 +8,15 @@ import { previewCoach } from "../../../../lib/FUNC-coach";
 import { mailConfigured, sendMail } from "../../../../lib/FUNC-mail";
 import { sendPushToUser } from "../../../../lib/FUNC-push";
 import { ALL_DIALOGUE_KEYS } from "../../../../core/coach-dialogue";
-import { formatSchedule, parseSchedule, SLOTS_ORDERED } from "../../../../core/slots";
+import { formatSchedule, parseSchedule, type Slot } from "../../../../core/slots";
 
-const KEY_PREFIX = { prescription: "P_", nudge: "N_", debrief: "D_" } as const;
+const KEY_PREFIX = { prescription: "P_", nudge: "N_", debrief: "D_", midday: "M_", extra: "X_" } as const;
+
+// The ladder's slots: anchors, the mock-window midday, and extra-1 to extra-9.
+const slotName = z.string().regex(/^(prescription|nudge|debrief|midday|extra-[1-9])$/);
 
 const previewSchema = z.union([
-  z.object({ slot: z.enum(["prescription", "nudge", "debrief"]), deliver: z.enum(["email", "push"]).optional() }).strict(),
+  z.object({ slot: slotName, deliver: z.enum(["email", "push"]).optional() }).strict(),
   z.object({ key: z.enum(ALL_DIALOGUE_KEYS as unknown as [string, ...string[]]), deliver: z.enum(["email", "push"]).optional() }).strict(),
 ]);
 
@@ -28,7 +31,10 @@ export async function GET(req: Request): Promise<Response> {
   if (!plan) return Response.json({ error: "No active plan" }, { status: 404 });
 
   const events = Object.fromEntries(
-    SLOTS_ORDERED.map((slot) => [slot, ALL_DIALOGUE_KEYS.filter((k) => k.startsWith(KEY_PREFIX[slot]))]),
+    (Object.keys(KEY_PREFIX) as Array<keyof typeof KEY_PREFIX>).map((slot) => [
+      slot,
+      ALL_DIALOGUE_KEYS.filter((k) => k.startsWith(KEY_PREFIX[slot])),
+    ]),
   );
   return Response.json({
     schedule: formatSchedule(parseSchedule(plan.coachSchedule)),
@@ -46,7 +52,7 @@ export async function POST(req: Request): Promise<Response> {
   if (!plan) return Response.json({ error: "No active plan" }, { status: 404 });
 
   const target =
-    "slot" in parsed.data ? { slot: parsed.data.slot } : { key: parsed.data.key as (typeof ALL_DIALOGUE_KEYS)[number] };
+    "slot" in parsed.data ? { slot: parsed.data.slot as Slot } : { key: parsed.data.key as (typeof ALL_DIALOGUE_KEYS)[number] };
   const preview = await previewCoach(plan.id, new Date(), target);
 
   const deliver = parsed.data.deliver;

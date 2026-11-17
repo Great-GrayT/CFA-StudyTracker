@@ -46,6 +46,17 @@ export type DialogueVars = {
    * both printed the task count as a holiday day number.
    */
   n: number;
+  /** Stage label for copy: steps-1-2, steps-3-4 or mock-window. */
+  stage: string;
+  /** Days of work outstanding, from the engine projection. */
+  daysBehind: number;
+  /** Overdue module steps, already joined into prose. */
+  overdueList: string;
+  /** Percent of the plan passed, and the percent the plan wanted by today. */
+  readiness: number;
+  readinessPlan: number;
+  /** Why the engine added extra work, or "none". */
+  extraReason: string;
 };
 
 /**
@@ -82,7 +93,8 @@ export type LineContext = {
 export function dialogueFor(slot: Slot, state: CoachState): DialogueKey | null {
   if (slot === "prescription") return prescriptionKey(state);
   if (slot === "nudge") return nudgeKey(state);
-  return debriefKey(state);
+  if (slot === "debrief") return debriefKey(state);
+  return ladderKey(slot, state);
 }
 
 function prescriptionKey(state: CoachState): DialogueKey {
@@ -144,6 +156,9 @@ function prescriptionKey(state: CoachState): DialogueKey {
   // A normal day is where the full streak escalation lives.
   switch (state.streak) {
     case "on-track":
+      // The ordinary morning carries the stage once the first pass is done.
+      if (state.stage === "mock-window") return "P_STAGE_MOCK";
+      if (state.stage === "steps-3-4") return "P_STAGE_REVIEW";
       return "P_NORMAL";
     case "slip":
       return "P_SLIP";
@@ -193,12 +208,29 @@ function nudgeKey(state: CoachState): DialogueKey | null {
   }
 }
 
+/**
+ * The midday and the random extras. They add pressure, so they stay silent on a
+ * rest day and anywhere near the exam, where pressure costs marks.
+ */
+function ladderKey(slot: Slot, state: CoachState): DialogueKey | null {
+  if (state.shape === "rest") return null;
+  if (state.horizon === "past" || state.horizon === "exam-day" || state.horizon === "exam-eve") return null;
+  if (slot === "midday") return "M_MIDDAY_MOCK";
+  if (state.belowPass) return "X_BELOW_PASS";
+  if (state.daysBehind >= 7) return "X_BEHIND_7";
+  if (state.daysBehind >= 3) return "X_BEHIND_3";
+  return "X_BEHIND_1";
+}
+
 function debriefKey(state: CoachState): DialogueKey | null {
   if (state.horizon === "past") return null;
   // Nothing to report on the day itself: the candidate sat an exam and the app
   // has no idea how it went.
   if (state.horizon === "exam-day") return null;
   if (state.horizon === "exam-eve") return "D_EXAM_EVE";
+
+  // Outranks the day's report: no report matters while the plan cannot be built.
+  if (state.infeasible) return "D_PLAN_DOES_NOT_FIT";
 
   if (state.shape === "rest") {
     // Work logged on a day the plan gave away is worth noticing. Silence here
