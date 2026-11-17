@@ -4,7 +4,10 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
-import { keys, usePackages } from "@/lib/hooks";
+import { keys, useCurriculum, useMockSessions, usePackages, usePlan } from "@/lib/hooks";
+import { invalidateProjection } from "@/lib/plan-invalidation";
+import { mockError, rowsFromMix, toTopicScores, totals, type MockRow } from "@/lib/mock-entry";
+import { X } from "lucide-react";
 import type { MockExam } from "@/lib/types";
 import { useOnline } from "@/hooks/use-online";
 import {
@@ -23,6 +26,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 
 const NO_PACKAGE = "none"; // Radix Select reserves the empty string.
+const NO_SESSION = "none";
 // The API speaks the candidate's own calendar days, so local, not UTC.
 const isoDay = (d: Date) => new Intl.DateTimeFormat("en-CA").format(d);
 
@@ -38,24 +42,53 @@ export function AddMockDialog({
   const online = useOnline();
   const qc = useQueryClient();
   const packages = usePackages();
+  const plan = usePlan();
+  const curriculum = useCurriculum(plan.data?.levelId);
+  const sessions = useMockSessions(planId);
+  const topics = [...(curriculum.data?.topics ?? [])].sort((a, b) => a.order - b.order);
+  const session = (sessions.data ?? []).find((m) => m.ref === sessionRef);
   const [date, setDate] = useState<Date | undefined>(() => new Date());
-  const [score, setScore] = useState("");
+  const [sessionRef, setSessionRef] = useState(NO_SESSION);
+  const [rows, setRows] = useState<MockRow[]>([]);
   const [packageId, setPackageId] = useState(NO_PACKAGE);
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const create = useMutation({
-    mutationFn: (body: { date: string; scorePercent: number; packageId?: string; note?: string }) =>
+    mutationFn: (body: {
+      date: string;
+      topicScores: { topicId: string; answered: number; correct: number }[];
+      packageId?: string;
+      sessionRef?: string;
+      note?: string;
+    }) =>
       api.post<MockExam>("mock-exams", { planId, ...body }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: keys.mocks(planId) }),
+    onSuccess: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: keys.mocks(planId) }),
+        qc.invalidateQueries({ queryKey: keys.mockSessions(planId) }),
+        invalidateProjection(qc, planId),
+      ]),
   });
 
-  const scoreNum = Number(score);
-  const scoreValid = score.trim() !== "" && Number.isFinite(scoreNum) && Number.isInteger(scoreNum) && scoreNum >= 0 && scoreNum <= 100;
+  const sessionSize = session?.questionCount ?? null;
+  const problem = mockError(rows, sessionSize);
+  const sum = totals(rows);
+
+  function pickSession(ref: string) {
+    setSessionRef(ref);
+    const m = (sessions.data ?? []).find((x) => x.ref === ref);
+    if (m) {
+      if (m.packageId) setPackageId(m.packageId);
+      setRows(rowsFromMix(m.topicMix));
+    } else setRows([]);
+  }
+  const patchRow = (i: number, p: Partial<MockRow>) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...p } : r)));
 
   function reset() {
     setDate(new Date());
-    setScore("");
+    setSessionRef(NO_SESSION);
+    setRows([]);
     setPackageId(NO_PACKAGE);
     setNote("");
     setError(null);
@@ -63,12 +96,13 @@ export function AddMockDialog({
 
   async function submit() {
     if (!date) return setError("Pick the day you sat it.");
-    if (!scoreValid) return setError("Enter a whole-number score from 0 to 100.");
+    if (problem) return setError(problem);
     setError(null);
     try {
       await create.mutateAsync({
         date: isoDay(date),
-        scorePercent: scoreNum,
+        topicScores: toTopicScores(rows),
+        ...(sessionRef !== NO_SESSION ? { sessionRef } : {}),
         // Omitted, not null: the API's schema takes an optional string only.
         ...(packageId !== NO_PACKAGE ? { packageId } : {}),
         ...(note.trim() ? { note: note.trim() } : {}),
@@ -89,7 +123,7 @@ export function AddMockDialog({
         onOpenChange(o);
       }}
     >
-      <DialogContent className="gap-5 sm:max-w-md">
+      <DialogContent className="max-h-[92dvh] gap-5 overflow-y-auto sm:max-w-lg">
         <DialogHeader className="text-left sm:text-left">
           <DialogTitle className="text-[20px] font-semibold">Add mock</DialogTitle>
           <DialogDescription className="text-[13px]">
@@ -104,31 +138,116 @@ export function AddMockDialog({
             void submit();
           }}
         >
-          <div className="grid grid-cols-[1fr_7rem] gap-3">
-            <div className="grid min-w-0 gap-1.5">
-              <Label htmlFor="mock-date" className="text-[13px]">
-                Date
-              </Label>
-              <DatePicker id="mock-date" value={date} onChange={setDate} max={new Date()} />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="mock-score" className="text-[13px]">
-                Score, %
-              </Label>
-              <Input
-                id="mock-score"
-                type="number"
-                inputMode="numeric"
-                min={0}
-                max={100}
-                step={1}
-                className="tabular-nums"
-                value={score}
-                aria-invalid={score !== "" && !scoreValid}
-                onChange={(e) => setScore(e.target.value)}
-              />
-            </div>
+          <div className="grid min-w-0 gap-1.5">
+            <Label htmlFor="mock-date" className="text-[13px]">
+              Date
+            </Label>
+            <DatePicker id="mock-date" value={date} onChange={setDate} max={new Date()} />
           </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="mock-session" className="text-[13px]">
+              Mock
+            </Label>
+            <Select value={sessionRef} onValueChange={pickSession}>
+              <SelectTrigger id="mock-session" className="w-full min-w-0">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_SESSION}>Another mock, not listed</SelectItem>
+                {(sessions.data ?? []).map((m) => (
+                  <SelectItem key={m.ref} value={m.ref}>
+                    {m.packageName ? `${m.packageName}: ` : ""}
+                    {m.title}
+                    {m.done ? " (done)" : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <fieldset className="grid gap-2">
+            <legend className="mb-1 text-[13px] font-medium">Score by topic</legend>
+            {session && session.topicMix.length === 0 ? (
+              <p className="text-muted-foreground text-[13px]">
+                This mock does not list its topics. Add each topic you were tested on and your counts.
+              </p>
+            ) : null}
+            {rows.map((r, i) => (
+              <div key={i} className="grid grid-cols-[1fr_5rem_5rem_auto] items-end gap-2 max-md:grid-cols-[1fr_1fr_auto]">
+                <div className="grid min-w-0 gap-1 max-md:col-span-3">
+                  <Label htmlFor={`mock-topic-${i}`} className="text-[12px]">
+                    Topic
+                  </Label>
+                  <Select value={r.topicId || undefined} onValueChange={(v) => patchRow(i, { topicId: v })}>
+                    <SelectTrigger id={`mock-topic-${i}`} className="w-full min-w-0 max-md:h-11">
+                      <SelectValue placeholder="Choose a topic" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {topics.map((t) => (
+                        <SelectItem key={t.id} value={t.id}>
+                          {t.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-1">
+                  <Label htmlFor={`mock-answered-${i}`} className="text-[12px]">
+                    Answered
+                  </Label>
+                  <Input
+                    id={`mock-answered-${i}`}
+                    type="number"
+                    inputMode="numeric"
+                    min={0}
+                    className="tabular-nums max-md:h-11"
+                    value={r.answered}
+                    onChange={(e) => patchRow(i, { answered: e.target.value })}
+                  />
+                </div>
+                <div className="grid gap-1">
+                  <Label htmlFor={`mock-correct-${i}`} className="text-[12px]">
+                    Correct
+                  </Label>
+                  <Input
+                    id={`mock-correct-${i}`}
+                    type="number"
+                    inputMode="numeric"
+                    min={0}
+                    className="tabular-nums max-md:h-11"
+                    value={r.correct}
+                    aria-invalid={r.correct !== "" && Number(r.correct) > Number(r.answered)}
+                    onChange={(e) => patchRow(i, { correct: e.target.value })}
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="size-9 max-md:size-11"
+                  aria-label={`Remove topic row ${i + 1}`}
+                  onClick={() => setRows((rs) => rs.filter((_, j) => j !== i))}
+                >
+                  <X aria-hidden="true" />
+                </Button>
+              </div>
+            ))}
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="max-md:h-11"
+                onClick={() => setRows((rs) => [...rs, { topicId: "", answered: "", correct: "" }])}
+              >
+                Add a topic
+              </Button>
+              {sum.percent !== null ? (
+                <p className="text-muted-foreground text-[13px] tabular-nums" aria-live="polite">
+                  {sum.correct} of {sum.answered} correct, {sum.percent}%
+                </p>
+              ) : null}
+            </div>
+          </fieldset>
           <div className="grid gap-1.5">
             <Label htmlFor="mock-package" className="text-[13px]">
               Package

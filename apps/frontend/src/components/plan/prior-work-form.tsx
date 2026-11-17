@@ -1,86 +1,75 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { OfflineLine } from "@/components/states/region-states";
-import { regionState } from "@/components/states/region-states";
-import { PriorWork, type Declaration, type PriorWorkData } from "@/components/prior-work";
-import { api, ApiError, messageForStatus } from "@/lib/api";
-import { useCurriculum } from "@/lib/hooks";
-import { invalidateAfterSetup } from "@/lib/plan-invalidation";
+import { OfflineLine, regionState } from "@/components/states/region-states";
+import { StartingPoint } from "@/components/plan/starting-point";
+import { ApiError } from "@/lib/api";
+import { useCurriculum, useDeclarations, useDeclare } from "@/lib/hooks";
+import { itemsError } from "@/lib/starting-point";
 import { useOnline } from "@/hooks/use-online";
-import type { Plan } from "@/lib/types";
+import type { DeclarationItem, Plan } from "@/lib/types";
 
 /**
- * PriorWork wired to the plan: loads the saved answers, holds the draft, and
- * saves it with a replan. Settings and Plan Setup both use this; onboarding
- * uses the controlled PriorWork directly.
+ * StartingPoint wired to the plan: shows what is already stated, collects new
+ * steps, and saves them with a replan. Stated steps stay; the plan has no way
+ * to un-state one, so the form only adds.
  */
 export function PriorWorkForm({ plan, onSaved }: { plan: Plan; onSaved?: () => void }) {
-  const qc = useQueryClient();
   const online = useOnline();
   const curriculum = useCurriculum(plan.levelId);
-  const saved = useQuery({
-    queryKey: ["prior-work", plan.id],
-    queryFn: () => api.get<PriorWorkData>(`plans/${plan.id}/prior-work`),
-  });
-  const [draft, setDraft] = useState<Declaration[] | null>(null);
-  const [saving, setSaving] = useState(false);
+  const stored = useDeclarations(plan.id);
+  const declare = useDeclare(plan.id);
+  const [draft, setDraft] = useState<DeclarationItem[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
-  const states = [curriculum, saved].map(regionState);
-  const value = draft ?? saved.data?.declarations ?? [];
+  const states = [curriculum, stored].map(regionState);
+  const msg = itemsError(draft);
 
   async function save() {
-    if (!draft) return;
-    setSaving(true);
+    if (draft.length === 0 || msg) return;
+    setError(null);
     try {
-      await api.post(`plans/${plan.id}/prior-work`, { declarations: draft });
-      toast.success(
-        draft.length === 0
-          ? "Cleared what you had already studied."
-          : "Saved. The days ahead have been replanned around it.",
-      );
-      setDraft(null);
-      await saved.refetch();
-      await invalidateAfterSetup(qc, plan.id);
+      await declare.mutateAsync(draft);
+      toast.success("Saved. The days ahead have been replanned around it.");
+      setDraft([]);
       onSaved?.();
     } catch (err) {
-      toast.error(err instanceof ApiError ? messageForStatus(err.status) : "Could not save that. Try again.");
-    } finally {
-      setSaving(false);
+      setError(err instanceof ApiError ? err.message : "Could not save that. Try again.");
     }
   }
 
   return (
     <div className="flex flex-col gap-4">
       {!online ? <OfflineLine /> : null}
-      <PriorWork
+      <StartingPoint
         topics={curriculum.data?.topics ?? []}
-        sources={saved.data?.sources}
-        value={value}
-        disabled={saving}
+        stored={stored.data ?? []}
+        value={draft}
+        disabled={declare.isPending}
         loading={states.some((s) => s.loading)}
-        failed={states.some((s) => s.error) && !saved.data}
+        failed={states.some((s) => s.error) && !(curriculum.data && stored.data)}
         onChange={setDraft}
       />
-      {draft !== null ? (
-        <div className="flex flex-col gap-2">
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={save} disabled={saving}>
-              {saving ? "Saving" : "Save and replan"}
-            </Button>
-            <Button variant="outline" onClick={() => setDraft(null)} disabled={saving}>
-              Cancel
-            </Button>
-          </div>
-          <p className="text-muted-foreground text-[13px]">
-            This replaces whatever you declared before, rather than adding to it. Work you have logged
-            inside the app is never touched.
-          </p>
+      {error ? (
+        <p className="text-alarm-ink text-[13px]" role="alert">
+          {error}
+        </p>
+      ) : null}
+      {draft.length > 0 ? (
+        <div className="flex flex-wrap gap-2">
+          <Button className="max-md:h-11" onClick={save} disabled={declare.isPending || msg !== null || !online}>
+            {declare.isPending ? "Saving" : "Save and replan"}
+          </Button>
+          <Button variant="outline" className="max-md:h-11" onClick={() => setDraft([])} disabled={declare.isPending}>
+            Cancel
+          </Button>
         </div>
       ) : null}
+      <p className="text-muted-foreground text-[13px]">
+        Work you have recorded in the app is never touched.
+      </p>
     </div>
   );
 }

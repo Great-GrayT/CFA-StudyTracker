@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useReducer, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { useLevels, useCurriculum, usePackages, usePlan, keys } from "@/lib/hooks";
@@ -12,7 +12,9 @@ import { WEEKDAYS, type WeeklyAvailability, type PackageRole } from "@/lib/types
 import { Mark } from "@/components/mark";
 import { HoursEditor } from "@/components/plan/hours-editor";
 import { PackagesEditor } from "@/components/plan/packages-editor";
-import { PriorWork, type Declaration, type Source, type SourceKind } from "@/components/prior-work";
+import { itemsError } from "@/lib/starting-point";
+import { StartingPoint } from "@/components/plan/starting-point";
+import type { DeclarationItem } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -36,7 +38,7 @@ type Draft = {
   startDate: string;
   availability: WeeklyAvailability;
   packages: Array<{ packageId: string; roles: PackageRole[] }>;
-  priorWork: Declaration[];
+  startingPoint: DeclarationItem[];
 };
 
 const emptyDraft: Draft = {
@@ -46,7 +48,7 @@ const emptyDraft: Draft = {
   startDate: toISODate(startOfUTCDay(new Date())),
   availability: { mon: 0, tue: 0, wed: 0, thu: 0, fri: 0, sat: 0, sun: 0 },
   packages: [],
-  priorWork: [],
+  startingPoint: [],
 };
 
 type Action =
@@ -83,14 +85,6 @@ export default function OnboardingPage() {
   const curriculum = useCurriculum(draft.levelId ?? undefined);
   const packages = usePackages();
   const plan = usePlan();
-  // What the form may name as material, for the chosen level. Needs no plan.
-  const sources = useQuery({
-    queryKey: ["prior-work-sources", draft.levelId],
-    queryFn: () =>
-      api.get<Record<SourceKind, Source[]>>(`prior-work/sources?levelId=${draft.levelId}`),
-    enabled: !!draft.levelId && draft.step === 5,
-  });
-
   // Resumable: closing the tab mid-setup must not restart a flow whose last
   // step can take ten minutes.
   useEffect(() => {
@@ -137,6 +131,8 @@ export default function OnboardingPage() {
         return !!draft.startDate && new Date(draft.startDate) <= new Date();
       case 3:
         return weeklyHours > 0;
+      case 5:
+        return itemsError(draft.startingPoint) === null;
       default:
         return true;
     }
@@ -166,9 +162,9 @@ export default function OnboardingPage() {
 
       // Saved after the packages, so the replan it triggers already knows
       // which package plays which role.
-      if (draft.priorWork.length > 0) {
+      if (draft.startingPoint.length > 0) {
         try {
-          await api.post(`plans/${created.id}/prior-work`, { declarations: draft.priorWork });
+          await api.post(`plans/${created.id}/declarations`, { items: draft.startingPoint });
         } catch {
           toast.warning(
             "The plan was created, but what you had already studied was not saved. Add it on the Plan screen.",
@@ -369,14 +365,14 @@ export default function OnboardingPage() {
             )}
 
             {draft.step === 5 && (
-              <PriorWork
+              <StartingPoint
                 topics={curriculum.data?.topics ?? []}
-                sources={sources.data}
-                value={draft.priorWork}
+                stored={[]}
+                value={draft.startingPoint}
                 disabled={submitting}
-                loading={curriculum.isLoading || sources.isLoading}
-                failed={curriculum.isError || sources.isError}
-                onChange={(priorWork) => dispatch({ type: "set", patch: { priorWork } })}
+                loading={curriculum.isLoading}
+                failed={curriculum.isError}
+                onChange={(startingPoint) => dispatch({ type: "set", patch: { startingPoint } })}
               />
             )}
 

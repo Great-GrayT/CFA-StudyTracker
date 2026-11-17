@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useQueryClient } from "@tanstack/react-query";
+import { useRecord } from "@/components/record/record-provider";
 
 import { DayHeader } from "@/components/today/day-header";
 import { TodaysWork } from "@/components/today/todays-work";
@@ -58,6 +59,7 @@ function Shell({ children }: { children: React.ReactNode }) {
 
 export default function TodayPage() {
   const qc = useQueryClient();
+  const record = useRecord();
   const online = useOnline();
   const plan = usePlan();
   const planId = plan.data?.id;
@@ -78,6 +80,15 @@ export default function TodayPage() {
   // unstarted work forward as Postponed. Invalidate so it shows.
   const debrief = debriefTime(plan.data?.coachSchedule);
   const msLeft = useDayClock(plan.data?.timeZone ?? "UTC", debrief);
+  // /today?task=<id>&date=<day> opens Record on that task, then drops the params.
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const taskId = q.get("task");
+    if (!taskId) return;
+    record.open({ taskId, date: q.get("date") ?? undefined });
+    window.history.replaceState(null, "", "/today");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const closed = msLeft !== null && msLeft <= 0;
   useEffect(() => {
     if (closed && planId) void qc.invalidateQueries({ queryKey: ["prescription", planId] });

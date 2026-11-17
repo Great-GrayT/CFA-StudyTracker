@@ -71,7 +71,7 @@ export type Plan = {
   reviewStartDate: string | null;
 };
 
-export type PlanMode = "effort-return" | "curriculum-strict" | "curriculum-topic";
+export type PlanMode = "curriculum-strict" | "curriculum-topic";
 
 export type ReviewPolicy =
   | "decay-triggered"
@@ -79,32 +79,13 @@ export type ReviewPolicy =
   | "weekly-interleave"
   | "fixed-date";
 
-/** Every constant the planner reads. Names match core/tuning.ts exactly. */
+/** The constants the step engine still lets a candidate set. */
 export type Tuning = {
   planMode: PlanMode;
   reviewPolicy: ReviewPolicy;
   reviewStartDate: string | null;
-  firstPassQuestionMultiple: number;
-  questionMultipleFloor: number;
-  coverageDeadlineWeeks: number;
-  reviewQuestionMultiple: number;
-  minNewUnitReadMinutes: number;
   answerReviewWordsPerMinute: number;
-  weeklyInterleaveShare: number;
-  reviewInjectionCapShare: number;
-  masteryWeightAccuracy: number;
-  masteryWeightCoverage: number;
-  masteryWeightConfidence: number;
-  masteryHalfLifeDays: number;
-  masteryBar: number;
-  readingWriteOffBar: number;
-  confidenceTriggerValue: number;
-  accuracyFloor: number;
-  accuracyMinSample: number;
 };
-
-/** The numeric fields only, which is what the form edits and sends. */
-export type TuningNumbers = Omit<Tuning, "planMode" | "reviewPolicy" | "reviewStartDate">;
 
 /**
  * The planner block from GET /api/settings: what is set, what each constant is
@@ -118,14 +99,6 @@ export type PlannerSettings = {
   defaults: Tuning;
   modes: PlanMode[];
   policies: ReviewPolicy[];
-  requestedQuestionMultiple: number;
-  effectiveQuestionMultiple: number | null;
-  calendarTooShort: boolean;
-  injectionCap: number | null;
-  reviewReason: string | null;
-  coverageProjection: { date: string; slackDays: number } | null;
-  writeOffs: Array<{ ref: string; mastery: number; readingMinutesDropped: number }>;
-  underPractised: Array<{ ref: string; shortfallMinutes: number }>;
 };
 
 /** One match from the city lookup, which returns several so the candidate picks. */

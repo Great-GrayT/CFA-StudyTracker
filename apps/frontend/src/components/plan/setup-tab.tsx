@@ -18,6 +18,7 @@ import { HolidaysEditor } from "./holidays-editor";
 import { HoursEditor } from "./hours-editor";
 import { PackagesEditor, type PackageDraft } from "./packages-editor";
 import { PriorWorkForm } from "./prior-work-form";
+import { PriorityEditor } from "./priority-editor";
 
 const hoursFmt = new Intl.NumberFormat("en", { maximumFractionDigits: 1 });
 const sameRoles = (a: PackageRole[], b: PackageRole[]) =>
@@ -185,13 +186,17 @@ export function SetupTab({ plan }: { plan: Plan }) {
         )}
       </Section>
 
+      <Section title="Package priority">
+        <PriorityEditor planId={planId} />
+      </Section>
+
       {/* Owns its own heading and saves on each change, so it sits outside Section. */}
       <div className="border-border border-t py-8">
         <PlannerSettings plan={plan} onSaved={() => void invalidateAfterSetup(qc, planId)} />
       </div>
 
       <div className="border-border border-t py-8">
-        <PriorWorkForm plan={plan} />
+        <PriorWorkForm plan={plan} onSaved={() => void invalidateAfterSetup(qc, planId)} />
       </div>
     </div>
   );

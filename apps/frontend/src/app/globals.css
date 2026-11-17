@@ -52,6 +52,8 @@
   --color-stage-rv-reading: var(--stage-rv-reading);
   --color-stage-rv-questions: var(--stage-rv-questions);
   --color-strong: var(--strong);
+  --color-alarm: var(--alarm);
+  --color-claimed: var(--claimed);
   --color-alarm-ink: var(--alarm-ink);
   --color-claimed-ink: var(--claimed-ink);
 
