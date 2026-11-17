@@ -97,10 +97,12 @@ describe("runCoachForPlan", () => {
   // Review Focus 2
   test("a streak regenerates the plan before the email is composed", async () => {
     const { planId } = await setupPlanWithTasks({ missedDays: 3 });
-    const before = await db.planTask.count({ where: { planId } });
+    // The seeded placeholder rows are all content-video; the engine writes step-tagged rows.
+    // Count alone is no signal: a light plan may rebuild to the same number of tasks.
+    expect(await db.planTask.count({ where: { planId, kind: "content-video" } })).toBe(2);
     await runCoachForPlan(planId, new Date("2027-01-04T07:00:00Z"));
-    // The regeneration ran: the backlog is now in the live window.
-    expect(await db.planTask.count({ where: { planId } })).not.toBe(before);
+    expect(await db.planTask.count({ where: { planId, kind: "content-video" } })).toBe(0);
+    expect(await db.planTask.count({ where: { planId, step: { not: null } } })).toBeGreaterThan(0);
   });
 
   test("a regeneration failure sends nothing at all, and says so", async () => {

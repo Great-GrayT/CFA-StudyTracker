@@ -9,7 +9,7 @@ const TODAY = "2027-01-04";
 // 2 topics x 2 readings; a Meldrum-like video package and a UWorld-like bank. 6 h/day and a 7 month runway:
 // ten full mocks in the last 30 days alone need about 66 h, and a 4 month plan of 4 modules
 // currently comes back infeasible (engine mock placement, see the phase 2 report).
-async function seedPlan(examDate = "2027-08-01") {
+async function seedPlan(examDate = "2027-04-20") {
   await db.level.create({ data: { id: "II", version: "2026-test" } });
   const readingIds: string[] = [];
   for (const [i, name] of ["Quantitative Methods", "Economics"].entries()) {

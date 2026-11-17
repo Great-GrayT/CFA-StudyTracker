@@ -129,7 +129,8 @@ describe("projectCampaign", () => {
         period.minutes.firstPassReading +
         period.minutes.firstPassQuestions +
         period.minutes.reviewReading +
-        period.minutes.reviewQuestions;
+        period.minutes.reviewQuestions +
+        period.minutes.mocks;
       expect(actual).toBe(expected);
       compared++;
     }
