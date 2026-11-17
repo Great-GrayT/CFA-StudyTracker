@@ -1,0 +1,200 @@
+import { describe, it, expect } from "vitest";
+import {
+  planWindow, barGeometry, circlePos, axisTicks, formatReadiness, formatHours, stepFractions,
+  weakestSection, owedMinutes, trackingBuckets, cumulative, sortModules, behindCount, hasAnyProgress,
+  sectionWindows, day, DAY, moduleHref, accuracy,
+} from "./pace-view";
+import type { Projection, ProjectionSection, ProjectionWindow } from "./types";
+
+const TODAY = "2026-11-16";
+const EXAM = "2027-05-20";
+const w = (
+  step: 1 | 2 | 3 | 4,
+  start: string | null,
+  due: string | null,
+  status: ProjectionWindow["status"] = "planned",
+): ProjectionWindow => ({ step, start, due, doneOn: null, status });
+
+describe("planWindow", () => {
+  it("spans 6 days back to the exam day for To exam", () => {
+    const x = planWindow("exam", TODAY, EXAM);
+    expect(x.start).toBe(day("2026-11-10"));
+    expect(x.end).toBe(day(EXAM) + DAY);
+  });
+  it("month is 3 back and 28 ahead, week is 1 back and 7 ahead", () => {
+    expect(planWindow("month", TODAY, EXAM)).toEqual({ start: day("2026-11-13"), end: day("2026-12-14") });
+    expect(planWindow("week", TODAY, EXAM)).toEqual({ start: day("2026-11-15"), end: day("2026-11-23") });
+  });
+});
+
+describe("bar geometry", () => {
+  const win = planWindow("week", TODAY, EXAM);
+  it("clamps a bar that starts before the window", () => {
+    const g = barGeometry("2026-11-01", "2026-11-17", win)!;
+    expect(g.left).toBe(0);
+    expect(g.width).toBeCloseTo(((day("2026-11-18") - win.start) / (win.end - win.start)) * 100);
+  });
+  it("is null outside the window and with no dates", () => {
+    expect(barGeometry("2027-01-01", "2027-01-05", win)).toBeNull();
+    expect(barGeometry(null, null, win)).toBeNull();
+  });
+  it("a due-only window is a one day bar", () => {
+    expect(barGeometry(null, "2026-11-17", win)!.width).toBeCloseTo(100 / 8);
+  });
+  it("circle sits at the end of the due day, null when outside", () => {
+    expect(circlePos("2026-11-16", win)).toBeCloseTo(((day("2026-11-17") - win.start) / (win.end - win.start)) * 100);
+    expect(circlePos("2026-12-30", win)).toBeNull();
+    expect(circlePos(null, win)).toBeNull();
+  });
+});
+
+describe("axisTicks", () => {
+  it("exam: first of each month", () => {
+    const t = axisTicks("exam", planWindow("exam", TODAY, EXAM));
+    expect(t[0].label).toBe("Dec");
+    expect(t[t.length - 1].label).toBe("May");
+    expect(t).toHaveLength(6);
+  });
+  it("week: a tick per day inside, month: weekly", () => {
+    expect(axisTicks("week", planWindow("week", TODAY, EXAM))).toHaveLength(7);
+    expect(axisTicks("month", planWindow("month", TODAY, EXAM))).toHaveLength(5);
+  });
+});
+
+describe("formatting", () => {
+  it("readiness formats and never yields NaN", () => {
+    expect(formatReadiness(0.041)).toBe("4.1%");
+    expect(formatReadiness(0)).toBe("0%");
+    expect(formatReadiness(1)).toBe("100%");
+    expect(formatReadiness(NaN)).toBe("0%");
+    expect(formatReadiness(2)).toBe("100%");
+  });
+  it("hours", () => {
+    expect(formatHours(360)).toBe("6 h");
+    expect(formatHours(108)).toBe("1.8 h");
+    expect(formatHours(0)).toBe("0 h");
+  });
+});
+
+describe("stepFractions", () => {
+  it("fractions of planned minutes, spent capped to the remainder", () => {
+    expect(
+      stepFractions({ step: 1, plannedMin: 100, donePassedMin: 40, spentUnpassedMin: 80, planTodayMin: 50 }),
+    ).toEqual({ done: 0.4, spent: 0.6, tick: 0.5 });
+  });
+  it("zero planned is all zero", () => {
+    expect(
+      stepFractions({ step: 1, plannedMin: 0, donePassedMin: 5, spentUnpassedMin: 0, planTodayMin: 0 }),
+    ).toEqual({ done: 0, spent: 0, tick: 0 });
+  });
+});
+
+const sec = (id: string, initial: { answered: number; correct: number } | null): ProjectionSection => ({
+  topicId: id,
+  name: id,
+  examWeight: 0.1,
+  steps: [],
+  modules: [],
+  performance: { initial, review: null, mocks: null, extras: { tasks: 0, minutes: 0 } },
+});
+
+describe("performance and behind", () => {
+  it("weakest section is lowest accuracy with answers", () => {
+    expect(
+      weakestSection([sec("a", { answered: 10, correct: 9 }), sec("b", { answered: 10, correct: 6 }), sec("c", null)]),
+    ).toEqual({ topicId: "b", name: "b", accuracy: 0.6 });
+    expect(weakestSection([sec("c", null), sec("d", { answered: 0, correct: 0 })])).toBeNull();
+    expect(accuracy({ answered: 0, correct: 0 })).toBeNull();
+  });
+  it("owed minutes sums past days only, never negative", () => {
+    const daily = [
+      { date: "2026-11-14", plannedMin: 120, doneMin: 60, byStep: {} },
+      { date: "2026-11-15", plannedMin: 60, doneMin: 60, byStep: {} },
+      { date: "2026-11-16", plannedMin: 90, doneMin: 0, byStep: {} },
+    ] as unknown as Projection["daily"];
+    expect(owedMinutes(daily, TODAY)).toBe(60);
+    expect(owedMinutes([], TODAY)).toBe(0);
+  });
+});
+
+describe("tracking buckets", () => {
+  const mk = (date: string, p: number, d: number) => ({
+    date,
+    plannedMin: p,
+    doneMin: d,
+    byStep: { "1": 0, "2": 0, "3": 0, "4": 0, "5": 0 },
+  });
+  const daily = [mk("2026-11-15", 60, 30), mk("2026-11-16", 60, 0), mk("2026-12-02", 60, 0)];
+  it("exam groups by month with owed only for past days", () => {
+    const b = trackingBuckets("exam", daily, [], TODAY);
+    expect(b.map((x) => x.label)).toEqual(["Nov", "Dec"]);
+    expect(b[0]).toMatchObject({ plannedMin: 120, doneMin: 30, owedMin: 30 });
+    const c = cumulative(b, day(TODAY));
+    expect(c.planned).toEqual([120, 180]);
+    expect(c.done).toEqual([30, null]);
+  });
+  it("week gives seven days from Monday, holidays and empty days off", () => {
+    const b = trackingBuckets("week", daily, [{ id: "h", start: "2026-11-17", end: "2026-11-17", cancelled: false }], TODAY);
+    expect(b).toHaveLength(7);
+    expect(b[0].key).toBe("2026-11-16");
+    expect(b[1].off).toBe(true);
+    expect(b[0].off).toBe(false);
+  });
+  it("a cancelled holiday is not greyed", () => {
+    const b = trackingBuckets("week", [mk("2026-11-17", 60, 0)], [{ id: "h", start: "2026-11-17", end: "2026-11-17", cancelled: true }], TODAY);
+    expect(b[1].off).toBe(false);
+  });
+  it("month gives weeks that cover the month once", () => {
+    const b = trackingBuckets("month", daily, [], TODAY);
+    expect(b.length).toBeGreaterThanOrEqual(4);
+    expect(b.reduce((a, x) => a + x.plannedMin, 0)).toBe(120);
+  });
+});
+
+describe("sorting modules", () => {
+  const m = (name: string, ws: ProjectionWindow[]) => ({ name, windows: ws });
+  const mods = [
+    m("a", [w(1, null, "2026-11-20")]),
+    m("b", [w(1, null, "2026-11-10"), w(2, null, "2026-11-12")]),
+    m("c", [w(1, null, "2026-11-10", "done")]),
+    m("d", [w(2, null, "2026-11-30", "overdue")]),
+  ];
+  it("counts past-due and overdue windows, not done ones", () => {
+    expect(mods.map((x) => behindCount(x, TODAY))).toEqual([0, 2, 0, 1]);
+  });
+  it("most behind first is stable, only behind filters", () => {
+    expect(sortModules(mods, "behind", TODAY).map((x) => x.name)).toEqual(["b", "d", "a", "c"]);
+    expect(sortModules(mods, "only-behind", TODAY).map((x) => x.name)).toEqual(["b", "d"]);
+    expect(sortModules(mods, "curriculum", TODAY)).toBe(mods);
+  });
+});
+
+describe("misc", () => {
+  it("section window spans earliest start to latest due per step", () => {
+    const r = sectionWindows([
+      { windows: [w(1, "2026-11-10", "2026-11-12", "done")] },
+      { windows: [w(1, "2026-11-13", "2026-11-15")] },
+    ]);
+    expect(r).toHaveLength(1);
+    expect(r[0]).toMatchObject({ step: 1, start: "2026-11-10", due: "2026-11-15", status: "planned" });
+  });
+  it("empty projection has no progress", () => {
+    const p = { sections: [sec("a", null)], daily: [] } as unknown as Projection;
+    expect(hasAnyProgress(p)).toBe(false);
+  });
+  it("module href carries the reading", () => {
+    expect(moduleHref("qm", "r 1")).toBe("/syllabus/qm?reading=r%201");
+  });
+});
+
+import { reasonText, shortDate } from "./pace-view";
+describe("copy helpers", () => {
+  it("names known extra reasons and tolerates unknown ones", () => {
+    expect(reasonText("top-up-80")).toBe("Top-up to reach 80%");
+    expect(reasonText("some-new-reason")).toBe("Some new reason");
+  });
+  it("short dates", () => {
+    expect(shortDate("2027-04-20")).toBe("20 Apr");
+    expect(shortDate(null)).toBe("");
+  });
+});

@@ -57,6 +57,16 @@
   --stage-rv-reading: #e69f00;
   --stage-rv-questions: #cc79a7;
 
+  /* Step engine: read, questions, review, review questions, and the mock gate.
+     Each is 3:1 or better on --ground and --raised in its theme (checked with
+     the WCAG formula). The step number inside every marker is the second
+     encoding, so hue is never the only carrier. */
+  --step-1: #0f7fa8;
+  --step-2: #2f5fe0;
+  --step-3: #8a3fd1;
+  --step-4: #c2306f;
+  --gate: #9a6408;
+
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -112,6 +122,12 @@
     --stage-fp-questions: #00916a;
     --stage-rv-reading: #c08a00;
     --stage-rv-questions: #b96d96;
+
+    --step-1: #3aa9d4;
+    --step-2: #6f90ff;
+    --step-3: #b27cf0;
+    --step-4: #e8689f;
+    --gate: #d9a23a;
   }
 }
 
@@ -142,6 +158,12 @@
   --stage-fp-questions: #00916a;
   --stage-rv-reading: #c08a00;
   --stage-rv-questions: #b96d96;
+
+  --step-1: #3aa9d4;
+  --step-2: #6f90ff;
+  --step-3: #b27cf0;
+  --step-4: #e8689f;
+  --gate: #d9a23a;
 }
 
 *,
