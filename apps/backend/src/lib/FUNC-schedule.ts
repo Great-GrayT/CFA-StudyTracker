@@ -17,6 +17,10 @@ import type { WorkItem } from "../core/steps/work";
 
 const HORIZON_DAYS = 14;
 
+// Bumped by every real rebuild so cached projections of the plan are dropped.
+const rebuilds = new Map<string, number>();
+export const horizonVersion = (planId: string) => rebuilds.get(planId) ?? 0;
+
 type StepKey = 1 | 2 | 3 | 4 | 5;
 export const DEFAULT_STEP_PRIORITY: Record<StepKey, string[]> = {
   1: ["mm-l2", "kaplan-l2", "cfa-les"],
@@ -282,7 +286,13 @@ export async function generateHorizon(
       declarations.push({ readingId, step: 2, confidence: null, answered: d.answered, correct: d.correct });
     }
   }
-  for (const s of await db.stepDeclaration.findMany({ where: { planId } })) {
+  const stated = await db.stepDeclaration.findMany({ where: { planId } });
+  // A self-state row restates the form's log rows (prior-work maps one onto the other), so it wins over them.
+  const statedKeys = new Set(stated.map((s) => `${s.readingId}|${s.step}`));
+  for (let i = declarations.length - 1; i >= 0; i--) {
+    if (statedKeys.has(`${declarations[i]!.readingId}|${declarations[i]!.step}`)) declarations.splice(i, 1);
+  }
+  for (const s of stated) {
     declarations.push({
       readingId: s.readingId, step: s.step as 1 | 2 | 3 | 4, confidence: s.confidence,
       answered: s.answered, correct: s.correct,
@@ -437,5 +447,6 @@ export async function generateHorizon(
     return { created: createdCount, frozen: frozenCount, kept: keptCount, deleted: deletedCount };
   }, { timeout: 30000 });
 
+  rebuilds.set(planId, horizonVersion(planId) + 1);
   return { ...written, ...reported };
 }

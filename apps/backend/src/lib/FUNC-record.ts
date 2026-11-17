@@ -14,6 +14,8 @@ export type RecordInput = {
   confidence?: number;
   questionsAnswered?: number;
   questionsCorrect?: number;
+  answerReviewDone?: boolean;
+  answerReviewMinutes?: number;
   note?: string;
 };
 
@@ -35,8 +37,15 @@ export async function recordTask(
     where: { id: task.id },
     data:
       input.status === "pending"
-        ? { status: "pending", actualMinutes: null }
-        : { status: input.status, actualMinutes: input.actualMinutes ?? task.estimatedMinutes },
+        ? { status: "pending", actualMinutes: null, answerReviewDone: false }
+        : {
+            status: input.status,
+            // Review time is part of the sitting. Only a done task takes it: a partial's credit ratio
+            // is spent over estimated, and review minutes would inflate the answering credit.
+            actualMinutes: (input.actualMinutes ?? task.estimatedMinutes)
+              + (input.status === "done" ? (input.answerReviewMinutes ?? 0) : 0),
+            answerReviewDone: input.answerReviewDone ?? false,
+          },
   });
   if (input.status === "pending") return updated;
 

@@ -143,6 +143,12 @@ export const patchPlanSchema = z.object({
   // or a value that is not a number, IS a 400, because both mean the client
   // and the server disagree about what exists.
   tuning: tuningSchema.optional(),
+  // Package slugs per step, best first. Slugs are checked against the catalogue in the route.
+  stepPriority: z
+    .record(z.enum(["1", "2", "3", "4", "5"]), z.array(z.string().min(1).max(100)).max(20))
+    .optional(),
+  lesReadingHours: z.number().int().min(50).max(400).optional(),
+  belowPassAccepted: z.boolean().optional(),
 });
 
 /**
@@ -224,6 +230,9 @@ export const submitTaskSchema = z
     confidence: z.number().int().min(1).max(5).optional(),
     questionsAnswered: z.number().int().min(0).max(1000).optional(),
     questionsCorrect: z.number().int().min(0).max(1000).optional(),
+    // Question tasks owe a review of the answers; saying it is done is what clears the debt.
+    answerReviewDone: z.boolean().optional(),
+    answerReviewMinutes: z.number().int().min(0).max(600).optional(),
     note: z.string().max(2000).optional(),
   })
   .refine((b) => b.status !== "partial" || b.actualMinutes !== undefined, {
@@ -289,12 +298,46 @@ export const importPlanSchema = z.object({
   packages: z.array(planPackageSchema).optional(),
 });
 
+export const mockTopicScoreSchema = z
+  .object({
+    topicId: z.string().min(1),
+    answered: z.number().int().min(0).max(1000),
+    correct: z.number().int().min(0).max(1000),
+  })
+  .refine((t) => t.correct <= t.answered, { message: "More correct than answered", path: ["correct"] });
+
+// scorePercent may be left out when topicScores carry it; the route derives it.
 export const createMockExamSchema = z.object({
   planId: z.string(),
   date: z.coerce.date(),
-  scorePercent: z.number().int().min(0).max(100),
+  scorePercent: z.number().int().min(0).max(100).optional(),
   packageId: z.string().optional(),
   note: z.string().optional(),
+  sessionRef: z.string().min(1).max(200).optional(),
+  topicScores: z.array(mockTopicScoreSchema).max(30).optional(),
+}).refine((b) => b.scorePercent !== undefined || (b.topicScores?.length ?? 0) > 0, {
+  message: "A score or per-topic scores are required",
+  path: ["scorePercent"],
+});
+
+export const declarationsSchema = z.object({
+  items: z
+    .array(
+      z
+        .object({
+          readingId: z.string().min(1),
+          step: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
+          confidence: z.number().int().min(1).max(5).optional(),
+          answered: z.number().int().min(0).max(5000).optional(),
+          correct: z.number().int().min(0).max(5000).optional(),
+        })
+        .refine((d) => (d.correct ?? 0) <= (d.answered ?? 0), {
+          message: "More correct than answered",
+          path: ["correct"],
+        }),
+    )
+    .min(1)
+    .max(200),
 });
 
 export const subscribePushSchema = z.object({

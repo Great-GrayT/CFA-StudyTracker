@@ -4,6 +4,7 @@ import { requireUser } from "../../../../lib/FUNC-auth";
 import { patchPlanSchema } from "../../../../lib/validation";
 import { parseTuning } from "../../../../core/tuning";
 import { generateHorizon } from "../../../../lib/FUNC-schedule";
+import { LES_SLUG } from "../../../../core/steps/catalog";
 
 // Route handlers here are called directly in tests (no Next.js router in the
 // loop), so the dynamic segment is pulled from the URL itself rather than a
@@ -34,7 +35,23 @@ export async function PATCH(req: Request): Promise<Response> {
     return Response.json({ error: "Invalid request body" }, { status: 400 });
   }
 
+  // A typo in a slug would silently drop that package from a step, so unknown slugs are a 400.
+  if (parsed.data.stepPriority !== undefined) {
+    const slugs = [...new Set(Object.values(parsed.data.stepPriority).flat())].filter((s) => s !== LES_SLUG);
+    if (slugs.length > 0) {
+      const known = await db.studyPackage.findMany({
+        where: { slug: { in: slugs }, OR: [{ userId: null }, { userId: auth.userId }] },
+        select: { slug: true },
+      });
+      const missing = slugs.find((s) => !known.some((k) => k.slug === s));
+      if (missing) return Response.json({ error: `Unknown package: ${missing}` }, { status: 400 });
+    }
+  }
+
   const data: Prisma.StudyPlanUpdateInput = {};
+  if (parsed.data.stepPriority !== undefined) data.stepPriority = parsed.data.stepPriority as Prisma.InputJsonValue;
+  if (parsed.data.lesReadingHours !== undefined) data.lesReadingHours = parsed.data.lesReadingHours;
+  if (parsed.data.belowPassAccepted !== undefined) data.belowPassAccepted = parsed.data.belowPassAccepted;
   if (parsed.data.examDate !== undefined) data.examDate = parsed.data.examDate;
   if (parsed.data.weeklyAvailability !== undefined) {
     data.weeklyAvailability = parsed.data.weeklyAvailability as Prisma.InputJsonValue;
@@ -138,7 +155,10 @@ export async function PATCH(req: Request): Promise<Response> {
     parsed.data.planMode !== undefined ||
     parsed.data.reviewPolicy !== undefined ||
     parsed.data.reviewStartDate !== undefined ||
-    parsed.data.tuning !== undefined;
+    parsed.data.tuning !== undefined ||
+    parsed.data.stepPriority !== undefined ||
+    parsed.data.lesReadingHours !== undefined ||
+    parsed.data.belowPassAccepted !== undefined;
   if (replans) {
     const today = new Intl.DateTimeFormat("en-CA", {
       timeZone: updated.timeZone ?? "UTC",

@@ -326,3 +326,29 @@ test("another user cannot set the location on a plan that is not theirs", async 
   expect(unchanged.city).toBeNull();
 });
 
+
+test("PATCH accepts stepPriority, lesReadingHours and belowPassAccepted", async () => {
+  const { PATCH } = await import("../../src/app/api/plans/[id]/route");
+  const { user, plan } = await setupUserWithPlan();
+  await db.studyPackage.create({ data: { slug: "mm-l2", name: "MM", userId: null } });
+  const res = await PATCH(
+    authedRequest(user, `/api/plans/${plan.id}`, {
+      stepPriority: { "1": ["mm-l2"] }, lesReadingHours: 120, belowPassAccepted: true,
+    }, "PATCH"),
+  );
+  expect(res.status).toBe(200);
+  const row = await db.studyPlan.findUniqueOrThrow({ where: { id: plan.id } });
+  expect(row.stepPriority).toEqual({ "1": ["mm-l2"] });
+  expect(row.lesReadingHours).toBe(120);
+  expect(row.belowPassAccepted).toBe(true);
+});
+
+test("PATCH rejects unknown package slugs, bad step keys and out of range LES hours", async () => {
+  const { PATCH } = await import("../../src/app/api/plans/[id]/route");
+  const { user, plan } = await setupUserWithPlan();
+  const send = (body: unknown) => PATCH(authedRequest(user, `/api/plans/${plan.id}`, body, "PATCH"));
+  expect((await send({ stepPriority: { "1": ["no-such-package"] } })).status).toBe(400);
+  expect((await send({ stepPriority: { "9": [] } })).status).toBe(400);
+  expect((await send({ lesReadingHours: 40 })).status).toBe(400);
+  expect((await send({ lesReadingHours: 401 })).status).toBe(400);
+});

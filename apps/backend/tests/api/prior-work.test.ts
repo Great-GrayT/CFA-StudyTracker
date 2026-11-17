@@ -78,6 +78,20 @@ describe("prior work declared at onboarding", () => {
     expect(rows.reduce((sum, r) => sum + r.questionsCorrect, 0)).toBe(84);
   });
 
+  test("declared work is mapped onto step self-states, replaced on resubmit", async () => {
+    const { planId, token, topicId } = await ownedPlan();
+    const body = { declarations: [{ topicId, read: true, questionsAnswered: 120, accuracyPercent: 70 }] };
+    await POST_PRIOR_WORK(priorWorkRequest(planId, token, body));
+    const rows = await db.stepDeclaration.findMany({ where: { planId } });
+    const s1 = rows.filter((r) => r.step === 1);
+    const s2 = rows.filter((r) => r.step === 2);
+    expect(s1.length).toBeGreaterThan(0);
+    expect(s2.reduce((a, r) => a + (r.answered ?? 0), 0)).toBe(120);
+    expect(s2.reduce((a, r) => a + (r.correct ?? 0), 0)).toBe(84);
+    await POST_PRIOR_WORK(priorWorkRequest(planId, token, { declarations: [{ topicId, read: true }] }));
+    expect(await db.stepDeclaration.count({ where: { planId, step: 2 } })).toBe(0);
+  });
+
   test("declared work is distinguishable from work logged as it happened", async () => {
     const { planId, token, topicId } = await ownedPlan();
     await POST_PRIOR_WORK(

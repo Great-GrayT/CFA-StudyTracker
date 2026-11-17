@@ -5,6 +5,7 @@
 // names, so a package added to the catalogue (Kaplan videos, a new Qbank)
 // appears in the right column with no code change.
 import { db } from "./db";
+import { spread } from "../core/spread";
 import { UNATTRIBUTED, type PriorWorkDeclaration } from "./validation";
 
 export type SourceKind = "notes" | "videos" | "questions";
@@ -140,4 +141,46 @@ export function declaredRows(declarations: PriorWorkDeclaration[], topics: Map<s
     }
   }
   return rows;
+}
+
+/** Modules a form row speaks for: its one module, or the topic's modules no module row overrides. */
+function scopeReadings(declarations: PriorWorkDeclaration[], topics: Map<string, TopicShape>) {
+  const overridden = new Set(declarations.filter((d) => d.readingId).map((d) => d.readingId!));
+  return declarations.map((d) => {
+    const topic = topics.get(d.topicId);
+    const readings = !topic ? [] : d.readingId
+      ? topic.readings.filter((r) => r.id === d.readingId)
+      : topic.readings.filter((r) => !overridden.has(r.id));
+    // Same rule as declaredRows: a module with no outcomes carries no evidence.
+    return { d, readings: readings.filter((r) => r.los.length > 0) };
+  });
+}
+
+export function scopeReadingIds(declarations: PriorWorkDeclaration[], topics: Map<string, TopicShape>): string[] {
+  return [...new Set(scopeReadings(declarations, topics).flatMap((s) => s.readings.map((r) => r.id)))];
+}
+
+export type DeclaredStep = {
+  readingId: string; step: 1 | 2; confidence: number | null; answered: number | null; correct: number | null;
+};
+
+/** The prior-work form as engine self-states: any read or watch is step 1, answered questions are step 2. */
+export function declaredSteps(declarations: PriorWorkDeclaration[], topics: Map<string, TopicShape>): DeclaredStep[] {
+  const out: DeclaredStep[] = [];
+  for (const { d, readings } of scopeReadings(declarations, topics)) {
+    if (readings.length === 0) continue;
+    const answered = d.questions?.answered ?? 0;
+    const correct = d.questions?.accuracyPercent == null ? 0 : Math.round((answered * d.questions.accuracyPercent) / 100);
+    const a = spread(answered, readings.length);
+    const c = spread(correct, readings.length);
+    readings.forEach((r, i) => {
+      if (d.notesFrom || d.videosFrom) {
+        out.push({ readingId: r.id, step: 1, confidence: d.confidence ?? 3, answered: null, correct: null });
+      }
+      if (a[i]! > 0) {
+        out.push({ readingId: r.id, step: 2, confidence: null, answered: a[i]!, correct: Math.min(a[i]!, c[i]!) });
+      }
+    });
+  }
+  return out;
 }

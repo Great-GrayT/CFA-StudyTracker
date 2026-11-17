@@ -4,6 +4,8 @@ import { priorWorkSchema } from "../../../../../lib/validation";
 import {
   CFAI,
   declaredRows,
+  declaredSteps,
+  scopeReadingIds,
   ensureCfaiPackage,
   priorWorkSources,
   unknownSource,
@@ -104,6 +106,19 @@ export async function POST(req: Request): Promise<Response> {
     date: declaredAt,
   }));
 
+  // The same form as engine self-states. A resubmit replaces what the form said before, including
+  // modules the new form no longer mentions, and leaves self-states declared one module at a time.
+  const steps = declaredSteps(declarations, byTopicId);
+  const touched = new Set(scopeReadingIds(declarations, byTopicId));
+  const before = priorWorkSchema.safeParse({ declarations: plan.priorWork ?? [] });
+  if (before.success && before.data.declarations.length > 0) {
+    const oldTopics = await db.topic.findMany({
+      where: { levelId: plan.levelId, id: { in: before.data.declarations.map((d) => d.topicId) } },
+      include: { readings: { include: { los: { select: { id: true } } } } },
+    });
+    for (const id of scopeReadingIds(before.data.declarations, new Map(oldTopics.map((t) => [t.id, t])))) touched.add(id);
+  }
+
   // Replace rather than accumulate. This is one statement about the past, not
   // an event log: a candidate who corrects their own answer on the onboarding
   // screen means "it was 60, not 100", never "it was 160".
@@ -113,6 +128,10 @@ export async function POST(req: Request): Promise<Response> {
     });
     if (rows.length > 0) {
       await tx.studyLogEntry.createMany({ data: rows });
+    }
+    await tx.stepDeclaration.deleteMany({ where: { planId, readingId: { in: [...touched] } } });
+    if (steps.length > 0) {
+      await tx.stepDeclaration.createMany({ data: steps.map((x) => ({ planId, ...x })), skipDuplicates: true });
     }
     await tx.studyPlan.update({ where: { id: planId }, data: { priorWork: declarations } });
     return deleted.count;

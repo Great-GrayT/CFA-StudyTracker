@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { db } from "../../src/lib/db";
 import { resetDb } from "../helpers/test-db";
 import { readJson } from "../helpers/request";
-import { authedRequest, registerUser, setupPlanWithTasks } from "../helpers/fixtures";
+import { addQuestionBank, authedRequest, registerUser, setupPlanWithCatalogue, setupPlanWithTasks } from "../helpers/fixtures";
+import { generateHorizon } from "../../src/lib/FUNC-schedule";
 import { PATCH } from "../../src/app/api/plans/[id]/tasks/[taskId]/route";
 import { POST as POST_LOG } from "../../src/app/api/logs/route";
 
@@ -211,5 +212,58 @@ describe("PATCH /api/plans/:id/tasks/:taskId", () => {
     const [day] = await getPrescription(planId, "2027-01-04", "2027-01-04");
     expect(day!.doneTasks).toBe(1);
     expect(day!.doneMinutes).toBe(40);
+  });
+});
+
+describe("answer review on a questions task", () => {
+  beforeEach(async () => {
+    await resetDb();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(TODAY);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  async function questionTask() {
+    const { planId } = await setupPlanWithCatalogue();
+    await addQuestionBank({ questionsPerUnit: 200 });
+    const user = await registerUser();
+    await db.studyPlan.update({ where: { id: planId }, data: { userId: user.id, examDate: new Date("2027-04-01") } });
+    await generateHorizon(planId, "2027-01-04");
+    const t = await db.planTask.findFirstOrThrow({ where: { planId, date: new Date("2027-01-04") }, orderBy: { order: "asc" } });
+    await db.planTask.update({
+      where: { id: t.id },
+      data: { kind: "questions", step: 2, round: 1, questionCount: 20, estimatedMinutes: 60, workMinutes: 60 },
+    });
+    return { planId, user, task: t };
+  }
+
+  test("answerReviewDone false creates an answer-review-owed extra after the rebuild", async () => {
+    const { planId, user, task } = await questionTask();
+    const res = await patch(user, planId, task.id, {
+      status: "done", confidence: 3, questionsAnswered: 20, questionsCorrect: 16, answerReviewDone: false,
+    });
+    expect(res.status).toBe(200);
+    expect((await db.planTask.findUniqueOrThrow({ where: { id: task.id } })).answerReviewDone).toBe(false);
+    const extras = await db.planTask.findMany({ where: { planId, extraReason: "answer-review-owed" } });
+    expect(extras.length).toBeGreaterThan(0);
+  });
+
+  test("answerReviewDone true is stored and owes nothing", async () => {
+    const { planId, user, task } = await questionTask();
+    await patch(user, planId, task.id, {
+      status: "done", confidence: 3, questionsAnswered: 20, questionsCorrect: 16,
+      answerReviewDone: true, answerReviewMinutes: 15,
+    });
+    const row = await db.planTask.findUniqueOrThrow({ where: { id: task.id } });
+    expect(row.answerReviewDone).toBe(true);
+    expect(await db.planTask.count({ where: { planId, extraReason: "answer-review-owed" } })).toBe(0);
+  });
+
+  test("more correct than answered is a 400", async () => {
+    const { planId, user, task } = await questionTask();
+    const res = await patch(user, planId, task.id, {
+      status: "done", confidence: 3, questionsAnswered: 5, questionsCorrect: 6, answerReviewDone: true,
+    });
+    expect(res.status).toBe(400);
   });
 });
