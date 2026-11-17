@@ -21,6 +21,10 @@ function state(overrides: Partial<CoachState> = {}): CoachState {
     holiday: "none",
     streakDays: 0,
     daysToExam: 120,
+    stage: "steps-1-2",
+    daysBehind: 0,
+    belowPass: false,
+    infeasible: false,
     ...overrides,
   };
 }

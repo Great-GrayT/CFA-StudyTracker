@@ -282,3 +282,11 @@ test("off-plan work does not make the day a rest day or change the streak band",
   expect(state.shape).not.toBe("rest");
   expect(state.streak).toBe("drifting");
 });
+
+// LADDER FACTS
+test("ladder facts default to on plan and carry through when given", () => {
+  const d = classify(input({}));
+  expect(d).toMatchObject({ stage: "steps-1-2", daysBehind: 0, belowPass: false, infeasible: false });
+  const s = classify(input({ stage: "mock-window", daysBehind: 5, belowPass: true, infeasible: true }));
+  expect(s).toMatchObject({ stage: "mock-window", daysBehind: 5, belowPass: true, infeasible: true });
+});

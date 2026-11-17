@@ -96,3 +96,23 @@ describe("planningDate", () => {
     expect(planningDate(new Date("2027-01-31T23:00:00Z"), "UTC", SLOT_LOCAL_TIMES)).toBe("2027-02-01");
   });
 });
+
+describe("dueSlots with the day's slot list", () => {
+  const list = [
+    { slot: "prescription" as const, hour: 6, minute: 30 },
+    { slot: "extra-1" as const, hour: 11, minute: 10 },
+    { slot: "nudge" as const, hour: 20, minute: 0 },
+    { slot: "debrief" as const, hour: 22, minute: 30 },
+  ];
+  test("widened slots are due in time order and skip the sent ones", () => {
+    const t = new Date("2027-01-04T12:00:00Z");
+    expect(dueSlots(t, "UTC", [], SLOT_LOCAL_TIMES, list)).toEqual(["prescription", "extra-1"]);
+    expect(dueSlots(t, "UTC", ["extra-1"], SLOT_LOCAL_TIMES, list)).toEqual(["prescription"]);
+  });
+  test("unsorted lists still return chronologically", () => {
+    const t = new Date("2027-01-04T23:00:00Z");
+    expect(dueSlots(t, "UTC", [], SLOT_LOCAL_TIMES, [...list].reverse())).toEqual([
+      "prescription", "extra-1", "nudge", "debrief",
+    ]);
+  });
+});

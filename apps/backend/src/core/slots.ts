@@ -1,20 +1,25 @@
 // Pure email slot scheduling engine. No DB, no HTTP, no framework.
 // Timezone-aware local time resolution for candidate emails.
 
-export type Slot = "prescription" | "nudge" | "debrief";
+/** The three fixed daily sends, the only slots a user can reschedule. */
+export type AnchorSlot = "prescription" | "nudge" | "debrief";
+/** Anchors plus the ladder's midday and random extras (stored in EmailSend.slot). */
+export type Slot = AnchorSlot | "midday" | `extra-${number}`;
 
-export const SLOT_LOCAL_TIMES: Record<Slot, { hour: number; minute: number }> = {
+export type DaySlot = { slot: Slot; hour: number; minute: number };
+
+export const SLOT_LOCAL_TIMES: Record<AnchorSlot, { hour: number; minute: number }> = {
   prescription: { hour: 6, minute: 30 },
   nudge: { hour: 20, minute: 0 },
   debrief: { hour: 22, minute: 30 },
 };
 
 // Slots in chronological order so due slots naturally sort correctly.
-export const SLOTS_ORDERED: Slot[] = ["prescription", "nudge", "debrief"];
+export const SLOTS_ORDERED: AnchorSlot[] = ["prescription", "nudge", "debrief"];
 
-export type CoachSchedule = Record<Slot, { hour: number; minute: number }>;
+export type CoachSchedule = Record<AnchorSlot, { hour: number; minute: number }>;
 /** As stored and sent: local "HH:MM" per slot. */
-export type CoachScheduleTimes = Record<Slot, string>;
+export type CoachScheduleTimes = Record<AnchorSlot, string>;
 
 const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
@@ -32,7 +37,7 @@ export function parseSchedule(raw: unknown): CoachSchedule {
     if (!m) return SLOT_LOCAL_TIMES;
     out[slot] = { hour: Number(m[1]), minute: Number(m[2]) };
   }
-  const at = (s: Slot) => out[s].hour * 60 + out[s].minute;
+  const at = (s: AnchorSlot) => out[s].hour * 60 + out[s].minute;
   if (!(at("prescription") < at("nudge") && at("nudge") < at("debrief"))) return SLOT_LOCAL_TIMES;
   return out;
 }
@@ -80,6 +85,7 @@ export function dueSlots(
   timeZone: string,
   alreadySent: Slot[],
   schedule: CoachSchedule = SLOT_LOCAL_TIMES,
+  daySlotList?: DaySlot[],
 ): Slot[] {
   // Get the candidate's local time
   const formatter = new Intl.DateTimeFormat("en-US", {
@@ -105,16 +111,14 @@ export function dueSlots(
 
   const alreadySentSet = new Set(alreadySent);
 
+  // Defaults to the anchors so callers without a ladder behave as before.
+  const slots: DaySlot[] = daySlotList ?? SLOTS_ORDERED.map((slot) => ({ slot, ...schedule[slot] }));
+  const byTime = (a: DaySlot) => a.hour * 60 + a.minute;
+
   const result: Slot[] = [];
-  for (const slot of SLOTS_ORDERED) {
+  for (const { slot, hour, minute } of [...slots].sort((a, b) => byTime(a) - byTime(b))) {
     if (alreadySentSet.has(slot)) continue;
-
-    const { hour, minute } = schedule[slot];
-    const slotTime = hour * 60 + minute;
-
-    if (localTime >= slotTime) {
-      result.push(slot);
-    }
+    if (localTime >= hour * 60 + minute) result.push(slot);
   }
 
   return result;

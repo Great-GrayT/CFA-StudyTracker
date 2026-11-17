@@ -45,6 +45,9 @@ export type Phase = "build" | "consolidate" | "sharpen";
  */
 export type HolidayContext = "none" | "starts-tomorrow" | "mid-break" | "last-day" | "first-day-back";
 
+export type { CoachStage } from "./coach-ladder";
+import type { CoachStage } from "./coach-ladder";
+
 export type CoachState = {
   streak: StreakBand;
   shape: DayShape;
@@ -54,6 +57,11 @@ export type CoachState = {
   holiday: HolidayContext;
   streakDays: number; // raw count, carried through for copy
   daysToExam: number; // raw count, carried through for copy
+  stage: CoachStage;
+  daysBehind: number;
+  belowPass: boolean;
+  /** Plan does not fit and the candidate has not consented to a below-pass plan. */
+  infeasible: boolean;
 };
 
 export type CoachInput = {
@@ -76,6 +84,11 @@ export type CoachInput = {
   onPlanLogged: number;
   /** Log entries today on a reading that is NOT. */
   offPlanLogged: number;
+  // Engine facts, optional so callers without a projection read as on plan.
+  stage?: CoachStage;
+  daysBehind?: number;
+  belowPass?: boolean;
+  infeasible?: boolean;
 };
 
 export function classify(input: CoachInput): CoachState {
@@ -92,6 +105,10 @@ export function classify(input: CoachInput): CoachState {
     holiday: classifyHoliday(input),
     streakDays: input.streakDays,
     daysToExam: input.daysToExam,
+    stage: input.stage ?? "steps-1-2",
+    daysBehind: input.daysBehind ?? 0,
+    belowPass: input.belowPass ?? false,
+    infeasible: input.infeasible ?? false,
   };
 }
 
