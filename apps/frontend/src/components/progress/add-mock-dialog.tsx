@@ -46,9 +46,9 @@ export function AddMockDialog({
   const curriculum = useCurriculum(plan.data?.levelId);
   const sessions = useMockSessions(planId);
   const topics = [...(curriculum.data?.topics ?? [])].sort((a, b) => a.order - b.order);
-  const session = (sessions.data ?? []).find((m) => m.ref === sessionRef);
   const [date, setDate] = useState<Date | undefined>(() => new Date());
   const [sessionRef, setSessionRef] = useState(NO_SESSION);
+  const session = (sessions.data ?? []).find((m) => m.ref === sessionRef);
   const [rows, setRows] = useState<MockRow[]>([]);
   const [packageId, setPackageId] = useState(NO_PACKAGE);
   const [note, setNote] = useState("");
