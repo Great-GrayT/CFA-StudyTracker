@@ -10,6 +10,7 @@ export type WorkItem = {
   extraReason: null | "top-up-80" | "top-up-adequacy" | "package-switch" | "exemption-review"
     | "mock-retest" | "answer-review-owed";
   after: string[]; // ids of items that must finish first
+  mockRef?: string | null; // step 5 only; null = generic placeholder
 };
 
 type QState = ModuleState["s2"];
