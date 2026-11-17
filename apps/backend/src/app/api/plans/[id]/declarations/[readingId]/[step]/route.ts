@@ -1,5 +1,6 @@
 import { db } from "../../../../../../../lib/db";
 import { requireUser } from "../../../../../../../lib/FUNC-auth";
+import { todayIn } from "../../../../../../../lib/FUNC-today";
 import { generateHorizon } from "../../../../../../../lib/FUNC-schedule";
 
 // /api/plans/<id>/declarations/<readingId>/<step>
@@ -37,7 +38,7 @@ export async function DELETE(req: Request): Promise<Response> {
   await db.stepDeclaration.deleteMany({ where: { planId, readingId, step } });
 
   try {
-    const today = new Intl.DateTimeFormat("en-CA", { timeZone: plan.timeZone ?? "UTC" }).format(new Date());
+    const today = todayIn(plan.timeZone);
     await generateHorizon(planId, today);
   } catch (err) {
     console.error(`declarations DELETE: could not replan plan ${planId}`, err);

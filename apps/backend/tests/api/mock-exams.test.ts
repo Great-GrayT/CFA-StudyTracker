@@ -56,7 +56,7 @@ test("DELETE /api/mock-exams/:id removes one, 403 if it isn't the caller's", asy
   const mock = await readJson(
     await POST(authedRequest(user, "/api/mock-exams", { planId: plan.id, date: "2026-11-01", scorePercent: 68 })),
   );
-  expect((await DELETE(authedRequest(other, `/api/mock-exams/${mock.id}`))).status).toBe(403);
+  expect((await DELETE(authedRequest(other, `/api/mock-exams/${mock.id}`))).status).toBe(404);
   expect((await DELETE(authedRequest(user, `/api/mock-exams/${mock.id}`))).status).toBe(200);
 });
 
@@ -67,8 +67,27 @@ async function twoTopics(planId: string) {
   return [a.id, b.id] as const;
 }
 
+async function mockSession(levelId: string, ref: string, questionCount?: number) {
+  const pkg = await db.studyPackage.upsert({ where: { slug: "mx" }, create: { slug: "mx", name: "Mx", userId: null }, update: {} });
+  const ed = await db.packageEdition.upsert({
+    where: { packageId_levelId_year: { packageId: pkg.id, levelId, year: "2026" } },
+    create: { packageId: pkg.id, levelId, year: "2026" }, update: {},
+  });
+  await db.packageResource.create({ data: { editionId: ed.id, ref, kind: "mock_session", questionCount } });
+}
+
+test("an unknown session ref is rejected with 400, a repeated one with 409", async () => {
+  const { user, plan } = await setupUserWithPlan();
+  const body = { planId: plan.id, date: "2026-11-01", scorePercent: 70, sessionRef: "mx/mock/9" };
+  expect((await POST(authedRequest(user, "/api/mock-exams", body))).status).toBe(400);
+  await mockSession(plan.levelId, "mx/mock/9");
+  expect((await POST(authedRequest(user, "/api/mock-exams", body))).status).toBe(201);
+  expect((await POST(authedRequest(user, "/api/mock-exams", body))).status).toBe(409);
+});
+
 test("per-topic scores are stored with the session ref", async () => {
   const { user, plan } = await setupUserWithPlan();
+  await mockSession(plan.levelId, "pp/mock/1");
   const [a, b] = await twoTopics(plan.id);
   const res = await POST(
     authedRequest(user, "/api/mock-exams", {
@@ -127,11 +146,7 @@ test("a topic score with correct above answered, or a foreign topic, is rejected
 test("totals must equal the session's question count when it is known", async () => {
   const { user, plan } = await setupUserWithPlan();
   const [a] = await twoTopics(plan.id);
-  const pkg = await db.studyPackage.create({ data: { slug: "mx", name: "Mx", userId: null } });
-  const ed = await db.packageEdition.create({ data: { packageId: pkg.id, levelId: plan.levelId, year: "2026" } });
-  await db.packageResource.create({
-    data: { editionId: ed.id, ref: "mx/mock/1", kind: "mock_session", questionCount: 44 },
-  });
+  await mockSession(plan.levelId, "mx/mock/1", 44);
   const res = await POST(
     authedRequest(user, "/api/mock-exams", {
       planId: plan.id, date: "2026-11-01", sessionRef: "mx/mock/1",

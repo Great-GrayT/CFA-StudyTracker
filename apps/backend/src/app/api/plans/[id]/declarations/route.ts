@@ -1,6 +1,7 @@
 import { db } from "../../../../../lib/db";
 import { requireUser } from "../../../../../lib/FUNC-auth";
 import { declarationsSchema } from "../../../../../lib/validation";
+import { todayIn } from "../../../../../lib/FUNC-today";
 import { generateHorizon } from "../../../../../lib/FUNC-schedule";
 
 // Handlers are called directly in tests, so the id comes from the path.
@@ -37,6 +38,16 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   const existing = await db.stepDeclaration.findMany({ where: { planId, readingId: { in: ids } } });
+  // Omitted fields keep what is stored, so the merged row is what gets validated.
+  const stored = new Map(existing.map((d) => [`${d.readingId}|${d.step}`, d]));
+  for (const i of items) {
+    const old = stored.get(`${i.readingId}|${i.step}`);
+    const answered = i.answered !== undefined ? i.answered : old?.answered ?? null;
+    const correct = i.correct !== undefined ? i.correct : old?.correct ?? null;
+    if ((correct ?? 0) > (answered ?? 0)) {
+      return Response.json({ error: "More correct than answered" }, { status: 400 });
+    }
+  }
   const has = new Set([...existing, ...items].map((d) => `${d.readingId}|${d.step}`));
   for (const i of items) {
     if (i.step === 3 && !has.has(`${i.readingId}|1`)) {
@@ -55,14 +66,18 @@ export async function POST(req: Request): Promise<Response> {
           planId, readingId: i.readingId, step: i.step,
           confidence: i.confidence ?? null, answered: i.answered ?? null, correct: i.correct ?? null,
         },
-        update: { confidence: i.confidence ?? null, answered: i.answered ?? null, correct: i.correct ?? null },
+        update: {
+          ...(i.confidence !== undefined && { confidence: i.confidence }),
+          ...(i.answered !== undefined && { answered: i.answered }),
+          ...(i.correct !== undefined && { correct: i.correct }),
+        },
       }),
     ),
   );
 
   // Show the effect now; the declarations are stored either way and the next tick rebuilds.
   try {
-    const today = new Intl.DateTimeFormat("en-CA", { timeZone: plan.timeZone ?? "UTC" }).format(new Date());
+    const today = todayIn(plan.timeZone);
     await generateHorizon(planId, today);
   } catch (err) {
     console.error(`declarations POST: could not replan plan ${planId}`, err);

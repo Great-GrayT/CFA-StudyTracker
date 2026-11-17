@@ -331,7 +331,7 @@ export const declarationsSchema = z.object({
           answered: z.number().int().min(0).max(5000).optional(),
           correct: z.number().int().min(0).max(5000).optional(),
         })
-        .refine((d) => (d.correct ?? 0) <= (d.answered ?? 0), {
+        .refine((d) => d.answered === undefined || d.correct === undefined || d.correct <= d.answered, {
           message: "More correct than answered",
           path: ["correct"],
         }),

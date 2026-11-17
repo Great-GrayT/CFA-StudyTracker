@@ -3,6 +3,7 @@ import { db } from "../../../../lib/db";
 import { requireUser } from "../../../../lib/FUNC-auth";
 import { patchPlanSchema } from "../../../../lib/validation";
 import { parseTuning } from "../../../../core/tuning";
+import { todayIn } from "../../../../lib/FUNC-today";
 import { generateHorizon } from "../../../../lib/FUNC-schedule";
 import { LES_SLUG } from "../../../../core/steps/catalog";
 
@@ -35,16 +36,16 @@ export async function PATCH(req: Request): Promise<Response> {
     return Response.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  // A typo in a slug would silently drop that package from a step, so unknown slugs are a 400.
+  // A slug off the plan would silently drop out of a step, so it is a 400.
   if (parsed.data.stepPriority !== undefined) {
     const slugs = [...new Set(Object.values(parsed.data.stepPriority).flat())].filter((s) => s !== LES_SLUG);
     if (slugs.length > 0) {
-      const known = await db.studyPackage.findMany({
-        where: { slug: { in: slugs }, OR: [{ userId: null }, { userId: auth.userId }] },
-        select: { slug: true },
+      const attached = await db.planPackage.findMany({
+        where: { planId }, select: { package: { select: { slug: true } } },
       });
-      const missing = slugs.find((s) => !known.some((k) => k.slug === s));
-      if (missing) return Response.json({ error: `Unknown package: ${missing}` }, { status: 400 });
+      const onPlan = new Set(attached.map((a) => a.package.slug));
+      const missing = slugs.find((s) => !onPlan.has(s));
+      if (missing) return Response.json({ error: `Package not on this plan: ${missing}` }, { status: 400 });
     }
   }
 
@@ -160,9 +161,7 @@ export async function PATCH(req: Request): Promise<Response> {
     parsed.data.lesReadingHours !== undefined ||
     parsed.data.belowPassAccepted !== undefined;
   if (replans) {
-    const today = new Intl.DateTimeFormat("en-CA", {
-      timeZone: updated.timeZone ?? "UTC",
-    }).format(new Date());
+    const today = todayIn(updated.timeZone);
     try {
       await generateHorizon(planId, today);
     } catch (err) {

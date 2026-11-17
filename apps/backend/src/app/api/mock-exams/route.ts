@@ -2,6 +2,7 @@ import { db } from "../../../lib/db";
 import { requireUser } from "../../../lib/FUNC-auth";
 import { createMockExamSchema } from "../../../lib/validation";
 import { assertUsablePackage } from "../../../lib/FUNC-packages";
+import { todayIn } from "../../../lib/FUNC-today";
 import { generateHorizon } from "../../../lib/FUNC-schedule";
 
 export async function POST(req: Request): Promise<Response> {
@@ -28,6 +29,18 @@ export async function POST(req: Request): Promise<Response> {
     if (packageError) return packageError;
   }
 
+  let sessionQuestions: number | null = null;
+  if (sessionRef) {
+    const session = await db.packageResource.findFirst({
+      where: { kind: "mock_session", ref: sessionRef, edition: { levelId: plan.levelId } },
+      select: { questionCount: true },
+    });
+    if (!session) return Response.json({ error: "Unknown mock session" }, { status: 400 });
+    sessionQuestions = session.questionCount;
+    const taken = await db.mockExam.count({ where: { planId, sessionRef } });
+    if (taken > 0) return Response.json({ error: "This mock session is already recorded" }, { status: 409 });
+  }
+
   let scorePercent = parsed.data.scorePercent ?? 0;
   if (topicScores.length > 0) {
     if (new Set(topicScores.map((t) => t.topicId)).size !== topicScores.length) {
@@ -48,19 +61,13 @@ export async function POST(req: Request): Promise<Response> {
       return Response.json({ error: "The score does not match the topic scores" }, { status: 400 });
     }
     if (parsed.data.scorePercent === undefined) scorePercent = derived;
-
-    if (sessionRef) {
-      const session = await db.packageResource.findFirst({
-        where: { kind: "mock_session", ref: sessionRef, edition: { levelId: plan.levelId } },
-        select: { questionCount: true },
-      });
-      if (session?.questionCount && session.questionCount !== answered) {
-        return Response.json(
-          { error: `Topic totals must equal the session's ${session.questionCount} questions` },
-          { status: 400 },
-        );
-      }
+    if (sessionQuestions && sessionQuestions !== answered) {
+      return Response.json(
+        { error: `Topic totals must equal the session's ${sessionQuestions} questions` },
+        { status: 400 },
+      );
     }
+
   }
 
   const mockExam = await db.mockExam.create({
@@ -79,7 +86,7 @@ export async function POST(req: Request): Promise<Response> {
 
   // Weak topics owe a retest and a done session leaves the pool; show it now.
   try {
-    const today = new Intl.DateTimeFormat("en-CA", { timeZone: plan.timeZone ?? "UTC" }).format(new Date());
+    const today = todayIn(plan.timeZone);
     await generateHorizon(planId, today);
   } catch (err) {
     console.error(`mock-exams POST: could not replan plan ${planId}`, err);

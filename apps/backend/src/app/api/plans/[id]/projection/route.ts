@@ -1,5 +1,6 @@
 import { db } from "../../../../../lib/db";
 import { requireUser } from "../../../../../lib/FUNC-auth";
+import { todayIn } from "../../../../../lib/FUNC-today";
 import { getProjection } from "../../../../../lib/FUNC-projection";
 
 // Handlers are called directly in tests, so the id comes from the path.
@@ -17,6 +18,6 @@ export async function GET(req: Request): Promise<Response> {
     return Response.json({ error: "Not found" }, { status: 404 });
   }
 
-  const today = new Intl.DateTimeFormat("en-CA", { timeZone: plan.timeZone ?? "UTC" }).format(new Date());
+  const today = todayIn(plan.timeZone);
   return Response.json(await getProjection(planId, today));
 }

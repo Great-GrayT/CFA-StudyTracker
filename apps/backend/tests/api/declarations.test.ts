@@ -34,6 +34,16 @@ describe("POST /api/plans/:id/declarations", () => {
     expect(rows[0]!.confidence).toBe(5);
   });
 
+  test("a repeat that omits a field keeps the stored value and validates the merged row", async () => {
+    const { planId, user, r } = await setup();
+    await post(user, planId, { items: [{ readingId: r[0], step: 1 }, { readingId: r[0], step: 2, answered: 10, correct: 6 }] });
+    await post(user, planId, { items: [{ readingId: r[0], step: 2, correct: 8 }] });
+    const row = await db.stepDeclaration.findFirstOrThrow({ where: { planId, readingId: r[0], step: 2 } });
+    expect([row.answered, row.correct]).toEqual([10, 8]);
+    const bad = await post(user, planId, { items: [{ readingId: r[0], step: 2, correct: 11 }] });
+    expect(bad.status).toBe(400);
+  });
+
   test("review before the first read is rejected", async () => {
     const { planId, user, r } = await setup();
     const res = await post(user, planId, { items: [{ readingId: r[0], step: 3 }] });
