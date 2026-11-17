@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
 import { keys } from "./hooks";
-import { invalidateAfterSetup } from "./plan-invalidation";
+import { invalidateAfterSetup, invalidateProjection } from "./plan-invalidation";
 
 const planId = "plan-1";
 
@@ -39,5 +39,25 @@ describe("invalidateAfterSetup", () => {
 
     expect(qc.getQueryState(otherCampaign)?.isInvalidated).toBe(false);
     expect(qc.getQueryState(otherWeek)?.isInvalidated).toBe(false);
+  });
+});
+
+describe("projection invalidation", () => {
+  it("a setup save invalidates the projection of that plan only", async () => {
+    const qc = new QueryClient();
+    seed(qc, keys.projection(planId));
+    seed(qc, keys.projection("plan-2"));
+    await invalidateAfterSetup(qc, planId);
+    expect(qc.getQueryState(keys.projection(planId))?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(keys.projection("plan-2"))?.isInvalidated).toBe(false);
+  });
+
+  it("invalidateProjection touches the projection and nothing else", async () => {
+    const qc = new QueryClient();
+    seed(qc, keys.projection(planId));
+    seed(qc, keys.packages);
+    await invalidateProjection(qc, planId);
+    expect(qc.getQueryState(keys.projection(planId))?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(keys.packages)?.isInvalidated).toBe(false);
   });
 });

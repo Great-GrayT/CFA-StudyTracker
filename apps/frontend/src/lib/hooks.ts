@@ -16,6 +16,10 @@ import type {
   PushDevice,
   Los,
   Prescription,
+  Projection,
+  DeclarationItem,
+  MockSession,
+  PlanSettingsPatch,
 } from "./types";
 import type { Campaign } from "./campaign-types";
 
@@ -27,6 +31,8 @@ export const keys = {
   logs: (planId: string) => ["logs", planId] as const,
   mocks: (planId: string) => ["mocks", planId] as const,
   packages: ["packages"] as const,
+  projection: (planId: string) => ["projection", planId] as const,
+  mockSessions: (planId: string) => ["mock-sessions", planId] as const,
   planPackages: (planId: string) => ["plan-packages", planId] as const,
   holidays: (planId: string) => ["holidays", planId] as const,
   cron: ["cron"] as const,
@@ -82,6 +88,60 @@ export function useCampaign(
     staleTime: 30 * 60 * 1000,
     refetchOnWindowFocus: false,
     refetchOnMount: false,
+  });
+}
+
+/**
+ * The engine's dry run: per section and module step windows, coverage,
+ * readiness, daily hours, extras. Every record, declaration or setting change
+ * invalidates it, so a modest staleTime only spares focus refetches.
+ */
+export function useProjection(planId: string | undefined): UseQueryResult<Projection> {
+  return useQuery({
+    queryKey: keys.projection(planId ?? ""),
+    queryFn: () => api.get<Projection>(`plans/${encodeURIComponent(planId!)}/projection`),
+    enabled: !!planId,
+    staleTime: 60_000,
+  });
+}
+
+/** "Did this before": declares steps already done; the server rebuilds the plan. */
+export function useDeclare(planId: string | undefined) {
+  const invalidate = useInvalidateAfterLog(planId);
+  return useMutation({
+    mutationFn: (items: DeclarationItem[]) => api.post<unknown>(`plans/${planId}/declarations`, { items }),
+    onSuccess: invalidate,
+  });
+}
+
+/** Mock sessions of the plan's packages, with topic mix, for per-topic entry. */
+export function useMockSessions(planId: string | undefined): UseQueryResult<MockSession[]> {
+  return useQuery({
+    queryKey: keys.mockSessions(planId ?? ""),
+    queryFn: async () => {
+      const pkgs = await api.get<{ id: string; name: string; mockSessions: MockSession[] }[]>(
+        `packages?planId=${encodeURIComponent(planId!)}`,
+      );
+      return pkgs.flatMap((p) => p.mockSessions.map((m) => ({ ...m, packageId: p.id, packageName: p.name })));
+    },
+    enabled: !!planId,
+  });
+}
+
+/** Step priority, LES hours and the below-pass consent. */
+export function usePatchPlanSettings(planId: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: PlanSettingsPatch) => api.patch<unknown>(`plans/${planId}`, body),
+    onSuccess: () => {
+      if (!planId) return;
+      return Promise.all([
+        qc.invalidateQueries({ queryKey: keys.plan }),
+        qc.invalidateQueries({ queryKey: ["prescription", planId] }),
+        qc.invalidateQueries({ queryKey: ["campaign", planId] }),
+        qc.invalidateQueries({ queryKey: keys.projection(planId) }),
+      ]);
+    },
   });
 }
 
@@ -229,6 +289,7 @@ export function useInvalidateAfterLog(planId: string | undefined) {
     // A record against a task settles it and replans the days ahead.
     qc.invalidateQueries({ queryKey: ["prescription", planId] });
     qc.invalidateQueries({ queryKey: ["campaign", planId] });
+    qc.invalidateQueries({ queryKey: keys.projection(planId) });
   };
 }
 
@@ -295,6 +356,7 @@ export function useSubmitTask(planId: string | undefined) {
         qc.invalidateQueries({ queryKey: ["campaign", planId] }),
         qc.invalidateQueries({ queryKey: keys.progress(planId) }),
         qc.invalidateQueries({ queryKey: keys.logs(planId) }),
+        qc.invalidateQueries({ queryKey: keys.projection(planId) }),
       ]);
     },
   });

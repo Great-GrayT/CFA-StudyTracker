@@ -303,3 +303,90 @@ export type Prescription = {
   to: string;
   days: PrescribedDay[];
 };
+
+// Step engine projection (GET plans/:id/projection).
+export type StepNo = 1 | 2 | 3 | 4;
+export type WindowStatus = "done" | "planned" | "overdue" | "in-progress";
+export type ProjectionWindow = {
+  step: StepNo;
+  start: string | null;
+  due: string | null;
+  doneOn: string | null;
+  status: WindowStatus;
+};
+export type Tally = { answered: number; correct: number };
+export type ProjectionSection = {
+  topicId: string;
+  name: string;
+  examWeight: number;
+  steps: {
+    step: StepNo;
+    plannedMin: number;
+    donePassedMin: number;
+    spentUnpassedMin: number;
+    planTodayMin: number;
+  }[];
+  modules: { readingId: string; name: string; windows: ProjectionWindow[] }[];
+  performance: {
+    initial: Tally | null;
+    review: Tally | null;
+    mocks: Tally | null;
+    extras: { tasks: number; minutes: number };
+  };
+};
+export type FitTrim = { readingId: string | null; step: number; minutes: number; reason: string };
+export type ProjectionExtra = {
+  taskId: string | null;
+  readingId: string;
+  step: number;
+  reason: string;
+  questions: number | null;
+  minutes: number;
+  date: string | null;
+};
+export type Projection = {
+  asOf: string;
+  exam: string;
+  gate: string;
+  fit: {
+    crash: number;
+    cancelledHolidayIds: string[];
+    feasible: boolean;
+    belowPass: boolean;
+    trims: FitTrim[];
+  };
+  sections: ProjectionSection[];
+  readiness: number;
+  readinessPlanToday: number;
+  daily: {
+    date: string;
+    plannedMin: number;
+    doneMin: number;
+    byStep: Record<"1" | "2" | "3" | "4" | "5", number>;
+  }[];
+  holidays: { id: string; start: string; end: string; cancelled: boolean }[];
+  mocks: { done: number; planned: number; firstDate: string | null };
+  extras: ProjectionExtra[];
+};
+
+export type DeclarationItem = {
+  readingId: string;
+  step: StepNo;
+  confidence?: number;
+  answered?: number;
+  correct?: number;
+};
+export type MockSession = {
+  ref: string;
+  title: string;
+  questionCount: number | null;
+  topicMix: { topicId: string; name: string; order: number; questions: number }[];
+  done: boolean;
+  packageId?: string;
+  packageName?: string;
+};
+export type PlanSettingsPatch = {
+  stepPriority?: Record<string, string[]>;
+  lesReadingHours?: number;
+  belowPassAccepted?: boolean;
+};

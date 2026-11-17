@@ -13,5 +13,11 @@ export async function invalidateAfterSetup(qc: QueryClient, planId: string): Pro
     qc.invalidateQueries({ queryKey: keys.plan }),
     qc.invalidateQueries({ queryKey: ["campaign", planId] }),
     qc.invalidateQueries({ queryKey: ["prescription", planId] }),
+    invalidateProjection(qc, planId),
   ]);
+}
+
+/** Every record, declaration and settings change moves the projection. */
+export function invalidateProjection(qc: QueryClient, planId: string): Promise<void> {
+  return qc.invalidateQueries({ queryKey: keys.projection(planId) });
 }
