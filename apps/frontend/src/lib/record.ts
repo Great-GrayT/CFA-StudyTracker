@@ -58,7 +58,7 @@ type MaterialLike = { action: string; questionCount: number | null };
  * materials carry a count too (the answers to review), which is not a count
  * to answer, so they are skipped.
  */
-export function taskQuestionCount(task: { questionCount?: number | null; materials: MaterialLike[] }): number | null {
+export function taskQuestionCount(task: { questionCount: number | null; materials: MaterialLike[] }): number | null {
   if (task.questionCount) return task.questionCount;
   const sum = task.materials
     .filter((m) => m.action !== "Review answers" && m.questionCount)
@@ -80,21 +80,9 @@ export function questionsError(answered: string, correct: string): string | null
   return null;
 }
 
-const KIND_STEP: Record<string, StepNo> = {
-  read: 1,
-  "content-notes": 1,
-  "content-video": 1,
-  seminar: 1,
-  eocq: 2,
-  questions: 2,
-  "answer-review": 2,
-  review: 3,
-};
-
-/** The step a task belongs to, or null for mocks and anything unmapped. */
-export function stepForTask(task: { kind: string; step?: number | null }): StepNo | null {
-  if (task.step && task.step >= 1 && task.step <= 4) return task.step as StepNo;
-  return KIND_STEP[task.kind] ?? null;
+/** The step a task belongs to, or null for mocks and tasks written before the engine. */
+export function stepForTask(task: { step: number | null }): StepNo | null {
+  return task.step && task.step >= 1 && task.step <= 4 ? (task.step as StepNo) : null;
 }
 
 /**

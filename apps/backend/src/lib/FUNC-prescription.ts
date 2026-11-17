@@ -49,6 +49,13 @@ export type PrescribedTask = {
   postponedFrom: string | null;
   /** A session the candidate logged themselves, not one the plan asked for. */
   offPlan: boolean;
+  /** Step-engine fields, null on tasks written before the engine. */
+  step: number | null;
+  round: number | null;
+  questionCount: number | null;
+  extraReason: string | null;
+  answerReviewDone: boolean;
+  mockRef: string | null;
 };
 
 export type PrescribedDay = {
@@ -377,6 +384,12 @@ export async function getPrescription(
       materials,
       postponedFrom: task.postponedFrom ? task.postponedFrom.toISOString().slice(0, 10) : null,
       offPlan,
+      step: task.step,
+      round: task.round,
+      questionCount: task.questionCount,
+      extraReason: task.extraReason,
+      answerReviewDone: task.answerReviewDone,
+      mockRef: task.mockRef,
     };
 
     const list = byDate.get(dateStr) ?? [];

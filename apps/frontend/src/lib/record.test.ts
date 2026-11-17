@@ -49,10 +49,10 @@ const mat = (action: string, questionCount: number | null) => ({ action, questio
 
 test("question count comes from the task, else from its practice materials, never from answer review", () => {
   expect(taskQuestionCount({ questionCount: 25, materials: [] })).toBe(25);
-  expect(taskQuestionCount({ materials: [mat("Questions", 12), mat("Questions", 8)] })).toBe(20);
-  expect(taskQuestionCount({ materials: [mat("Review answers", 12)] })).toBeNull();
+  expect(taskQuestionCount({ questionCount: null, materials: [mat("Questions", 12), mat("Questions", 8)] })).toBe(20);
+  expect(taskQuestionCount({ questionCount: null, materials: [mat("Review answers", 12)] })).toBeNull();
   expect(taskQuestionCount({ questionCount: 0, materials: [] })).toBeNull();
-  expect(taskQuestionCount({ materials: [mat("Read", null)] })).toBeNull();
+  expect(taskQuestionCount({ questionCount: null, materials: [mat("Read", null)] })).toBeNull();
 });
 
 test("questions are validated as whole numbers with correct no higher than answered", () => {
@@ -66,16 +66,11 @@ test("questions are validated as whole numbers with correct no higher than answe
   expect(questionsError("30", "-1")).toBe("Use whole numbers for questions.");
 });
 
-test("a task maps to its step, by the engine's step when it names one", () => {
-  expect(stepForTask({ kind: "content-video" })).toBe(1);
-  expect(stepForTask({ kind: "read" })).toBe(1);
-  expect(stepForTask({ kind: "eocq" })).toBe(2);
-  expect(stepForTask({ kind: "questions" })).toBe(2);
-  expect(stepForTask({ kind: "answer-review" })).toBe(2);
-  expect(stepForTask({ kind: "review" })).toBe(3);
-  expect(stepForTask({ kind: "questions", step: 4 })).toBe(4);
-  expect(stepForTask({ kind: "mock" })).toBeNull();
-  expect(stepForTask({ kind: "mock-review" })).toBeNull();
+test("a task maps to the engine's step, null for mocks and pre-engine tasks", () => {
+  expect(stepForTask({ step: 1 })).toBe(1);
+  expect(stepForTask({ step: 4 })).toBe(4);
+  expect(stepForTask({ step: null })).toBeNull();
+  expect(stepForTask({ step: 9 })).toBeNull();
 });
 
 test("step 3 needs step 1 and step 4 needs step 2, unless stated together", () => {

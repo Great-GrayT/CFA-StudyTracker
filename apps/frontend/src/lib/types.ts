@@ -252,12 +252,15 @@ export type PrescribedTask = {
   postponedFrom: string | null;
   /** A session the candidate logged themselves, not one the plan asked for. */
   offPlan: boolean;
-  /** Engine step 1 to 4, when the task belongs to one. */
-  step?: number | null;
+  /** Engine step 1 to 4, null for mocks and tasks written before the engine. */
+  step: number | null;
+  round: number | null;
   /** Questions the package sets for this task, when known. */
-  questionCount?: number | null;
+  questionCount: number | null;
   /** Why an extra task was added, null for base work. */
-  extraReason?: string | null;
+  extraReason: string | null;
+  answerReviewDone: boolean;
+  mockRef: string | null;
 };
 
 export type PrescribedDay = {
@@ -293,6 +296,15 @@ export type ProjectionWindow = {
   doneOn: string | null;
   status: WindowStatus;
 };
+/** One module's question work at step 2 or 4: the latest round and the time it was worth. */
+export type StepPerformance = {
+  round: number;
+  answered: number;
+  correct: number;
+  minutes: number;
+  adequateMin: number;
+  passed: boolean;
+};
 export type Tally = { answered: number; correct: number };
 export type ProjectionSection = {
   topicId: string;
@@ -305,7 +317,12 @@ export type ProjectionSection = {
     spentUnpassedMin: number;
     planTodayMin: number;
   }[];
-  modules: { readingId: string; name: string; windows: ProjectionWindow[] }[];
+  modules: {
+    readingId: string;
+    name: string;
+    windows: ProjectionWindow[];
+    performance: { s2: StepPerformance | null; s4: StepPerformance | null };
+  }[];
   performance: {
     initial: Tally | null;
     review: Tally | null;

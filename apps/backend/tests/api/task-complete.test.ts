@@ -213,6 +213,18 @@ describe("PATCH /api/plans/:id/tasks/:taskId", () => {
     expect(day!.doneTasks).toBe(1);
     expect(day!.doneMinutes).toBe(40);
   });
+
+  test("the prescription carries the engine step fields", async () => {
+    const { getPrescription } = await import("../../src/lib/FUNC-prescription");
+    const { planId, tasks } = await ownedTasks();
+    await db.planTask.update({
+      where: { id: tasks[0]!.id },
+      data: { step: 2, round: 3, questionCount: 25, extraReason: "top-up-80", mockRef: "m1", answerReviewDone: true },
+    });
+    const [day] = await getPrescription(planId, "2027-01-04", "2027-01-04");
+    const t = day!.tasks.find((x) => x.id === tasks[0]!.id)!;
+    expect(t).toMatchObject({ step: 2, round: 3, questionCount: 25, extraReason: "top-up-80", mockRef: "m1", answerReviewDone: true });
+  });
 });
 
 describe("answer review on a questions task", () => {
