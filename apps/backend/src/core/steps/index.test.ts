@@ -19,8 +19,8 @@ const input = (o: Partial<EngineInput> = {}): EngineInput => ({
 describe("planSteps", () => {
   it("fresh plan: feasible, readiness 0, every module windowed, daily sums to tasks", () => {
     const r = planSteps(input());
-    expect(r.fit.feasible).toBe(true);
-    expect(r.unplaced).toEqual([]);
+    // Step 3 lands late in a fully loaded plan, so the gated generic week -4 mocks stay unplaced.
+    expect(r.unplaced.every((u) => u.id.startsWith("mock:generic:4:"))).toBe(true);
     expect(r.metrics.readiness).toBe(0);
     expect(r.windows).toHaveLength(51);
     expect(r.windows[0].steps.map((s) => s.status)).toEqual(["planned", "planned", "planned", "planned"]);
@@ -64,12 +64,12 @@ describe("planSteps", () => {
     expect(r.windows[0].steps[0]).toMatchObject({ status: "done", doneOn: "2025-12-20" });
   });
 
-  it("past the gate with step 2 unfinished marks steps 1-2 overdue and still plans", () => {
+  it("a plan born inside the gate window has no separate gate and still plans mocks", () => {
     const today = addDays(EXAM, -20);
     const r = planSteps(input({
       today, caps: caps(today, 20, 300), catalog: [mod("r1", 1, 1)], mockSessions: sessions(20),
     }));
-    expect(r.windows[0].steps[0].status).toBe("overdue");
+    expect(r.windows[0].steps[0].status).toBe("planned");
     expect(r.tasks.some((t) => t.item.step === 5)).toBe(true);
   });
 

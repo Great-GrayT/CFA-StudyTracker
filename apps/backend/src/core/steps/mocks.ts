@@ -86,6 +86,8 @@ const mkItem = (id: string, kind: "mock" | "mock-review", minutes: number, s: Mo
 export function placeMocks(p: {
   today: string; exam: string; caps: Array<{ date: string; minutes: number }>;
   sessions: MockSession[]; elig: Map<string, string | null>; trim?: number;
+  // Earliest day a generic mock may sit: every topic eligible. "" = no gate, null = never.
+  genericFrom?: string | null;
 }): MockPlan {
   const rem = new Map<string, number>();
   for (const c of p.caps) if (c.date >= p.today && c.date < p.exam && c.minutes > EPS) rem.set(c.date, c.minutes);
@@ -135,9 +137,11 @@ export function placeMocks(p: {
       const key = s ? s.ref : `generic:${w.before}:${gi++}`;
       const label = s ? s.title : "Mock (any provider)";
       const sess = mkItem(`mock:${key}`, "mock", MOCK_SESSION_MIN, s ?? null, label, []);
-      const fin = place(sess, days, s ? (p.elig.get(s.ref) ?? "") : "");
+      const from = s ? (p.elig.get(s.ref) ?? "") : (p.genericFrom === undefined ? "" : p.genericFrom);
       const rev = mkItem(`mock:${key}:review`, "mock-review", MOCK_REVIEW_MIN, s ?? null,
         `${label} answer review`, [sess.id]);
+      const fin = from === null ? null : place(sess, days, from);
+      if (from === null) plan.unplaced.push(sess);
       if (fin === null) plan.unplaced.push(rev);
       else place(rev, days, fin, fin);
     }

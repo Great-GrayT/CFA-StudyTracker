@@ -134,3 +134,40 @@ describe("deriveState", () => {
     expect(ok.s4.passed).toBe(true);
   });
 });
+
+describe("mock retest", () => {
+  const two = [mod("r1"), mod("r2")];
+  const fail = [{ date: "2026-02-01", topicScores: [{ topicId: "t1", answered: 20, correct: 10 }] }];
+  const base = (id: string) => [
+    task({ readingIds: [id], kind: "read", step: 1, minutes: 60, date: "2026-01-01" }),
+    task({ readingIds: [id], kind: "questions", step: 2, minutes: 90, answered: 30, correct: 27, date: "2026-01-02" }),
+    task({ readingIds: [id], kind: "review", step: 3, minutes: 20, date: "2026-01-03" }),
+  ];
+
+  it("every module of the topic owes a review; a fresh step 4 round only if attempted or passed", () => {
+    const tasks = [
+      ...base("r1"),
+      task({ readingIds: ["r1"], kind: "questions", step: 4, minutes: 30, answered: 10, correct: 5, date: "2026-01-04" }),
+      ...base("r2"),
+    ];
+    const s = deriveState(two, tasks, [], fail);
+    expect(s.get("r1")!.s4.round).toBe(2);
+    expect(s.get("r2")!.s4.round).toBe(1);
+    for (const id of ["r1", "r2"]) {
+      expect(s.get(id)!.s3.owed, id).toBe(1);
+      expect(s.get(id)!.mockRetestFrom, id).toBe("2026-02-01");
+    }
+  });
+
+  it("an exemption before the base review is done owes exactly the base review", () => {
+    const s = st([task({ kind: "questions", step: 2, minutes: 180, answered: 60, correct: 40 })]);
+    expect(s.s3.owed).toBe(1);
+    expect(s.s3.done).toBe(false);
+  });
+
+  it("question usage carries across rounds", () => {
+    const s = st([task({ kind: "questions", step: 2, minutes: 180, answered: 60, correct: 40 })]);
+    expect(s.s2.round).toBe(2);
+    expect(s.s2.usedByPackage.uw).toBe(60);
+  });
+});

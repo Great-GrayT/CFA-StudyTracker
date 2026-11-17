@@ -19,7 +19,7 @@ type QState = ModuleState["s2"];
 // per-question minutes (simplest choice); a later package with other rates can
 // leave a small adequacy gap, which the next rebuild tops up.
 function questionItems(m: ModuleCatalog, step: 2 | 4, r: QState, retest: string | null,
-  usedAll: Record<string, number>, prev: string[]): WorkItem[] {
+  used: Record<string, number>, prev: string[]): WorkItem[] {
   const opts = m.options[step];
   const adequate = adequateMinutes(m, step);
   if (!opts.length || adequate <= 0) return [];
@@ -34,6 +34,9 @@ function questionItems(m: ModuleCatalog, step: 2 | 4, r: QState, retest: string 
   } else {
     const { n80, nAdq } = topUpParts({ answered: r.answered, correct: r.correct, minutes: credited, adequate, perQ: perT });
     need = Math.max(n80, nAdq);
+    // Past 2x adequate minutes the exemption applies, so plan only up to that point.
+    const room = Math.floor((2 * adequate - credited) / perT + EPS);
+    need = Math.min(need, Math.max(1, room));
     reason = n80 >= nAdq ? "top-up-80" : "top-up-adequacy";
   }
   if (need <= 0) return [];
@@ -42,7 +45,7 @@ function questionItems(m: ModuleCatalog, step: 2 | 4, r: QState, retest: string 
   let left = need;
   opts.forEach((o, idx) => {
     if (left <= 0) return;
-    const avail = o.questions == null ? Infinity : Math.max(0, o.questions - (usedAll[o.packageSlug] ?? 0));
+    const avail = o.questions == null ? Infinity : Math.max(0, o.questions - (used[o.packageSlug] ?? 0));
     const n = Math.min(left, avail);
     if (n > 0) { alloc.push({ o, idx, n }); left -= n; }
   });
@@ -53,6 +56,8 @@ function questionItems(m: ModuleCatalog, step: 2 | 4, r: QState, retest: string 
     const hit = alloc.find((a) => a.idx === idx);
     if (hit) hit.n += left; else alloc.push({ o: opts[idx], idx, n: left });
   }
+
+  for (const a of alloc) used[a.o.packageSlug] = (used[a.o.packageSlug] ?? 0) + a.n;
 
   const out: WorkItem[] = [];
   alloc.forEach(({ o, idx, n }, i) => {
@@ -110,15 +115,20 @@ export function remainingWork(cat: ModuleCatalog[], state: Map<string, ModuleSta
       extraReason: reason, after: ids(),
     });
     const owedReason = st.mockRetestFrom ? "mock-retest" : "exemption-review";
-    const owedItems = (from: number) => {
+    const baseRem = o3 ? Math.max(0, o3.minutes - st.s3.doneMin) : 0;
+    // An undone base review is itself the owed one; only the rest are extra items.
+    const baseOwed = baseRem > EPS && st.s3.owed > 0;
+    const owedBlock = () => {
+      if (!o3) return;
       const res: WorkItem[] = [];
-      if (!o3) return res;
-      for (let i = 0; i < st.s3.owed; i++) res.push(reviewItem(`owed${from + i}`, o3.minutes, owedReason));
-      return res;
+      if (baseOwed) res.push(reviewItem("base", baseRem, owedReason));
+      for (let i = 0; i < st.s3.owed - (baseOwed ? 1 : 0); i++) res.push(reviewItem(`owed${i}`, o3.minutes, owedReason));
+      for (const it of res) { mine.push(it); it.after = ids().filter((x) => x !== it.id); }
     };
 
     // An exemption from step 2 sends the learner through review before the fresh round.
-    if (!st.s2.passed && o3) for (const it of owedItems(0)) { mine.push(it); it.after = ids().filter((x) => x !== it.id); }
+    const reviewFirst = !st.s2.passed && !!o3 && st.s3.owed > 0;
+    if (reviewFirst) owedBlock();
 
     const used = { ...st.s2.usedByPackage };
     for (const [k, v] of Object.entries(st.s4.usedByPackage)) used[k] = (used[k] ?? 0) + v;
@@ -129,10 +139,9 @@ export function remainingWork(cat: ModuleCatalog[], state: Map<string, ModuleSta
       mine.push(...questionItems(m, 2, st.s2, null, used, prev));
     }
 
-    if (o3) {
-      const baseRem = Math.max(0, o3.minutes - st.s3.doneMin);
-      if (baseRem > EPS) mine.push(reviewItem("base", baseRem, null));
-      if (st.s2.passed) for (const it of owedItems(0)) { mine.push(it); it.after = ids().filter((x) => x !== it.id); }
+    if (o3 && !reviewFirst) {
+      if (baseRem > EPS && !baseOwed) mine.push(reviewItem("base", baseRem, null));
+      owedBlock();
     }
 
     mine.push(...pendingReview(m, 4, st.s4));

@@ -140,13 +140,14 @@ describe("schedule", () => {
       const r = schedule(mbase({
         exam, caps: caps("2026-01-01", 59, 300), work: w, modules, mockSessions: sessions(20),
       }));
-      expect(r.unplaced).toEqual([]);
       const perWeek: Record<number, number> = {};
       for (const t of mockTasks(r)) perWeek[weekOf(t.date)] = (perWeek[weekOf(t.date)] ?? 0) + 1;
-      expect(perWeek).toEqual({ 4: 2, 3: 4, 2: 6, 1: 8 });
+      // Week -4 falls before steps 1-3 finish, so its generic mocks stay unplaced.
+      expect(perWeek).toEqual({ 3: 4, 2: 6, 1: 8 });
+      expect(r.unplaced.every((u) => u.id.startsWith("mock:generic:4:"))).toBe(true);
       const lastC = r.tasks.filter((t) => t.item.id === "C").map((t) => t.date).sort().slice(-1)[0]!;
       for (const t of mockTasks(r).filter((x) => x.item.mockRef !== null)) expect(t.date > lastC).toBe(true);
-      expect(r.tasks.filter((t) => t.item.kind === "mock-review").length).toBeGreaterThanOrEqual(20);
+      expect(r.tasks.filter((t) => t.item.kind === "mock-review").length).toBeGreaterThanOrEqual(18);
     });
 
     it("with steps 1-3 done every mock is a real session, in supply order", () => {
@@ -178,5 +179,19 @@ describe("schedule", () => {
       }));
       expect(mockTasks(r).length).toBeGreaterThan(0);
     });
+  });
+});
+
+describe("schedule mock gate", () => {
+  it("never places a generic mock before every module's steps 1-3 are done", () => {
+    const r = schedule(base({
+      today: "2026-01-01", exam: "2026-03-01", caps: caps("2026-01-01", 59, 300), mockTrim: 0,
+      work: [item({ minutes: 1200, readingId: "r1", step: 1 })],
+      modules: [{ readingId: "r1", topicOrder: 1 }],
+    }));
+    const lastS1 = r.tasks.filter((t) => t.item.step === 1).map((t) => t.date).sort().slice(-1)[0];
+    const mocks = r.tasks.filter((t) => t.item.step === 5);
+    expect(mocks.length).toBeGreaterThan(0);
+    for (const m of mocks) expect(m.date > lastS1).toBe(true);
   });
 });

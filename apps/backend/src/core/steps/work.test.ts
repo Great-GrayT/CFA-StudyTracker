@@ -51,7 +51,7 @@ describe("remainingWork", () => {
     expect(total).toBe(30);
   });
 
-  it("top-up after 24/40 asks 40 questions tagged top-up-80", () => {
+  it("top-up after 24/40 asks 20 questions (capped) tagged top-up-80", () => {
     const cat = [mod([bank("uw", 200)])];
     const w = work(cat, [
       task({ kind: "read", step: 1, minutes: 60 }),
@@ -59,7 +59,7 @@ describe("remainingWork", () => {
     ]);
     const q = w.filter((i) => i.step === 2 && i.kind === "questions");
     expect(q).toHaveLength(1);
-    expect(q[0].questions).toBe(40);
+    expect(q[0].questions).toBe(20);
     expect(q[0].extraReason).toBe("top-up-80");
     expect(w.some((i) => i.step === 1)).toBe(false);
   });
@@ -102,6 +102,32 @@ describe("remainingWork", () => {
     expect(q.round).toBe(2);
     expect(q.after).toContain(rev.id);
     expect(q.questions).toBe(30);
+    expect(w.filter((i) => i.step === 3)).toHaveLength(1);
+  });
+
+  it("question banks are shared by step 2 and step 4 within one plan", () => {
+    const w = work([mod([bank("uw", 40), bank("kaplan", 100)])]);
+    const q = (s: number) => w.filter((i) => i.step === s && i.kind === "questions")
+      .map((i) => [i.packageId, i.questions, i.extraReason]);
+    expect(q(2)).toEqual([["p-uw", 30, null]]);
+    expect(q(4)).toEqual([["p-uw", 10, null], ["p-kaplan", 50, "package-switch"]]);
+  });
+
+  it("a fresh round after an exemption never reuses questions from earlier rounds", () => {
+    const w = work([mod([bank("uw", 70), bank("kaplan", 100)])], [
+      task({ kind: "questions", step: 2, minutes: 180, answered: 60, correct: 40, packageSlug: "uw" }),
+    ]);
+    const q = w.filter((i) => i.step === 2 && i.kind === "questions");
+    expect(q.map((i) => [i.packageId, i.questions])).toEqual([["p-uw", 10], ["p-kaplan", 20]]);
+  });
+
+  it("top-up is capped so the round reaches 2x adequate and trips the exemption", () => {
+    const w = work([mod([bank("uw", 500)])], [
+      task({ kind: "questions", step: 2, minutes: 120, answered: 40, correct: 24, packageSlug: "uw" }),
+    ]);
+    const q = w.find((i) => i.step === 2 && i.kind === "questions")!;
+    // credited 160 min, cap 240: 20 questions at 4 min
+    expect(q.questions).toBe(20);
   });
 
   it("a fully passed module has no work", () => {

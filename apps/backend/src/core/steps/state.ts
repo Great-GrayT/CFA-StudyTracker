@@ -29,12 +29,13 @@ type Round = RoundState & { passed: boolean; pendingAnswerReview: number };
 type Work = {
   m: ModuleCatalog;
   s1Min: number; lowConf: boolean;
-  s3Min: number; s3Req: number; s3Target: number;
+  s3Min: number; s3Req: number; s3Target: number; s3Trig: boolean;
   s2: Round; s4: Round; lastQStep: 2 | 4; retest: string | null;
 };
 
-const freshRound = (round: number, pending = 0): Round =>
-  ({ round, answered: 0, correct: 0, minutes: 0, usedByPackage: {}, passed: false, pendingAnswerReview: pending });
+// Question usage is cumulative across rounds: a fresh set is brand new questions.
+const freshRound = (round: number, pending = 0, used: Record<string, number> = {}): Round =>
+  ({ round, answered: 0, correct: 0, minutes: 0, usedByPackage: { ...used }, passed: false, pendingAnswerReview: pending });
 
 // Old-kind rows (step null) predate the engine; see spec Builder answer 1.
 const OLD_STEP1 = new Set(["content-notes", "content-video", "seminar", "eocq"]);
@@ -42,7 +43,11 @@ const OLD_STEP1 = new Set(["content-notes", "content-video", "seminar", "eocq"])
 function s3Done(w: Work) { return w.s3Target <= 0 || w.s3Min >= w.s3Req - EPS; }
 
 // Each trigger demands one more full review on top of whatever is already done.
-function owe(w: Work) { w.s3Req = Math.max(w.s3Req, w.s3Min) + w.s3Target; }
+// While the base review is still undone it is that review, so none is added.
+function owe(w: Work) {
+  if (w.s3Min < w.s3Target - EPS) { w.s3Trig = true; return; }
+  w.s3Req = Math.max(w.s3Req, w.s3Min) + w.s3Target;
+}
 
 function reviewPerQ(m: ModuleCatalog, step: 2 | 4, slug: string | null): number {
   const opts = m.options[step];
@@ -61,7 +66,7 @@ function evaluate(w: Work, step: 2 | 4) {
     if (step === 4) w.retest = null;
   } else if (out === "exemption") {
     owe(w);
-    const fresh = freshRound(r.round + 1, r.pendingAnswerReview);
+    const fresh = freshRound(r.round + 1, r.pendingAnswerReview, r.usedByPackage);
     if (step === 2) w.s2 = fresh; else w.s4 = fresh;
   }
 }
@@ -86,7 +91,7 @@ export function deriveState(
   for (const m of cat) {
     const o3 = m.options[3][0]?.minutes ?? 0;
     works.set(m.readingId, {
-      m, s1Min: 0, lowConf: false, s3Min: 0, s3Req: o3, s3Target: o3,
+      m, s1Min: 0, lowConf: false, s3Min: 0, s3Req: o3, s3Target: o3, s3Trig: false,
       s2: freshRound(1), s4: freshRound(1), lastQStep: 2, retest: null,
     });
   }
@@ -131,9 +136,12 @@ export function deriveState(
       for (const sc of ev.mock!.topicScores) {
         if (sc.answered <= 0 || sc.correct / sc.answered >= 0.75) continue;
         for (const w of works.values()) {
-          if (w.m.topicId !== sc.topicId || !w.s4.passed) continue;
+          if (w.m.topicId !== sc.topicId) continue;
           owe(w);
-          w.s4 = freshRound(w.s4.round + 1, w.s4.pendingAnswerReview);
+          // An untouched open round simply continues as the retest.
+          if (w.s4.passed || w.s4.answered > 0) {
+            w.s4 = freshRound(w.s4.round + 1, w.s4.pendingAnswerReview, w.s4.usedByPackage);
+          }
           w.retest = ev.date;
         }
       }
@@ -180,8 +188,10 @@ export function deriveState(
     const target = w.s3Target;
     // owed counts extra reviews: outstanding whole reviews minus the base one if undone.
     const outstanding = Math.max(0, w.s3Req - w.s3Min);
+    // Reviews beyond the base one, plus the base itself when a trigger made it the owed review.
+    const baseUndone = w.s3Min < target - EPS;
     const owed = target > 0
-      ? Math.max(0, Math.ceil(outstanding / target - EPS) - (w.s3Min < target - EPS ? 1 : 0))
+      ? Math.max(0, Math.ceil(outstanding / target - EPS) - (baseUndone ? 1 : 0)) + (baseUndone && w.s3Trig ? 1 : 0)
       : 0;
     out.set(w.m.readingId, {
       readingId: w.m.readingId,

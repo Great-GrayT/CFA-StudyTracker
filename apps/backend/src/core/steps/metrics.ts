@@ -1,6 +1,6 @@
 import { adequateMinutes, step1Minutes } from "./catalog";
 import { addDays, diffDays } from "./dates";
-import { GATE_DAYS, type ScheduledTask } from "./schedule";
+import { gateDate, type ScheduledTask } from "./schedule";
 import type { ModuleState } from "./state";
 import type { ModuleCatalog, StepNo } from "./types";
 import type { WorkItem } from "./work";
@@ -53,7 +53,7 @@ export function buildWindows(p: {
       if (t.date > cur.due) cur.due = t.date;
     }
   }
-  const gate = addDays(p.exam, -GATE_DAYS);
+  const gate = gateDate(p.today, p.exam);
   return p.cat.map((m) => {
     const st = p.state.get(m.readingId);
     return {

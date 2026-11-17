@@ -240,27 +240,50 @@ export function schedule(inp: ScheduleInput): ScheduleResult {
     return ready;
   };
 
+  const mockViolations = (pls: MockPlacement[], r: Run) => {
+    const elig = eligibleFrom(inp.mockSessions, inp.modules, readyOf(r));
+    const gen = genericFrom(r);
+    return pls.filter((pl) => {
+      const ref = pl.item.mockRef;
+      const e = ref ? elig.get(ref) : gen;
+      return e === null || (e !== undefined && pl.date < e);
+    });
+  };
   let run = runPasses({ ...base, days });
   let mocks: { placements: MockPlacement[]; unplaced: WorkItem[] } = { placements: [], unplaced: [] };
+  // Generic mocks wait for every topic: one pseudo-session spanning all of them.
+  const allTopics = [...new Set(inp.modules.map((m) => m.topicOrder))];
+  const genericFrom = (r: Run) => eligibleFrom(
+    [{ ref: "*", packageId: "", resourceId: "", title: "", questionCount: 0, topicOrders: allTopics, done: false }],
+    inp.modules, readyOf(r),
+  ).get("*") ?? "";
   // Eligibility depends on the schedule and mocks shift it, so iterate to a fixed point.
   for (let it = 0; it < 3; it++) {
     const elig = eligibleFrom(inp.mockSessions, inp.modules, readyOf(run));
     const plan = placeMocks({
       today: inp.today, exam: inp.exam, caps: days, sessions: inp.mockSessions, elig, trim: inp.mockTrim,
+      genericFrom: genericFrom(run),
     });
     mocks = plan;
     if (!plan.placements.length) break;
     const left = days.map((d) => ({ ...d, minutes: d.minutes - (plan.used.get(d.date) ?? 0) }))
       .filter((d) => d.minutes > EPS);
     run = runPasses({ ...base, days: left });
-    const elig2 = eligibleFrom(inp.mockSessions, inp.modules, readyOf(run));
-    const bad = plan.placements.some((pl) => {
-      const ref = pl.item.mockRef;
-      if (!ref) return false;
-      const e = elig2.get(ref);
-      return e === null || (e !== undefined && pl.date < e);
-    });
-    if (!bad) break;
+    if (!mockViolations(mocks.placements, run).length) break;
+  }
+  // No fixed point: drop mocks (and their reviews) still sitting before eligibility.
+  const bad = mockViolations(mocks.placements, run);
+  if (bad.length) {
+    const drop = new Set(bad.map((pl) => pl.item.id.replace(/:review$/, "")));
+    const keep: MockPlacement[] = [];
+    const lost = new Map<string, WorkItem>();
+    for (const pl of mocks.placements) {
+      const key = pl.item.id.endsWith(":review") ? pl.item.id.slice(0, -7) : pl.item.id;
+      if (!drop.has(key)) { keep.push(pl); continue; }
+      const cur = lost.get(pl.item.id);
+      lost.set(pl.item.id, { ...pl.item, minutes: (cur?.minutes ?? 0) + pl.minutes });
+    }
+    mocks = { placements: keep, unplaced: [...mocks.unplaced, ...lost.values()] };
   }
 
   const byDate = new Map<string, ScheduledTask[]>();
