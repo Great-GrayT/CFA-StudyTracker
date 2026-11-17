@@ -1,4 +1,4 @@
-import type { Projection, ProjectionSection, ProjectionWindow, StepNo, Tally } from "./types";
+import type { Projection, ProjectionExtra, ProjectionSection, ProjectionWindow, StepNo, Tally } from "./types";
 
 // Pure view helpers for the Pace page. Dates are YYYY-MM-DD in the plan's
 // own calendar; they are compared as UTC midnights so no time zone shifts them.
@@ -308,4 +308,75 @@ const REASONS: Record<string, string> = {
 /** Plain-language reason for an extra task; unknown slugs read as themselves. */
 export function reasonText(reason: string): string {
   return REASONS[reason] ?? reason.replace(/-/g, " ").replace(/^./, (c) => c.toUpperCase());
+}
+
+export type PerfRow = {
+  key: string;
+  readingId: string;
+  topicId: string;
+  label: string;
+  step: 2 | 4;
+  answered: number;
+  correct: number;
+  accuracy: number;
+  /** Under the 80% bar. */
+  low: boolean;
+  enough: boolean;
+  minutes: number;
+  adequateMin: number;
+  extras: { taskId: string | null; text: string; reason: string; date: string | null }[];
+};
+
+const QUESTION_BAR = 0.8;
+
+/**
+ * One row per module and question step that has attempts. Extras follow their
+ * module and step; an extra on another step (an exemption review, say) rides
+ * on the module's first row so it is never dropped.
+ */
+export function perfRows(p: Projection): PerfRow[] {
+  const rows: PerfRow[] = [];
+  for (const sec of p.sections) {
+    for (const m of sec.modules) {
+      const first = rows.length;
+      for (const step of [2, 4] as const) {
+        const x = step === 2 ? m.performance.s2 : m.performance.s4;
+        if (!x || x.answered <= 0) continue;
+        const acc = x.correct / x.answered;
+        rows.push({
+          key: `${m.readingId}|${step}`,
+          readingId: m.readingId,
+          topicId: sec.topicId,
+          label: `${sec.name} · ${m.name}`,
+          step,
+          answered: x.answered,
+          correct: x.correct,
+          accuracy: acc,
+          low: acc < QUESTION_BAR,
+          enough: x.minutes >= x.adequateMin,
+          minutes: Math.round(x.minutes),
+          adequateMin: Math.round(x.adequateMin),
+          extras: p.extras
+            .filter((e) => e.readingId === m.readingId && e.step === step)
+            .map(extraCell),
+        });
+      }
+      if (rows.length > first) {
+        const shown = new Set(rows.slice(first).map((r) => r.step as number));
+        const stray = p.extras.filter((e) => e.readingId === m.readingId && !shown.has(e.step));
+        rows[first]!.extras.push(...stray.map(extraCell));
+      }
+    }
+  }
+  return rows;
+}
+
+function extraCell(e: ProjectionExtra) {
+  const size = e.questions ? `+${e.questions} q` : `+${Math.round(e.minutes)} min`;
+  return {
+    taskId: e.taskId,
+    text: e.date ? `${size}, due ${shortDate(e.date)}` : size,
+    reason: reasonText(e.reason),
+    date: e.date,
+  };
 }

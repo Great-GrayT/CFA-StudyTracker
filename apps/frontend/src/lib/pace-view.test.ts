@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   planWindow, barGeometry, circlePos, axisTicks, formatReadiness, formatHours, stepFractions,
   weakestSection, owedMinutes, trackingBuckets, cumulative, sortModules, behindCount, hasAnyProgress,
-  sectionWindows, day, DAY, moduleHref, accuracy,
+  sectionWindows, day, DAY, moduleHref, accuracy, perfRows,
 } from "./pace-view";
 import type { Projection, ProjectionSection, ProjectionWindow } from "./types";
 
@@ -196,5 +196,47 @@ describe("copy helpers", () => {
   it("short dates", () => {
     expect(shortDate("2027-04-20")).toBe("20 Apr");
     expect(shortDate(null)).toBe("");
+  });
+});
+
+describe("perfRows", () => {
+  const perf = (answered: number, correct: number, minutes: number, adequateMin: number) => ({
+    round: 1, answered, correct, minutes, adequateMin, passed: false,
+  });
+  const proj = {
+    sections: [
+      {
+        topicId: "qm",
+        name: "QM",
+        modules: [
+          { readingId: "r1", name: "Fit", windows: [], performance: { s2: perf(40, 24, 140, 120), s4: null } },
+          { readingId: "r2", name: "Idle", windows: [], performance: { s2: null, s4: null } },
+          { readingId: "r3", name: "Both", windows: [], performance: { s2: perf(24, 20, 80, 110), s4: perf(10, 9, 30, 30) } },
+        ],
+      },
+    ],
+    extras: [
+      { taskId: "t1", readingId: "r1", step: 2, reason: "top-up-80", questions: 40, minutes: 70, date: "2026-11-18" },
+      { taskId: null, readingId: "r1", step: 3, reason: "exemption-review", questions: null, minutes: 20, date: null },
+      { taskId: "t3", readingId: "r3", step: 4, reason: "top-up-adequacy", questions: 10, minutes: 30, date: "2026-11-20" },
+      { taskId: "t9", readingId: "elsewhere", step: 2, reason: "top-up-80", questions: 5, minutes: 9, date: null },
+    ],
+  } as unknown as Projection;
+
+  it("lists only modules with attempts, one row per question step", () => {
+    expect(perfRows(proj).map((r) => r.key)).toEqual(["r1|2", "r3|2", "r3|4"]);
+  });
+  it("computes accuracy, the 80% flag and whether the time was enough", () => {
+    const [a, b] = perfRows(proj);
+    expect(a).toMatchObject({ label: "QM · Fit", accuracy: 0.6, low: true, enough: true, minutes: 140, adequateMin: 120 });
+    expect(b).toMatchObject({ low: false, enough: false, minutes: 80, adequateMin: 110 });
+  });
+  it("attaches extras by module and step, strays to the first row, with reason copy", () => {
+    const rows = perfRows(proj);
+    expect(rows[0]!.extras.map((e) => e.taskId)).toEqual(["t1", null]);
+    expect(rows[0]!.extras[0]).toEqual({ taskId: "t1", text: "+40 q, due 18 Nov", reason: "Top-up to reach 80%", date: "2026-11-18" });
+    expect(rows[0]!.extras[1]!.text).toBe("+20 min");
+    expect(rows[1]!.extras).toEqual([]);
+    expect(rows[2]!.extras.map((e) => e.taskId)).toEqual(["t3"]);
   });
 });

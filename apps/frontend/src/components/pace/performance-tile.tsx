@@ -10,6 +10,7 @@ import {
   formatHours,
   formatPercent,
   moduleHref,
+  perfRows,
   reasonText,
   sectionHref,
   taskHref,
@@ -84,7 +85,10 @@ function Rows({ p }: { p: Projection }) {
 }
 
 function Expanded({ p }: { p: Projection }) {
+  const rows = perfRows(p);
+  const scored = new Set(rows.map((r) => r.readingId));
   const modules = new Map(p.sections.flatMap((sec) => sec.modules.map((m) => [m.readingId, { m, sec }] as const)));
+  const orphans = p.extras.filter((e) => !scored.has(e.readingId));
   const totalMin = p.extras.reduce((a, e) => a + e.minutes, 0);
   const questions = p.extras.reduce((a, e) => a + (e.questions ?? 0), 0);
   return (
@@ -93,100 +97,108 @@ function Expanded({ p }: { p: Projection }) {
         {p.extras.length} extra {p.extras.length === 1 ? "task" : "tasks"}, {formatHours(totalMin)} added this plan
         {questions > 0 ? `, ${questions} extra questions` : ""}.
       </p>
-      <div className={s.panel}>
+      <div className={cn(s.panel, s.perf)} tabIndex={0} role="region" aria-label="Per-module question performance">
         <table className={s.tbl}>
-          <caption className="sr-only">Question scores per section, then each extra task and why it exists</caption>
+          <caption className="sr-only">
+            Each module with question attempts: step, answered, correct, accuracy, whether the practice time was enough,
+            and any extra task with the reason it was added
+          </caption>
           <thead>
             <tr>
-              <th scope="col">Section</th>
-              <th scope="col">Initial</th>
-              <th scope="col">Review</th>
-              <th scope="col">Mocks</th>
-              <th scope="col">Extras</th>
-            </tr>
-          </thead>
-          <tbody>
-            {p.sections.map((sec) => {
-              const cell = (t: Tally | null) => {
-                const a = accuracy(t);
-                return a === null ? (
-                  <span className="text-muted-foreground">Not yet</span>
-                ) : (
-                  <span>
-                    {formatPercent(a)}, {t!.correct} of {t!.answered}
-                  </span>
-                );
-              };
-              return (
-                <tr key={sec.topicId}>
-                  <td>
-                    <Link href={sectionHref(sec.topicId)} className={cn(s.link, focus)}>
-                      {sec.name}
-                    </Link>
-                  </td>
-                  <td>{cell(sec.performance.initial)}</td>
-                  <td>{cell(sec.performance.review)}</td>
-                  <td>{cell(sec.performance.mocks)}</td>
-                  <td>
-                    {sec.performance.extras.tasks > 0
-                      ? `${sec.performance.extras.tasks}, ${formatHours(sec.performance.extras.minutes)}`
-                      : <span className="text-muted-foreground">None</span>}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      <div className={s.panel}>
-        <table className={s.tbl}>
-          <caption className="sr-only">Extra tasks with the module, step and reason</caption>
-          <thead>
-            <tr>
-              <th scope="col">Extra task</th>
+              <th scope="col">Module</th>
               <th scope="col">Step</th>
-              <th scope="col">Size</th>
-              <th scope="col">Why</th>
+              <th scope="col">Answered</th>
+              <th scope="col">Correct</th>
+              <th scope="col">Accuracy</th>
+              <th scope="col">Enough?</th>
+              <th scope="col">Extras and why</th>
             </tr>
           </thead>
           <tbody>
-            {p.extras.length === 0 ? (
+            {rows.length === 0 ? (
               <tr>
-                <td colSpan={4} className="text-muted-foreground">
-                  No extra tasks. Every step cleared its bar.
+                <td colSpan={7} className="text-muted-foreground">
+                  No questions answered yet. Modules appear here after their first attempt.
                 </td>
               </tr>
             ) : null}
-            {p.extras.map((e, i) => {
-              const hit = modules.get(e.readingId);
-              const label = hit ? `${hit.sec.name} · ${hit.m.name}` : "Module";
-              return (
-                <tr key={`${e.taskId ?? "x"}${i}`}>
-                  <td className="max-w-[300px] truncate">
-                    {e.taskId ? (
-                      <Link href={taskHref(e.taskId)} className={cn(s.link, focus, "text-alarm-ink")}>
-                        {label}
-                      </Link>
-                    ) : hit ? (
-                      <Link href={moduleHref(hit.sec.topicId, e.readingId)} className={cn(s.link, focus)}>
-                        {label}
-                      </Link>
-                    ) : (
-                      label
-                    )}
-                  </td>
-                  <td>{STEP_LABEL[e.step as 1] ?? e.step}</td>
-                  <td>
-                    {e.questions ? `${e.questions} questions, ` : ""}
-                    {formatHours(e.minutes)}
-                  </td>
-                  <td className="whitespace-normal">{reasonText(e.reason)}</td>
-                </tr>
-              );
-            })}
+            {rows.map((r) => (
+              <tr key={r.key}>
+                <th scope="row" className={s.stickyCol}>
+                  <Link href={moduleHref(r.topicId, r.readingId)} className={cn(s.link, focus)}>
+                    {r.label}
+                  </Link>
+                </th>
+                <td className="tabular-nums">{STEP_LABEL[r.step]}</td>
+                <td className="tabular-nums">{r.answered}</td>
+                <td className="tabular-nums">{r.correct}</td>
+                <td className={cn("tabular-nums", r.low && "text-alarm-ink")}>{formatPercent(r.accuracy)}</td>
+                <td className={cn("tabular-nums", !r.enough && "text-alarm-ink")}>
+                  {r.enough ? "Yes" : "No"}, {r.minutes} of {r.adequateMin} min
+                </td>
+                <td className="whitespace-normal">
+                  {r.extras.length === 0 ? (
+                    <span className="text-muted-foreground">Passed first try</span>
+                  ) : (
+                    r.extras.map((e, i) => (
+                      <div key={`${e.taskId ?? "x"}${i}`} className="min-w-[220px] py-0.5">
+                        {e.taskId ? (
+                          <Link href={taskHref(e.taskId)} className={cn(s.link, focus, "text-alarm-ink")}>
+                            {e.text}
+                          </Link>
+                        ) : (
+                          <span className="text-alarm-ink">{e.text}</span>
+                        )}
+                        <div className="text-muted-foreground text-[11.5px]">{e.reason}</div>
+                      </div>
+                    ))
+                  )}
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
+      {orphans.length > 0 ? (
+        <div className={s.panel}>
+          <table className={s.tbl}>
+            <caption className="sr-only">Extra tasks on modules with no scored questions</caption>
+            <thead>
+              <tr>
+                <th scope="col">Other extras</th>
+                <th scope="col">Step</th>
+                <th scope="col">Size</th>
+                <th scope="col">Why</th>
+              </tr>
+            </thead>
+            <tbody>
+              {orphans.map((e, i) => {
+                const hit = modules.get(e.readingId);
+                const label = hit ? `${hit.sec.name} · ${hit.m.name}` : "Module";
+                return (
+                  <tr key={`${e.taskId ?? "x"}${i}`}>
+                    <td className="max-w-[300px] truncate">
+                      {e.taskId ? (
+                        <Link href={taskHref(e.taskId)} className={cn(s.link, focus, "text-alarm-ink")}>
+                          {label}
+                        </Link>
+                      ) : (
+                        label
+                      )}
+                    </td>
+                    <td>{STEP_LABEL[e.step as 1] ?? e.step}</td>
+                    <td>
+                      {e.questions ? `${e.questions} questions, ` : ""}
+                      {formatHours(e.minutes)}
+                    </td>
+                    <td className="whitespace-normal">{reasonText(e.reason)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
     </>
   );
 }
@@ -197,7 +209,7 @@ export function PerformanceTile({ p, className }: { p: Projection; className?: s
       title="Performance"
       className={className}
       hint="Tick is the bar to clear: 80% on questions, 75% on mocks. Extras are tasks added because a bar was missed."
-      expandedHint="Scores per section, then every extra task with the reason it was added."
+      expandedHint="Every module with question attempts: score, whether the practice time was enough, and any extra task with its reason."
       expanded={<Expanded p={p} />}
     >
       <Rows p={p} />

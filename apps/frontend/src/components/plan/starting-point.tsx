@@ -33,6 +33,7 @@ export function StartingPoint({
   disabled = false,
   loading = false,
   failed = false,
+  onRemove,
 }: {
   topics: Topic[];
   stored: DeclarationItem[];
@@ -41,6 +42,8 @@ export function StartingPoint({
   disabled?: boolean;
   loading?: boolean;
   failed?: boolean;
+  /** Takes back a stored step. Omitted where nothing is stored yet. */
+  onRemove?: (item: DeclarationItem) => void;
 }) {
   const sorted = useMemo(
     () =>
@@ -60,7 +63,7 @@ export function StartingPoint({
       <div>
         <h2 className="text-[16px] font-semibold">Starting point</h2>
         <p className="text-muted-foreground max-w-prose text-[14px]">
-          Tick each step you already finished for a module. The plan skips it and plans what is left. Review reading
+          Tick each step you already finished for a module. The plan skips it and plans what is left. Remove a saved step to have it planned again. Review reading
           opens after the first read, and review questions after the first questions.
         </p>
       </div>
@@ -104,6 +107,17 @@ export function StartingPoint({
                               {label}
                               {isStored ? " (saved)" : ""}
                             </Label>
+                            {isStored && onRemove ? (
+                              <button
+                                type="button"
+                                disabled={disabled}
+                                onClick={() => onRemove(find(stored, r.id, step)!)}
+                                aria-label={`Remove ${label} for ${r.name}`}
+                                className="text-muted-foreground hover:text-foreground focus-visible:ring-ring min-h-9 rounded-sm px-1 text-[12px] underline underline-offset-2 outline-hidden focus-visible:ring-2 disabled:opacity-50 max-md:min-h-11"
+                              >
+                                Remove
+                              </button>
+                            ) : null}
                           </div>
                         );
                       })}

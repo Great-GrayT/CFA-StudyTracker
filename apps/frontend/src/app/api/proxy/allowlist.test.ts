@@ -22,6 +22,7 @@ test.each([
   "plans/abc123/sessions",
   "plans/abc123/projection",
   "plans/abc123/declarations",
+  "plans/abc123/declarations/r1/2",
   "plans/abc123/restart",
   "prior-work/sources",
   "packages",

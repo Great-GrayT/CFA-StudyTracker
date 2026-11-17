@@ -6,26 +6,37 @@ import { Button } from "@/components/ui/button";
 import { OfflineLine, regionState } from "@/components/states/region-states";
 import { StartingPoint } from "@/components/plan/starting-point";
 import { ApiError } from "@/lib/api";
-import { useCurriculum, useDeclarations, useDeclare } from "@/lib/hooks";
+import { useCurriculum, useDeclarations, useDeclare, useRemoveDeclaration } from "@/lib/hooks";
 import { itemsError } from "@/lib/starting-point";
 import { useOnline } from "@/hooks/use-online";
 import type { DeclarationItem, Plan } from "@/lib/types";
 
 /**
  * StartingPoint wired to the plan: shows what is already stated, collects new
- * steps, and saves them with a replan. Stated steps stay; the plan has no way
- * to un-state one, so the form only adds.
+ * steps, and saves them with a replan. A stored step can be
+ * removed, which the server refuses while a later step depends on it.
  */
 export function PriorWorkForm({ plan, onSaved }: { plan: Plan; onSaved?: () => void }) {
   const online = useOnline();
   const curriculum = useCurriculum(plan.levelId);
   const stored = useDeclarations(plan.id);
   const declare = useDeclare(plan.id);
+  const remove = useRemoveDeclaration(plan.id);
   const [draft, setDraft] = useState<DeclarationItem[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const states = [curriculum, stored].map(regionState);
   const msg = itemsError(draft);
+
+  async function removeStored(item: DeclarationItem) {
+    setError(null);
+    try {
+      await remove.mutateAsync({ readingId: item.readingId, step: item.step });
+      toast.success("Removed. The days ahead have been replanned.");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not remove that. Try again.");
+    }
+  }
 
   async function save() {
     if (draft.length === 0 || msg) return;
@@ -47,7 +58,8 @@ export function PriorWorkForm({ plan, onSaved }: { plan: Plan; onSaved?: () => v
         topics={curriculum.data?.topics ?? []}
         stored={stored.data ?? []}
         value={draft}
-        disabled={declare.isPending}
+        disabled={declare.isPending || remove.isPending}
+        onRemove={online ? removeStored : undefined}
         loading={states.some((s) => s.loading)}
         failed={states.some((s) => s.error) && !(curriculum.data && stored.data)}
         onChange={setDraft}

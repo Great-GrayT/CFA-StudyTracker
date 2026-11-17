@@ -270,6 +270,40 @@
   white-space: nowrap;
   vertical-align: top;
 }
+/* Wide module table: scrolls sideways inside the panel, module name stays put */
+.perf {
+  overscroll-behavior-x: contain;
+}
+.perf .tbl {
+  min-width: 760px;
+}
+.tbl th.stickyCol {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  top: auto;
+  background: var(--raised);
+  font-weight: 500;
+  color: inherit;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--rule);
+  border-right: 1px solid var(--rule);
+  white-space: normal;
+  min-width: 150px;
+  max-width: 220px;
+}
+@media (max-width: 759px) {
+  .perf .tbl th.stickyCol a,
+  .perf .tbl td a {
+    display: inline-block;
+    padding-block: 0.6rem;
+  }
+  .stickyCol { min-width: 130px; }
+}
+.perf thead th:first-child {
+  left: 0;
+  z-index: 3;
+}
 .secRow td {
   font-weight: 600;
   background: var(--accent-tint);

@@ -120,6 +120,20 @@ export function useDeclare(planId: string | undefined) {
   });
 }
 
+/** Takes back one declaration; the server refuses while a later step depends on it. */
+export function useRemoveDeclaration(planId: string | undefined) {
+  const qc = useQueryClient();
+  const invalidate = useInvalidateAfterLog(planId);
+  return useMutation({
+    mutationFn: (d: { readingId: string; step: number }) =>
+      api.del<unknown>(`plans/${planId}/declarations/${encodeURIComponent(d.readingId)}/${d.step}`),
+    onSuccess: () => {
+      invalidate();
+      if (planId) void qc.invalidateQueries({ queryKey: keys.declarations(planId) });
+    },
+  });
+}
+
 /** Stored "did this before" self-states, for the starting-point screens. */
 export function useDeclarations(planId: string | undefined): UseQueryResult<DeclarationItem[]> {
   return useQuery({
