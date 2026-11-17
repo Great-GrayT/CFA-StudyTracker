@@ -3,12 +3,16 @@
 // mock topic scores, holidays), so past and future share one shape.
 import { db } from "./db";
 import { generateHorizon, horizonVersion, type HorizonResult } from "./FUNC-schedule";
+import { adequateMinutes } from "../core/steps/catalog";
 import { plannedMinutes } from "../core/steps/metrics";
 import { gateDate } from "../core/steps/schedule";
 import type { FitReport, ModuleWindow } from "../core/steps";
 import type { StepNo } from "../core/steps/types";
 
 type Counts = { answered: number; correct: number };
+export type StepPerformance = {
+  round: number; answered: number; correct: number; minutes: number; adequateMin: number; passed: boolean;
+};
 type StepKey = "1" | "2" | "3" | "4" | "5";
 
 export type Projection = {
@@ -17,7 +21,10 @@ export type Projection = {
   sections: Array<{
     topicId: string; name: string; examWeight: number;
     steps: Array<{ step: 1 | 2 | 3 | 4; plannedMin: number; donePassedMin: number; spentUnpassedMin: number; planTodayMin: number }>;
-    modules: Array<{ readingId: string; name: string; windows: ModuleWindow["steps"] }>;
+    modules: Array<{
+      readingId: string; name: string; windows: ModuleWindow["steps"];
+      performance: { s2: StepPerformance | null; s4: StepPerformance | null };
+    }>;
     performance: {
       initial: Counts | null; review: Counts | null; mocks: Counts | null;
       extras: { tasks: number; minutes: number };
@@ -161,6 +168,16 @@ export async function buildProjection(planId: string, today: string): Promise<Pr
   }
   const countsOrNull = (c: Counts) => (c.answered > 0 ? c : null);
 
+  // Null until the step has an attempt or is passed, so the table shows a dash rather than 0 of 0.
+  const stepPerf = (m: (typeof hz.catalog)[number], step: 2 | 4): StepPerformance | null => {
+    const r = hz.state.get(m.readingId)?.[step === 2 ? "s2" : "s4"];
+    if (!r || (!r.passed && r.answered === 0 && r.minutes === 0)) return null;
+    return {
+      round: r.round, answered: r.answered, correct: r.correct, minutes: Math.round(r.minutes),
+      adequateMin: Math.round(adequateMinutes(m, step)), passed: r.passed,
+    };
+  };
+
   const byTopic = new Map<string, typeof hz.catalog>();
   for (const m of hz.catalog) byTopic.set(m.topicId, [...(byTopic.get(m.topicId) ?? []), m]);
   const sections: Projection["sections"] = [...byTopic.entries()]
@@ -194,6 +211,10 @@ export async function buildProjection(planId: string, today: string): Promise<Pr
         modules: mods.map((m) => ({
           readingId: m.readingId, name: readingName.get(m.readingId) ?? m.readingId,
           windows: windowOf.get(m.readingId)?.steps ?? [],
+          performance: {
+            s2: stepPerf(m, 2),
+            s4: stepPerf(m, 4),
+          },
         })),
         performance: {
           initial: p ? countsOrNull(p.initial) : null,

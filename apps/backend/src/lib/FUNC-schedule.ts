@@ -11,7 +11,7 @@ import {
   planSteps,
   type DayCap, type FitReport, type Metrics, type MockSession, type ModuleWindow, type ScheduledTask,
 } from "../core/steps";
-import type { Declaration, HistoryTask, MockResult } from "../core/steps/state";
+import type { Declaration, HistoryTask, MockResult, ModuleState } from "../core/steps/state";
 import type { ModuleCatalog } from "../core/steps/types";
 import type { WorkItem } from "../core/steps/work";
 
@@ -137,6 +137,7 @@ export type HorizonResult = {
   fit: FitReport; windows: ModuleWindow[]; metrics: Metrics; unplaced: WorkItem[]; load: number;
   relaxedPolicy: boolean;
   catalog: ModuleCatalog[];
+  state: Map<string, ModuleState>;
 };
 
 /**
@@ -360,7 +361,7 @@ export async function generateHorizon(
     planMode: tuning.planMode, reviewPolicy: tuning.reviewPolicy,
     rejectedTuning: parsed.rejected.map((r) => ({ field: r.field, reason: r.reason })),
     today, exam, tasks: result.tasks, fit: result.fit, windows: result.windows, metrics: result.metrics,
-    unplaced: result.unplaced, load: result.load, relaxedPolicy: result.relaxedPolicy, catalog,
+    unplaced: result.unplaced, load: result.load, relaxedPolicy: result.relaxedPolicy, catalog, state: result.state,
   };
   if (opts.dryRun) return { created: 0, frozen: 0, kept: 0, deleted: 0, ...reported };
 

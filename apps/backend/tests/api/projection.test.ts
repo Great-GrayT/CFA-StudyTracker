@@ -95,4 +95,25 @@ describe("GET /api/plans/:id/projection", () => {
     expect(a.holidays).toHaveLength(0);
     expect(b.holidays).toHaveLength(1);
   });
+
+  test("a recorded step 2 task shows in that module's performance with passed false", async () => {
+    const { planId, user } = await ownedPlan();
+    const reading = await db.reading.findFirstOrThrow({ where: { topic: { levelId: "II" } }, orderBy: { name: "asc" } });
+    const los = await db.lOS.findFirst({ where: { readingId: reading.id } })
+      ?? await db.lOS.create({ data: { readingId: reading.id, text: "Outcome", order: 1 } });
+    const task = await db.planTask.create({
+      data: {
+        planId, date: new Date("2027-01-04T00:00:00Z"), order: 99, kind: "questions", step: 2, round: 1,
+        readingIds: [reading.id], estimatedMinutes: 60, actualMinutes: 60, status: "done",
+      },
+    });
+    await db.studyLogEntry.create({
+      data: { userId: user.id, planId, losId: los.id, confidence: 3, questionsAnswered: 24, questionsCorrect: 12, taskId: task.id },
+    });
+    const p = await readJson(await get(user, planId));
+    const mod = p.sections.flatMap((s: any) => s.modules).find((m: any) => m.readingId === reading.id);
+    expect(mod.performance.s2).toMatchObject({ answered: 24, correct: 12, passed: false });
+    expect(mod.performance.s2.adequateMin).toBeGreaterThan(0);
+    expect(mod.performance.s4).toBeNull();
+  });
 });

@@ -1,4 +1,4 @@
-import { deriveState, type Declaration, type HistoryTask, type MockResult } from "./state";
+import { deriveState, type Declaration, type HistoryTask, type MockResult, type ModuleState } from "./state";
 import { fitPlan, type FitReport } from "./fit";
 import { buildWindows, computeMetrics, type DoneOn, type Metrics, type ModuleWindow } from "./metrics";
 import type { MockSession } from "./mocks";
@@ -32,6 +32,7 @@ export type PlanResult = {
   unplaced: WorkItem[];
   load: number;
   relaxedPolicy: boolean;
+  state: Map<string, ModuleState>;
 };
 
 export function planSteps(input: EngineInput): PlanResult {
@@ -53,7 +54,7 @@ export function planSteps(input: EngineInput): PlanResult {
   });
   return {
     tasks: result.tasks, fit, windows, metrics, unplaced: result.unplaced, load: result.load,
-    relaxedPolicy: result.relaxedPolicy,
+    relaxedPolicy: result.relaxedPolicy, state,
   };
 }
 
