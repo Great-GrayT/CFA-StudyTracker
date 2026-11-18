@@ -14,6 +14,7 @@ import { HoursEditor } from "@/components/plan/hours-editor";
 import { PackagesEditor } from "@/components/plan/packages-editor";
 import { itemsError } from "@/lib/starting-point";
 import { StartingPoint } from "@/components/plan/starting-point";
+import { defaultDeclaredDate, todayIn } from "@/lib/starting-point";
 import type { DeclarationItem } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -373,6 +374,8 @@ export default function OnboardingPage() {
                 loading={curriculum.isLoading}
                 failed={curriculum.isError}
                 onChange={(startingPoint) => dispatch({ type: "set", patch: { startingPoint } })}
+                defaultDate={defaultDeclaredDate(draft.startDate, todayIn())}
+                maxDate={todayIn()}
               />
             )}
 

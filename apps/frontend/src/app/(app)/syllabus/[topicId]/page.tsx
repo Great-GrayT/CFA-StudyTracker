@@ -1,6 +1,7 @@
 "use client";
 
-import { use, useMemo, useRef } from "react";
+import type { UseQueryResult } from "@tanstack/react-query";
+import { use, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
@@ -8,14 +9,34 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StatusStrip } from "@/components/syllabus/status-strip";
 import { OfflineLine, RegionError, regionState } from "@/components/states/region-states";
 import { useRecord } from "@/components/record/record-provider";
-import { useCurriculum, useLogs, usePlan } from "@/lib/hooks";
+import { ChevronRight } from "lucide-react";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { ModuleSteps, MocksSection } from "@/components/history/step-history";
+import {
+  DeleteRecordDialog,
+  EditDeclarationDialog,
+  EditMockDialog,
+  EditTaskDialog,
+  type DeleteTarget,
+} from "@/components/history/record-dialogs";
+import { recordWhen, STEP_TITLES, dayText } from "@/lib/history";
+import { useCurriculum, useHistory, useLogs, usePlan } from "@/lib/hooks";
 import { logsByLos, outcomeStatus, type OutcomeStatus } from "@/lib/syllabus";
 import { weightedCoveragePercent } from "@/lib/coverage";
 import { useOnline } from "@/hooks/use-online";
 import { useOutcomeParam } from "@/hooks/use-outcome-param";
 import { useIsCut } from "@/components/states/truncated-text";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import type { LogEntry, Reading } from "@/lib/types";
+import type {
+  HistoryDeclarationRecord,
+  HistoryRecord,
+  HistoryStep,
+  HistoryMock,
+  HistoryResponse,
+  HistoryTaskRecord,
+  LogEntry,
+  Reading,
+} from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const pct = new Intl.NumberFormat("en", { maximumFractionDigits: 0 });
@@ -38,6 +59,12 @@ export default function TopicPage({ params }: { params: Promise<{ topicId: strin
   const plan = usePlan();
   const curriculum = useCurriculum(plan.data?.levelId);
   const logs = useLogs(plan.data?.id);
+  const planId = plan.data?.id;
+  const history = useHistory(planId, topicId);
+  const [editTask, setEditTask] = useState<HistoryTaskRecord | null>(null);
+  const [editDecl, setEditDecl] = useState<{ rec: HistoryDeclarationRecord; readingId: string; moduleName: string } | null>(null);
+  const [editMock, setEditMock] = useState<HistoryMock | null>(null);
+  const [del, setDel] = useState<DeleteTarget | null>(null);
 
   const byLos = useMemo(() => logsByLos(logs.data ?? []), [logs.data]);
   const topic = curriculum.data?.topics.find((t) => t.id === topicId);
@@ -95,6 +122,20 @@ export default function TopicPage({ params }: { params: Promise<{ topicId: strin
             <ReadingItem
               key={reading.id}
               reading={reading}
+              history={history}
+              onEditRecord={(rec) =>
+                rec.type === "task"
+                  ? setEditTask(rec)
+                  : setEditDecl({ rec, readingId: reading.id, moduleName: reading.name })
+              }
+              onDeleteRecord={(rec, step) =>
+                setDel({
+                  kind: "record",
+                  rec,
+                  readingId: reading.id,
+                  label: `${reading.name}, ${STEP_TITLES[step.step].toLowerCase()}, ${recordWhen(rec)}`,
+                })
+              }
               byLos={byLos}
               onOpen={setLos}
               onRecord={(losId) => record.open({ losId })}
@@ -103,18 +144,47 @@ export default function TopicPage({ params }: { params: Promise<{ topicId: strin
           ))}
         </Accordion>
       )}
+
+      {history.data ? (
+        <MocksSection
+          mocks={history.data.mocks}
+          onEdit={setEditMock}
+          onDelete={(m) => setDel({ kind: "mock", mock: m, label: `Mock from ${dayText(m.date)}, ${Math.round(m.scorePercent)}%` })}
+        />
+      ) : null}
+
+      {planId ? (
+        <>
+          <EditTaskDialog planId={planId} rec={editTask} onClose={() => setEditTask(null)} />
+          <EditDeclarationDialog
+            planId={planId}
+            readingId={editDecl?.readingId ?? ""}
+            moduleName={editDecl?.moduleName ?? ""}
+            rec={editDecl?.rec ?? null}
+            onClose={() => setEditDecl(null)}
+          />
+          <EditMockDialog planId={planId} topicId={topicId} topicName={topic.name} mock={editMock} onClose={() => setEditMock(null)} />
+          <DeleteRecordDialog planId={planId} target={del} onClose={() => setDel(null)} />
+        </>
+      ) : null}
     </Shell>
   );
 }
 
 function ReadingItem({
   reading,
+  history,
+  onEditRecord,
+  onDeleteRecord,
   byLos,
   onOpen,
   onRecord,
   href,
 }: {
   reading: Reading;
+  history: UseQueryResult<HistoryResponse>;
+  onEditRecord: (rec: HistoryRecord, step: HistoryStep) => void;
+  onDeleteRecord: (rec: HistoryRecord, step: HistoryStep) => void;
   byLos: Map<string, LogEntry[]>;
   onOpen: (losId: string) => void;
   onRecord: (losId: string) => void;
@@ -153,49 +223,79 @@ function ReadingItem({
           </span>
         </span>
       </AccordionTrigger>
-      <AccordionContent className="pb-2">
-        <ul>
-          {[...reading.los]
-            .sort((a, b) => a.order - b.order)
-            .map((los) => {
-              const status = outcomeStatus(byLos.get(los.id) ?? []);
-              return (
-                <li key={los.id} className="border-border flex items-start gap-3 border-t py-2 first:border-t-0">
-                  <Link
-                    href={href(los.id)}
-                    scroll={false}
-                    // A plain click opens through the sheet's history handling;
-                    // the href stays for a new tab or a copied link.
-                    onClick={(e) => {
-                      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-                      e.preventDefault();
-                      onOpen(los.id);
-                    }}
-                    className="focus-visible:ring-ring hover:bg-accent -mx-1 flex min-w-0 flex-1 flex-col gap-0.5 rounded-sm px-1 py-0.5 outline-hidden focus-visible:ring-2"
-                  >
-                    <span className="font-prose text-[16px] leading-snug">{los.text}</span>
-                    <span
-                      className={cn(
-                        "text-[12px]",
-                        status === "flagged" ? "text-foreground font-medium" : "text-muted-foreground",
-                      )}
-                    >
-                      {STATUS_WORD[status]}
-                    </span>
-                  </Link>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="shrink-0 max-md:h-11"
-                    onClick={() => onRecord(los.id)}
-                    aria-label={`Record study for ${los.text}`}
-                  >
-                    Record
-                  </Button>
-                </li>
-              );
-            })}
-        </ul>
+      <AccordionContent className="pb-3">
+        {history.data ? (
+          (() => {
+            const mod = history.data?.modules.find((m) => m.readingId === reading.id);
+            return mod ? <ModuleSteps steps={mod.steps} onEdit={onEditRecord} onDelete={onDeleteRecord} /> : null;
+          })()
+        ) : history.isError ? (
+          <p className="text-muted-foreground py-2 text-[13px]" role="alert">
+            Study history did not load.{" "}
+            <button type="button" className="text-claimed-ink underline underline-offset-4" onClick={() => void history.refetch()}>
+              Try again
+            </button>
+          </p>
+        ) : (
+          <div aria-hidden="true" className="border-border border-t">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="border-border flex min-h-11 items-center gap-4 border-b px-1">
+                <Skeleton className="h-3.5 w-40 rounded-sm" />
+                <Skeleton className="h-3.5 w-20 rounded-sm" />
+              </div>
+            ))}
+          </div>
+        )}
+        <Collapsible className="mt-1">
+          <CollapsibleTrigger className="focus-visible:ring-ring text-muted-foreground group flex min-h-11 w-full items-center gap-2 rounded-sm px-1 text-[13px] outline-hidden focus-visible:ring-2 md:min-h-9">
+            <ChevronRight aria-hidden="true" className="size-4 transition-transform group-data-[state=open]:rotate-90 motion-reduce:transition-none" />
+            Learning outcomes, {done} of {reading.los.length} covered
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <ul>
+              {[...reading.los]
+                .sort((a, b) => a.order - b.order)
+                .map((los) => {
+                  const status = outcomeStatus(byLos.get(los.id) ?? []);
+                  return (
+                    <li key={los.id} className="border-border flex items-start gap-3 border-t py-2 first:border-t-0">
+                      <Link
+                        href={href(los.id)}
+                        scroll={false}
+                        // A plain click opens through the sheet's history handling;
+                        // the href stays for a new tab or a copied link.
+                        onClick={(e) => {
+                          if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                          e.preventDefault();
+                          onOpen(los.id);
+                        }}
+                        className="focus-visible:ring-ring hover:bg-accent -mx-1 flex min-w-0 flex-1 flex-col gap-0.5 rounded-sm px-1 py-0.5 outline-hidden focus-visible:ring-2"
+                      >
+                        <span className="font-prose text-[16px] leading-snug">{los.text}</span>
+                        <span
+                          className={cn(
+                            "text-[12px]",
+                            status === "flagged" ? "text-foreground font-medium" : "text-muted-foreground",
+                          )}
+                        >
+                          {STATUS_WORD[status]}
+                        </span>
+                      </Link>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="shrink-0 max-md:h-11"
+                        onClick={() => onRecord(los.id)}
+                        aria-label={`Record study for ${los.text}`}
+                      >
+                        Record
+                      </Button>
+                    </li>
+                  );
+                })}
+            </ul>
+          </CollapsibleContent>
+        </Collapsible>
       </AccordionContent>
     </AccordionItem>
   );

@@ -4,6 +4,8 @@
 import { db } from "./db";
 import { generateHorizon, horizonVersion, type HorizonResult } from "./FUNC-schedule";
 import { adequateMinutes } from "../core/steps/catalog";
+import { EPS, MIN_PER_QUESTION } from "../core/steps/rules";
+import { declaredMinutes } from "../core/steps/declared-credit";
 import { plannedMinutes } from "../core/steps/metrics";
 import { EXTRA_REASONS } from "../core/steps/work";
 import { gateDate } from "../core/steps/schedule";
@@ -13,6 +15,12 @@ import type { StepNo } from "../core/steps/types";
 type Counts = { answered: number; correct: number };
 export type StepPerformance = {
   round: number; answered: number; correct: number; minutes: number; adequateMin: number; passed: boolean;
+  /** Adequate question count at the first option's rate, 0 with no option. */
+  adequateQ: number;
+  /** Questions of still-owed top-up work in the current round. */
+  extraPendingQ: number;
+  /** Minutes per question including answer review, the rate the engine sizes with. */
+  perQ: number;
 };
 type StepKey = "1" | "2" | "3" | "4" | "5";
 
@@ -25,6 +33,8 @@ export type Projection = {
     modules: Array<{
       readingId: string; name: string; windows: ModuleWindow["steps"];
       performance: { s2: StepPerformance | null; s4: StepPerformance | null };
+      /** Steps 2 and 4, every round, recorded plus stated; mock part is the whole topic's. */
+      totals: { answered: number; correct: number; mockAnswered: number; mockCorrect: number };
     }>;
     performance: {
       initial: Counts | null; review: Counts | null; mocks: Counts | null;
@@ -46,12 +56,37 @@ const STEPS: Array<1 | 2 | 3 | 4> = [1, 2, 3, 4];
 const emptySteps = (): Record<StepKey, number> => ({ "1": 0, "2": 0, "3": 0, "4": 0, "5": 0 });
 
 // Tasks from before the engine carry no step; the kind says which one they were.
-function stepOf(t: { step: number | null; kind: string }): number {
+export function stepOf(t: { step: number | null; kind: string }): number {
   if (t.step !== null) return t.step;
   if (["read", "content-notes", "content-video", "seminar", "eocq"].includes(t.kind)) return 1;
   if (t.kind === "review") return 3;
   if (t.kind === "questions" || t.kind === "answer-review") return 2;
   return 5;
+}
+
+/** Same rate `work.ts` sizes question sets with, and the question count that reaches adequacy at it. */
+export function adequateQuestions(m: HorizonResult["catalog"][number], step: 2 | 4): { adequateQ: number; perQ: number } {
+  const o = m.options[step][0];
+  if (!o) return { adequateQ: 0, perQ: 0 };
+  const perQ = (o.minutesPerQuestion ?? MIN_PER_QUESTION) + (o.answerReviewPerQuestion ?? MIN_PER_QUESTION / 3);
+  return { adequateQ: perQ > 0 ? Math.ceil(adequateMinutes(m, step) / perQ - EPS) : 0, perQ };
+}
+
+/**
+ * Still-owed top-up questions keyed readingId|step|round. The dry run covers placed and unplaced
+ * work, and one item can span several days, so each id is counted once.
+ */
+export function owedExtraQuestions(hz: HorizonResult): Map<string, number> {
+  const owedQ = new Map<string, number>();
+  const seen = new Set<string>();
+  for (const it of [...hz.tasks.map((t) => t.item), ...hz.unplaced]) {
+    if (seen.has(it.id)) continue;
+    seen.add(it.id);
+    if (!it.extraReason || it.kind !== "questions" || (it.step !== 2 && it.step !== 4)) continue;
+    const k = `${it.readingId}|${it.step}|${it.round}`;
+    owedQ.set(k, (owedQ.get(k) ?? 0) + (it.questions ?? 0));
+  }
+  return owedQ;
 }
 
 const CACHE_MAX = 200;
@@ -102,7 +137,7 @@ async function fingerprint(planId: string, today: string): Promise<string | null
     where: { planId }, select: { startDate: true, endDate: true }, orderBy: { startDate: "asc" },
   });
   return JSON.stringify([
-    horizonVersion(planId), today, plan, tasks, logs, decls, holidays, mocks, scores,
+    "projection-v3", horizonVersion(planId), today, plan, tasks, logs, decls, holidays, mocks, scores,
     holidayDates.map((h) => [h.startDate, h.endDate]),
   ]);
 }
@@ -194,6 +229,12 @@ export async function buildProjection(planId: string, today: string): Promise<Pr
     if (!p) perf.set(topicId, (p = { initial: { answered: 0, correct: 0 }, review: { answered: 0, correct: 0 }, mocks: { answered: 0, correct: 0 } }));
     return p;
   };
+  const readingTotals = new Map<string, Counts>();
+  const totalsOf = (readingId: string) => {
+    let c = readingTotals.get(readingId);
+    if (!c) readingTotals.set(readingId, (c = { answered: 0, correct: 0 }));
+    return c;
+  };
   // Prior-work writes a self-declared log row and a StepDeclaration for the same answers; the
   // declaration wins, as in the engine, so those answers are counted once.
   const statedStep = new Set(stated.map((d) => `${d.readingId}|${d.step}`));
@@ -205,6 +246,9 @@ export async function buildProjection(planId: string, today: string): Promise<Pr
     const step = l.task ? stepOf(l.task) : 2;
     const bucket = step === 2 ? "initial" : step === 4 ? "review" : null;
     if (!bucket) continue;
+    const rt = totalsOf(l.los.readingId);
+    rt.answered += l.questionsAnswered;
+    rt.correct += l.questionsCorrect;
     perfOf(topicId)[bucket].answered += l.questionsAnswered;
     perfOf(topicId)[bucket].correct += l.questionsCorrect;
   }
@@ -212,6 +256,9 @@ export async function buildProjection(planId: string, today: string): Promise<Pr
     const topicId = topicOfReading.get(d.readingId);
     if (!topicId) continue;
     const bucket = d.step === 2 ? "initial" : "review";
+    const rt = totalsOf(d.readingId);
+    rt.answered += d.answered ?? 0;
+    rt.correct += d.correct ?? 0;
     perfOf(topicId)[bucket].answered += d.answered ?? 0;
     perfOf(topicId)[bucket].correct += d.correct ?? 0;
   }
@@ -221,13 +268,20 @@ export async function buildProjection(planId: string, today: string): Promise<Pr
   }
   const countsOrNull = (c: Counts) => (c.answered > 0 ? c : null);
 
+  const owedQ = owedExtraQuestions(hz);
+
   // Null until the step has an attempt or is passed, so the table shows a dash rather than 0 of 0.
   const stepPerf = (m: (typeof hz.catalog)[number], step: 2 | 4): StepPerformance | null => {
     const r = hz.state.get(m.readingId)?.[step === 2 ? "s2" : "s4"];
-    if (!r || (!r.passed && r.answered === 0 && r.minutes === 0)) return null;
+    const { adequateQ, perQ } = adequateQuestions(m, step);
+    // Shown from the start when the step has a question option, so Today can say 0 of m.
+    if (!r || (adequateQ <= 0 && !r.passed && r.answered === 0 && r.minutes === 0)) return null;
     return {
       round: r.round, answered: r.answered, correct: r.correct, minutes: Math.round(r.minutes),
       adequateMin: Math.round(adequateMinutes(m, step)), passed: r.passed,
+      adequateQ,
+      extraPendingQ: owedQ.get(`${m.readingId}|${step}|${r.round}`) ?? 0,
+      perQ,
     };
   };
 
@@ -268,6 +322,12 @@ export async function buildProjection(planId: string, today: string): Promise<Pr
             s2: stepPerf(m, 2),
             s4: stepPerf(m, 4),
           },
+          totals: {
+            answered: readingTotals.get(m.readingId)?.answered ?? 0,
+            correct: readingTotals.get(m.readingId)?.correct ?? 0,
+            mockAnswered: p?.mocks.answered ?? 0,
+            mockCorrect: p?.mocks.correct ?? 0,
+          },
         })),
         performance: {
           initial: p ? countsOrNull(p.initial) : null,
@@ -295,6 +355,13 @@ export async function buildProjection(planId: string, today: string): Promise<Pr
       r.byStep[String(stepOf(t)) as StepKey] += t.estimatedMinutes;
     }
     if (finished) row(date).doneMin += credit(t);
+  }
+  // Stated work counts as study on its date, at the minutes the engine credits it with.
+  const catalogOf = new Map(hz.catalog.map((m) => [m.readingId, m]));
+  for (const d of hz.declarations) {
+    const m = catalogOf.get(d.readingId);
+    const min = m ? Math.round(declaredMinutes(m, d)) : 0;
+    if (min > 0) row(d.date).doneMin += min;
   }
   for (const d of hz.metrics.daily) {
     const r = row(d.date);

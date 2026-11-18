@@ -20,8 +20,10 @@ import type {
   DeclarationItem,
   MockSession,
   PlanSettingsPatch,
+  HistoryResponse,
 } from "./types";
 import type { Campaign } from "./campaign-types";
+import { invalidateAfterEdit } from "./plan-invalidation";
 
 export const keys = {
   plan: ["plan"] as const,
@@ -32,6 +34,8 @@ export const keys = {
   mocks: (planId: string) => ["mocks", planId] as const,
   packages: ["packages"] as const,
   projection: (planId: string) => ["projection", planId] as const,
+  history: (planId: string, topicId?: string) =>
+    (topicId === undefined ? ["history", planId] : ["history", planId, topicId]) as readonly string[],
   declarations: (planId: string) => ["declarations", planId] as const,
   plannerState: (planId: string) => ["planner-state", planId] as const,
   mockSessions: (planId: string) => ["mock-sessions", planId] as const,
@@ -115,7 +119,7 @@ export function useDeclare(planId: string | undefined) {
     mutationFn: (items: DeclarationItem[]) => api.post<unknown>(`plans/${planId}/declarations`, { items }),
     onSuccess: () => {
       invalidate();
-      if (planId) void qc.invalidateQueries({ queryKey: keys.declarations(planId) });
+      if (planId) void invalidateAfterEdit(qc, planId);
     },
   });
 }
@@ -129,7 +133,7 @@ export function useRemoveDeclaration(planId: string | undefined) {
       api.del<unknown>(`plans/${planId}/declarations/${encodeURIComponent(d.readingId)}/${d.step}`),
     onSuccess: () => {
       invalidate();
-      if (planId) void qc.invalidateQueries({ queryKey: keys.declarations(planId) });
+      if (planId) void invalidateAfterEdit(qc, planId);
     },
   });
 }
@@ -335,6 +339,7 @@ export function useInvalidateAfterLog(planId: string | undefined) {
     qc.invalidateQueries({ queryKey: ["prescription", planId] });
     qc.invalidateQueries({ queryKey: ["campaign", planId] });
     qc.invalidateQueries({ queryKey: keys.projection(planId) });
+    qc.invalidateQueries({ queryKey: keys.history(planId) });
   };
 }
 
@@ -382,9 +387,11 @@ type RecordDetail = {
   answerReviewMinutes?: number;
   note?: string;
 };
+/** Edits to an already recorded task: move it to another day or package. */
+type TaskMove = { date?: string; packageId?: string };
 export type TaskSubmission =
-  | ({ status: "done"; actualMinutes?: number } & RecordDetail)
-  | ({ status: "partial"; actualMinutes: number } & RecordDetail)
+  | ({ status: "done"; actualMinutes?: number } & RecordDetail & TaskMove)
+  | ({ status: "partial"; actualMinutes: number } & RecordDetail & TaskMove)
   | { status: "pending" };
 
 /**
@@ -403,14 +410,57 @@ export function useSubmitTask(planId: string | undefined) {
     // otherwise the row flashes its old state between save and reload.
     onSuccess: () => {
       if (!planId) return;
-      return Promise.all([
-        qc.invalidateQueries({ queryKey: ["prescription", planId] }),
-        qc.invalidateQueries({ queryKey: ["campaign", planId] }),
-        qc.invalidateQueries({ queryKey: keys.progress(planId) }),
-        qc.invalidateQueries({ queryKey: keys.logs(planId) }),
-        qc.invalidateQueries({ queryKey: keys.projection(planId) }),
-      ]);
+      return invalidateAfterEdit(qc, planId);
     },
+  });
+}
+
+/** Deletes a recorded task: off plan it is removed, planned it goes back to pending. The server replans. */
+export function useDeleteTask(planId: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (taskId: string) => api.del<unknown>(`plans/${planId}/tasks/${encodeURIComponent(taskId)}`),
+    onSuccess: () => (planId ? invalidateAfterEdit(qc, planId) : undefined),
+  });
+}
+
+export type MockPatch = {
+  date?: string;
+  scorePercent?: number;
+  topicScores?: Array<{ topicId: string; answered: number; correct: number }>;
+};
+
+/** Edits a mock's date, score or per-topic counts; the server replans. */
+export function usePatchMock(planId: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: MockPatch & { id: string }) =>
+      api.patch<unknown>(`mock-exams/${encodeURIComponent(id)}`, body),
+    onSuccess: () => (planId ? invalidateAfterEdit(qc, planId) : undefined),
+  });
+}
+
+export function useDeleteMock(planId: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.del<unknown>(`mock-exams/${encodeURIComponent(id)}`),
+    onSuccess: () => (planId ? invalidateAfterEdit(qc, planId) : undefined),
+  });
+}
+
+/** Per-module, per-step record of everything done in one topic, newest first. */
+export function useHistory(
+  planId: string | undefined,
+  topicId: string | undefined,
+): UseQueryResult<HistoryResponse> {
+  return useQuery({
+    queryKey: keys.history(planId ?? "", topicId ?? ""),
+    queryFn: () =>
+      api.get<HistoryResponse>(
+        `plans/${encodeURIComponent(planId!)}/history?topicId=${encodeURIComponent(topicId!)}`,
+      ),
+    enabled: !!planId && !!topicId,
+    staleTime: 30_000,
   });
 }
 

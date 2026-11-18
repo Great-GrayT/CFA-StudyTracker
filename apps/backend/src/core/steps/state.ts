@@ -13,6 +13,8 @@ export type HistoryTask = {
 };
 export type Declaration = {
   readingId: string; step: StepNo; confidence: number | null; answered: number | null; correct: number | null;
+  /** YYYY-MM-DD the stated work was done; it enters the history on that day. */
+  date: string;
 };
 export type MockResult = { date: string; topicScores: Array<{ topicId: string; answered: number; correct: number }> };
 
@@ -121,17 +123,23 @@ export function deriveState(
     }
   };
 
-  const byStep = (s: StepNo) => decls.filter((d) => d.step === s);
-  byStep(1).concat(byStep(2)).forEach(applyDecl);
-
-  type Ev = { date: string; kind: "task" | "mock"; task?: HistoryTask; mock?: MockResult };
+  // One chronological stream. On a shared day a stated step comes before recorded work, which comes
+  // before mocks, and stated steps run in step order so a later step finds its predecessor done.
+  type Ev = { date: string; kind: "decl" | "task" | "mock"; decl?: Declaration; task?: HistoryTask; mock?: MockResult };
+  const rank = { decl: 0, task: 1, mock: 2 } as const;
   const events: Ev[] = ([
+    ...decls.map((d) => ({ date: d.date, kind: "decl" as const, decl: d })),
     ...tasks.filter((t) => t.status !== "pending").map((t) => ({ date: t.date, kind: "task" as const, task: t })),
     ...mocks.map((mk) => ({ date: mk.date, kind: "mock" as const, mock: mk })),
-  ] as Ev[]).sort((a, b) => a.date.localeCompare(b.date) || (a.kind === b.kind ? 0 : a.kind === "task" ? -1 : 1)
+  ] as Ev[]).sort((a, b) => a.date.localeCompare(b.date) || rank[a.kind] - rank[b.kind]
+    || (a.decl && b.decl ? a.decl.step - b.decl.step || a.decl.readingId.localeCompare(b.decl.readingId) : 0)
     || (a.task && b.task ? a.task.id.localeCompare(b.task.id) : 0));
 
   for (const ev of events) {
+    if (ev.kind === "decl") {
+      applyDecl(ev.decl!);
+      continue;
+    }
     if (ev.kind === "mock") {
       for (const sc of ev.mock!.topicScores) {
         if (sc.answered <= 0 || sc.correct / sc.answered >= 0.75) continue;
@@ -179,9 +187,6 @@ export function deriveState(
       }
     }
   }
-
-  // Later steps cannot be stated before their predecessors, judged after tasks.
-  byStep(3).concat(byStep(4)).forEach(applyDecl);
 
   const out = new Map<string, ModuleState>();
   for (const w of works.values()) {

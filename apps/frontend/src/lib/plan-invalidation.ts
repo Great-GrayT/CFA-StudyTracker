@@ -21,3 +21,20 @@ export async function invalidateAfterSetup(qc: QueryClient, planId: string): Pro
 export function invalidateProjection(qc: QueryClient, planId: string): Promise<void> {
   return qc.invalidateQueries({ queryKey: keys.projection(planId) });
 }
+
+/**
+ * Everything an edit or delete of a record can move: the history itself, the
+ * projection and prescription it replans, and the logs and mocks behind them.
+ */
+export function invalidateAfterEdit(qc: QueryClient, planId: string): Promise<unknown> {
+  return Promise.all([
+    qc.invalidateQueries({ queryKey: keys.history(planId) }),
+    qc.invalidateQueries({ queryKey: keys.projection(planId) }),
+    qc.invalidateQueries({ queryKey: ["prescription", planId] }),
+    qc.invalidateQueries({ queryKey: ["campaign", planId] }),
+    qc.invalidateQueries({ queryKey: keys.logs(planId) }),
+    qc.invalidateQueries({ queryKey: keys.progress(planId) }),
+    qc.invalidateQueries({ queryKey: keys.mocks(planId) }),
+    qc.invalidateQueries({ queryKey: keys.declarations(planId) }),
+  ]);
+}

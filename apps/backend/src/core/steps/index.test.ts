@@ -40,10 +40,10 @@ describe("planSteps", () => {
   it("all steps passed: readiness 1, only mocks remain", () => {
     const cat = fullCatalog();
     const declarations: Declaration[] = cat.flatMap((m) => ([
-      { readingId: m.readingId, step: 1 as const, confidence: 5, answered: null, correct: null },
-      { readingId: m.readingId, step: 2 as const, confidence: null, answered: null, correct: null },
-      { readingId: m.readingId, step: 3 as const, confidence: null, answered: null, correct: null },
-      { readingId: m.readingId, step: 4 as const, confidence: null, answered: null, correct: null },
+      { readingId: m.readingId, step: 1 as const, confidence: 5, answered: null, correct: null, date: "2026-01-01" },
+      { readingId: m.readingId, step: 2 as const, confidence: null, answered: null, correct: null, date: "2026-01-01" },
+      { readingId: m.readingId, step: 3 as const, confidence: null, answered: null, correct: null, date: "2026-01-01" },
+      { readingId: m.readingId, step: 4 as const, confidence: null, answered: null, correct: null, date: "2026-01-01" },
     ]));
     const r = planSteps(input({ declarations }));
     expect(r.metrics.readiness).toBeCloseTo(1, 9);
@@ -57,7 +57,7 @@ describe("planSteps", () => {
     const cat = [mod("r1", 1, 1)];
     const r = planSteps(input({
       catalog: cat, caps: caps(TODAY, 181, 300),
-      declarations: [{ readingId: "r1", step: 1, confidence: 5, answered: null, correct: null }],
+      declarations: [{ readingId: "r1", step: 1, confidence: 5, answered: null, correct: null, date: "2026-01-01" }],
       doneOn: { r1: { 1: "2025-12-20" } },
     }));
     expect(r.windows[0].steps[0]).toMatchObject({ status: "done", doneOn: "2025-12-20" });

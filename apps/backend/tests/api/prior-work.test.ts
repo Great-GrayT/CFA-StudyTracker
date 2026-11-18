@@ -231,3 +231,35 @@ describe("prior work declared at onboarding", () => {
     expect(after.tasks.some((t) => declaredIds.has(t.item.readingId) && t.item.step === 3)).toBe(true);
   });
 });
+
+describe("prior work dates", () => {
+  beforeEach(resetDb);
+
+  test("each item carries its own date, defaulting to the plan's first day", async () => {
+    const { planId, token, topicId } = await ownedPlan();
+    const plan = await db.studyPlan.findUniqueOrThrow({ where: { id: planId } });
+    const res = await POST_PRIOR_WORK(priorWorkRequest(planId, token, {
+      declarations: [{ topicId, read: true, questionsAnswered: 40, accuracyPercent: 70 }],
+    }));
+    expect(res.status).toBe(201);
+    const rows = await db.studyLogEntry.findMany({ where: { planId } });
+    expect(rows.every((r) => r.date.getTime() === new Date(plan.startDate.toISOString().slice(0, 10) + "T00:00:00Z").getTime())).toBe(true);
+    const decls = await db.stepDeclaration.findMany({ where: { planId } });
+    expect(decls.length).toBeGreaterThan(0);
+
+    await POST_PRIOR_WORK(priorWorkRequest(planId, token, {
+      declarations: [{ topicId, read: true, questionsAnswered: 40, accuracyPercent: 70, date: "2026-10-01" }],
+    }));
+    const dated = await db.studyLogEntry.findMany({ where: { planId } });
+    expect(dated.every((r) => r.date.toISOString().slice(0, 10) === "2026-10-01")).toBe(true);
+    expect((await db.stepDeclaration.findMany({ where: { planId } })).every((d) => d.date.toISOString().slice(0, 10) === "2026-10-01")).toBe(true);
+  });
+
+  test("a date after today is a 400", async () => {
+    const { planId, token, topicId } = await ownedPlan();
+    const res = await POST_PRIOR_WORK(priorWorkRequest(planId, token, {
+      declarations: [{ topicId, read: true, date: "2999-01-01" }],
+    }));
+    expect(res.status).toBe(400);
+  });
+});

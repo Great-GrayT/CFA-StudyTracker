@@ -7,6 +7,7 @@ import { OFF_PLAN } from "../core/task-credit";
 import { buildCatalog } from "../core/steps/catalog";
 import { addDays, diffDays } from "../core/steps/dates";
 import { deriveDoneOn } from "../core/steps/done-on";
+import { declaredMinutes } from "../core/steps/declared-credit";
 import {
   planSteps,
   type DayCap, type FitReport, type Metrics, type MockSession, type ModuleWindow, type ScheduledTask,
@@ -140,6 +141,8 @@ export type HorizonResult = {
   relaxedPolicy: boolean;
   catalog: ModuleCatalog[];
   state: Map<string, ModuleState>;
+  /** Every stated step the engine saw, stored and onboarding-derived, each with its date. */
+  declarations: Declaration[];
 };
 
 /**
@@ -290,25 +293,29 @@ async function planAndWrite(
     where: { planId, selfDeclared: true, taskId: null },
     select: {
       confidence: true, questionsAnswered: true, questionsCorrect: true, declaredRead: true,
-      declaredWatched: true, los: { select: { readingId: true } },
+      declaredWatched: true, date: true, los: { select: { readingId: true } },
     },
   });
-  const byReading = new Map<string, { conf: number | null; read: boolean; answered: number; correct: number }>();
+  type Acc = { conf: number | null; read: boolean; answered: number; correct: number; readDate: string | null; qDate: string | null };
+  const byReading = new Map<string, Acc>();
+  const earliest = (cur: string | null, d: string) => (cur === null || d < cur ? d : cur);
   for (const d of declared) {
-    const cur = byReading.get(d.los.readingId) ?? { conf: null, read: false, answered: 0, correct: 0 };
+    const cur = byReading.get(d.los.readingId) ?? { conf: null, read: false, answered: 0, correct: 0, readDate: null, qDate: null };
     if (d.declaredRead || d.declaredWatched) {
       cur.read = true;
       cur.conf = cur.conf === null ? d.confidence : Math.min(cur.conf, d.confidence);
+      cur.readDate = earliest(cur.readDate, iso(d.date));
     }
+    if (d.questionsAnswered > 0) cur.qDate = earliest(cur.qDate, iso(d.date));
     cur.answered += d.questionsAnswered;
     cur.correct += d.questionsCorrect;
     byReading.set(d.los.readingId, cur);
   }
   const declarations: Declaration[] = [];
   for (const [readingId, d] of byReading) {
-    if (d.read) declarations.push({ readingId, step: 1, confidence: d.conf, answered: null, correct: null });
+    if (d.read) declarations.push({ readingId, step: 1, confidence: d.conf, answered: null, correct: null, date: d.readDate! });
     if (d.answered > 0) {
-      declarations.push({ readingId, step: 2, confidence: null, answered: d.answered, correct: d.correct });
+      declarations.push({ readingId, step: 2, confidence: null, answered: d.answered, correct: d.correct, date: d.qDate! });
     }
   }
   const stated = await q.stepDeclaration.findMany({ where: { planId } });
@@ -320,7 +327,7 @@ async function planAndWrite(
   for (const s of stated) {
     declarations.push({
       readingId: s.readingId, step: s.step as 1 | 2 | 3 | 4, confidence: s.confidence,
-      answered: s.answered, correct: s.correct,
+      answered: s.answered, correct: s.correct, date: iso(s.date),
     });
   }
 
@@ -342,6 +349,13 @@ async function planAndWrite(
     if (t.status !== "done" && t.status !== "partial") continue;
     const k = iso(t.date);
     usedByDate.set(k, (usedByDate.get(k) ?? 0) + (t.actualMinutes ?? t.estimatedMinutes) + (t.answerReviewMinutes ?? 0));
+  }
+  // Stated work counts as study on its day, so a self-state dated today uses today's capacity too.
+  const catalogOf = new Map(catalog.map((m) => [m.readingId, m]));
+  for (const d of declarations) {
+    const m = catalogOf.get(d.readingId);
+    if (!m || d.date < today || d.date > iso(horizonEnd)) continue;
+    usedByDate.set(d.date, (usedByDate.get(d.date) ?? 0) + declaredMinutes(m, d));
   }
   const caps: DayCap[] = [];
   const nDays = Math.max(0, diffDays(today, exam));
@@ -385,7 +399,7 @@ async function planAndWrite(
     planMode: tuning.planMode, reviewPolicy: tuning.reviewPolicy,
     rejectedTuning: parsed.rejected.map((r) => ({ field: r.field, reason: r.reason })),
     today, exam, tasks: result.tasks, fit: result.fit, windows: result.windows, metrics: result.metrics,
-    unplaced: result.unplaced, load: result.load, relaxedPolicy: result.relaxedPolicy, catalog, state: result.state,
+    unplaced: result.unplaced, load: result.load, relaxedPolicy: result.relaxedPolicy, catalog, state: result.state, declarations,
   };
   if (opts.dryRun) return { created: 0, frozen: 0, kept: 0, deleted: 0, ...reported };
 

@@ -48,6 +48,28 @@ export async function POST(req: Request): Promise<Response> {
       return Response.json({ error: "More correct than answered" }, { status: 400 });
     }
   }
+  // Dates: a stored one is kept when none is sent, a new one defaults to the plan's first day.
+  const today = todayIn(plan.timeZone);
+  const startDay = plan.startDate.toISOString().slice(0, 10);
+  const dateOf = new Map(existing.map((d) => [`${d.readingId}|${d.step}`, d.date.toISOString().slice(0, 10)]));
+  for (const i of items) {
+    if (i.date !== undefined) {
+      if (i.date > today) return Response.json({ error: "A date cannot be after today" }, { status: 400 });
+      dateOf.set(`${i.readingId}|${i.step}`, i.date);
+    } else if (!dateOf.has(`${i.readingId}|${i.step}`)) {
+      dateOf.set(`${i.readingId}|${i.step}`, startDay);
+    }
+  }
+  // A review cannot be dated before the step it follows.
+  for (const id of ids) {
+    for (const [later, first, msg] of [
+      [3, 1, "Review cannot be dated before the first read"],
+      [4, 2, "Review questions cannot be dated before the initial questions"],
+    ] as const) {
+      const a = dateOf.get(`${id}|${first}`), b = dateOf.get(`${id}|${later}`);
+      if (a && b && b < a) return Response.json({ error: msg }, { status: 400 });
+    }
+  }
   const has = new Set([...existing, ...items].map((d) => `${d.readingId}|${d.step}`));
   for (const i of items) {
     if (i.step === 3 && !has.has(`${i.readingId}|1`)) {
@@ -64,9 +86,11 @@ export async function POST(req: Request): Promise<Response> {
         where: { planId_readingId_step: { planId, readingId: i.readingId, step: i.step } },
         create: {
           planId, readingId: i.readingId, step: i.step,
+          date: new Date(`${dateOf.get(`${i.readingId}|${i.step}`)}T00:00:00Z`),
           confidence: i.confidence ?? null, answered: i.answered ?? null, correct: i.correct ?? null,
         },
         update: {
+          ...(i.date !== undefined && { date: new Date(`${i.date}T00:00:00Z`) }),
           ...(i.confidence !== undefined && { confidence: i.confidence }),
           ...(i.answered !== undefined && { answered: i.answered }),
           ...(i.correct !== undefined && { correct: i.correct }),
@@ -77,7 +101,6 @@ export async function POST(req: Request): Promise<Response> {
 
   // Show the effect now; the declarations are stored either way and the next tick rebuilds.
   try {
-    const today = todayIn(plan.timeZone);
     await generateHorizon(planId, today);
   } catch (err) {
     console.error(`declarations POST: could not replan plan ${planId}`, err);
@@ -97,8 +120,8 @@ export async function GET(req: Request): Promise<Response> {
   }
   const rows = await db.stepDeclaration.findMany({
     where: { planId },
-    select: { readingId: true, step: true, confidence: true, answered: true, correct: true },
+    select: { readingId: true, step: true, confidence: true, answered: true, correct: true, date: true },
     orderBy: [{ readingId: "asc" }, { step: "asc" }],
   });
-  return Response.json({ items: rows });
+  return Response.json({ items: rows.map((r) => ({ ...r, date: r.date.toISOString().slice(0, 10) })) });
 }

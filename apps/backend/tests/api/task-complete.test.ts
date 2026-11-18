@@ -4,7 +4,7 @@ import { resetDb } from "../helpers/test-db";
 import { readJson } from "../helpers/request";
 import { addQuestionBank, authedRequest, registerUser, setupPlanWithCatalogue, setupPlanWithTasks } from "../helpers/fixtures";
 import { generateHorizon } from "../../src/lib/FUNC-schedule";
-import { PATCH } from "../../src/app/api/plans/[id]/tasks/[taskId]/route";
+import { PATCH, DELETE } from "../../src/app/api/plans/[id]/tasks/[taskId]/route";
 import { POST as POST_LOG } from "../../src/app/api/logs/route";
 
 // setupPlanWithTasks puts two 40-minute tasks on 2027-01-04. Pin the clock to
@@ -282,5 +282,82 @@ describe("answer review on a questions task", () => {
       status: "done", confidence: 3, questionsAnswered: 5, questionsCorrect: 6, answerReviewDone: true,
     });
     expect(res.status).toBe(400);
+  });
+});
+
+describe("editing and deleting a recorded task", () => {
+  beforeEach(async () => {
+    await resetDb();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(TODAY);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const del = (user: Awaited<ReturnType<typeof registerUser>>, planId: string, taskId: string) =>
+    DELETE(authedRequest(user, `/api/plans/${planId}/tasks/${taskId}`, undefined, "DELETE"));
+
+  test("a recorded task moves to an earlier day, last in order and frozen, logs follow", async () => {
+    const { planId, user, tasks } = await ownedTaskWithOutcomes();
+    const t = tasks[0]!;
+    await db.planTask.create({
+      data: { planId, date: new Date("2027-01-03T00:00:00Z"), order: 4, kind: "content-video", estimatedMinutes: 10, frozen: true },
+    });
+    const body = { status: "done", confidence: 3, actualMinutes: 30 };
+    expect((await patch(user, planId, t.id, body)).status).toBe(200);
+    const res = await patch(user, planId, t.id, { ...body, date: "2027-01-03" });
+    expect(res.status).toBe(200);
+    const row = await db.planTask.findUniqueOrThrow({ where: { id: t.id } });
+    expect(row.date.toISOString().slice(0, 10)).toBe("2027-01-03");
+    expect(row.order).toBe(5);
+    expect(row.frozen).toBe(true);
+    const logs = await db.studyLogEntry.findMany({ where: { taskId: t.id } });
+    expect(logs.length).toBeGreaterThan(0);
+    expect(logs.every((l) => l.date.toISOString().slice(0, 10) === "2027-01-03")).toBe(true);
+  });
+
+  test("a date after today, a malformed date and pending with a date are 400", async () => {
+    const { planId, user, tasks } = await ownedTaskWithOutcomes();
+    const body = { status: "done", confidence: 3 };
+    expect((await patch(user, planId, tasks[0]!.id, { ...body, date: "2027-01-05" })).status).toBe(400);
+    expect((await patch(user, planId, tasks[0]!.id, { ...body, date: "yesterday" })).status).toBe(400);
+    expect((await patch(user, planId, tasks[0]!.id, { status: "pending", date: "2027-01-03" })).status).toBe(400);
+  });
+
+  test("packageId must be one of the plan's packages", async () => {
+    const { planId, user, tasks } = await ownedTaskWithOutcomes();
+    const pkg = await db.studyPackage.create({ data: { slug: `p-${Date.now()}`, name: "Mine", userId: null } });
+    const body = { status: "done", confidence: 3 };
+    expect((await patch(user, planId, tasks[0]!.id, { ...body, packageId: pkg.id })).status).toBe(400);
+    await db.planPackage.create({ data: { planId, packageId: pkg.id, roles: ["questions"] } });
+    expect((await patch(user, planId, tasks[0]!.id, { ...body, packageId: pkg.id })).status).toBe(200);
+    expect((await db.planTask.findUniqueOrThrow({ where: { id: tasks[0]!.id } })).packageId).toBe(pkg.id);
+  });
+
+  test("DELETE on a planned task undoes it, DELETE on an off-plan task removes it and its logs", async () => {
+    const { planId, user, tasks } = await ownedTaskWithOutcomes();
+    await patch(user, planId, tasks[0]!.id, { status: "done", confidence: 3, actualMinutes: 30 });
+    expect((await del(user, planId, tasks[0]!.id)).status).toBe(200);
+    expect(await db.planTask.count({ where: { planId, OR: [{ status: { not: "pending" } }, { actualMinutes: { not: null } }] } })).toBe(0);
+    expect(await db.studyLogEntry.count({ where: { planId } })).toBe(0);
+
+    const off = await db.planTask.create({
+      data: {
+        planId, date: new Date("2027-01-04T00:00:00Z"), order: 9, kind: "questions", estimatedMinutes: 20,
+        status: "done", actualMinutes: 20, insertedBecause: "off-plan", frozen: true, readingIds: tasks[0]!.readingIds,
+      },
+    });
+    const los = await db.lOS.findFirstOrThrow({ where: { reading: { topic: { levelId: "II" } } } });
+    await db.studyLogEntry.create({
+      data: { userId: user.id, planId, losId: los.id, confidence: 3, taskId: off.id, date: off.date },
+    });
+    expect((await del(user, planId, off.id)).status).toBe(200);
+    expect(await db.planTask.findUnique({ where: { id: off.id } })).toBeNull();
+    expect(await db.studyLogEntry.count({ where: { planId } })).toBe(0);
+  });
+
+  test("DELETE is a 404 for another user", async () => {
+    const { planId, tasks } = await ownedTasks();
+    const stranger = await registerUser();
+    expect((await del(stranger, planId, tasks[0]!.id)).status).toBe(404);
   });
 });

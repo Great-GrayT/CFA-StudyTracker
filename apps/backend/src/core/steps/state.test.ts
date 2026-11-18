@@ -92,23 +92,23 @@ describe("deriveState", () => {
   });
 
   it("declared step 2 passing marks it passed, otherwise counts become attempts", () => {
-    expect(st([], [{ readingId: "r1", step: 2, confidence: null, answered: 40, correct: 36 }]).s2.passed).toBe(true);
-    const s = st([], [{ readingId: "r1", step: 2, confidence: null, answered: 40, correct: 24 }]);
+    expect(st([], [{ readingId: "r1", step: 2, confidence: null, answered: 40, correct: 36, date: "2026-01-01" }]).s2.passed).toBe(true);
+    const s = st([], [{ readingId: "r1", step: 2, confidence: null, answered: 40, correct: 24, date: "2026-01-01" }]);
     expect(s.s2.passed).toBe(false);
     expect(s.s2.answered).toBe(40);
     expect(s.s2.pendingAnswerReview).toBe(0);
   });
 
   it("step 3 declaration is ignored without step 1; step 4 without step 2", () => {
-    const s3 = { readingId: "r1", step: 3 as const, confidence: null, answered: null, correct: null };
+    const s3 = { readingId: "r1", step: 3 as const, confidence: null, answered: null, correct: null, date: "2026-01-02" };
     expect(st([], [s3]).s3.done).toBe(false);
     expect(st([task({ kind: "read", minutes: 60 })], [s3]).s3.done).toBe(true);
-    const s4 = { readingId: "r1", step: 4 as const, confidence: null, answered: null, correct: null };
+    const s4 = { readingId: "r1", step: 4 as const, confidence: null, answered: null, correct: null, date: "2026-01-01" };
     expect(st([], [s4]).s4.passed).toBe(false);
   });
 
   it("low-confidence step 1 needs half the minutes", () => {
-    const d = { readingId: "r1", step: 1 as const, confidence: 2, answered: null, correct: null };
+    const d = { readingId: "r1", step: 1 as const, confidence: 2, answered: null, correct: null, date: "2026-01-01" };
     let s = st([], [d]);
     expect(s.s1.lowConfidence).toBe(true);
     expect(s.s1.done).toBe(false);
@@ -169,5 +169,39 @@ describe("mock retest", () => {
     const s = st([task({ kind: "questions", step: 2, minutes: 180, answered: 60, correct: 40 })]);
     expect(s.s2.round).toBe(2);
     expect(s.s2.usedByPackage.uw).toBe(60);
+  });
+
+  it("a stated step 2 is applied on its date, not before recorded tasks", () => {
+    const recorded = task({ kind: "questions", step: 2, minutes: 90, answered: 30, correct: 27, date: "2026-01-02" });
+    const weak = { readingId: "r1", step: 2 as const, confidence: null, answered: 40, correct: 10 };
+    // Stated after the pass: the step is already passed, so the statement changes nothing.
+    const after = st([recorded], [{ ...weak, date: "2026-01-05" }]);
+    expect(after.s2.passed).toBe(true);
+    expect(after.s2.round).toBe(1);
+    expect(after.s2.answered).toBe(30);
+    // Stated first: a weak, long attempt opens a fresh round before the recorded one lands.
+    const before = st([recorded], [{ ...weak, date: "2026-01-01" }]);
+    expect(before.s2.round).toBe(2);
+  });
+
+  it("a mock dated between two statements splits them", () => {
+    const decl = (step: 1 | 2 | 4, date: string) =>
+      ({ readingId: "r1", step, confidence: null, answered: null, correct: null, date });
+    const mock = { date: "2026-01-03", topicScores: [{ topicId: "t1", answered: 40, correct: 20 }] };
+    const early = st([], [decl(1, "2026-01-01"), decl(2, "2026-01-01"), decl(4, "2026-01-02")], [mock]);
+    expect(early.s4.passed).toBe(false);
+    expect(early.s4.round).toBe(2);
+    expect(early.mockRetestFrom).toBe("2026-01-03");
+    const late = st([], [decl(1, "2026-01-01"), decl(2, "2026-01-01"), decl(4, "2026-01-04")], [mock]);
+    expect(late.s4.passed).toBe(true);
+    expect(late.s4.round).toBe(1);
+  });
+
+  it("on one day statements run before tasks, in step order", () => {
+    const decls = [3, 1].map((step) =>
+      ({ readingId: "r1", step: step as 1 | 3, confidence: null, answered: null, correct: null, date: "2026-01-01" }));
+    const s = st([task({ kind: "read", step: 1, minutes: 10, date: "2026-01-01" })], decls);
+    expect(s.s1.done).toBe(true);
+    expect(s.s3.done).toBe(true);
   });
 });

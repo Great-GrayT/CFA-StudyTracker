@@ -167,4 +167,50 @@ describe("GET /api/plans/:id/projection", () => {
     const slots = rows.map((r) => `${r.date.getTime()}|${r.order}`);
     expect(new Set(slots).size).toBe(slots.length);
   });
+  test("question stats: adequateQ, perQ, extraPendingQ and per-module totals", async () => {
+    const { planId } = await setupPlanWithCatalogue();
+    await addQuestionBank({ questionsPerUnit: 200 });
+    const user = await registerUser();
+    await db.studyPlan.update({
+      where: { id: planId },
+      data: { userId: user.id, examDate: new Date("2027-04-01"), weeklyAvailability: { mon: 8, tue: 8, wed: 8, thu: 8, fri: 8, sat: 8, sun: 8 } },
+    });
+    await generateHorizon(planId, "2027-01-04");
+    const t = await db.planTask.findFirstOrThrow({ where: { planId, date: new Date("2027-01-04") }, orderBy: { order: "asc" } });
+    const readingId = t.readingIds[0]!;
+    await db.planTask.update({
+      where: { id: t.id },
+      data: { kind: "questions", step: 2, round: 1, questionCount: 20, estimatedMinutes: 60, workMinutes: 60 },
+    });
+    await db.lOS.create({ data: { readingId, text: "Outcome", order: 1 } });
+    await PATCH_TASK(authedRequest(user, `/api/plans/${planId}/tasks/${t.id}`, {
+      status: "done", confidence: 3, questionsAnswered: 20, questionsCorrect: 10, answerReviewDone: true,
+    }, "PATCH"));
+    const p = await readJson(await get(user, planId));
+    const mods = p.sections.flatMap((s: any) => s.modules);
+    const mod = mods.find((m: any) => m.readingId === readingId);
+    const s2 = mod.performance.s2;
+    expect(s2.perQ).toBeGreaterThan(0);
+    expect(s2.adequateQ).toBe(Math.ceil(s2.adequateMin / s2.perQ - 1e-9));
+    expect(s2.extraPendingQ).toBeGreaterThan(0);
+    expect(mod.totals).toEqual({ answered: 20, correct: 10, mockAnswered: 0, mockCorrect: 0 });
+    expect(mods.find((m: any) => m.readingId !== readingId).totals.answered).toBe(0);
+  });
+  test("s2 and s4 are present from the start when the step has questions, and stated work counts as done on its date", async () => {
+    const { planId, user } = await ownedPlan();
+    await addQuestionBank({ questionsPerUnit: 200 });
+    const p0 = await readJson(await get(user, planId));
+    const m0 = p0.sections.flatMap((s: any) => s.modules)[0];
+    expect(m0.performance.s2).toMatchObject({ answered: 0, passed: false });
+    expect(m0.performance.s2.adequateQ).toBeGreaterThan(0);
+    expect(m0.performance.s4).not.toBeNull();
+
+    const r = (await db.reading.findFirstOrThrow({ where: { topic: { levelId: "II" } }, orderBy: { name: "asc" } })).id;
+    await POST_DECL(authedRequest(user, `/api/plans/${planId}/declarations`, {
+      items: [{ readingId: r, step: 1, date: "2027-01-02" }],
+    }));
+    const p1 = await readJson(await get(user, planId));
+    const day = p1.daily.find((d: any) => d.date === "2027-01-02");
+    expect(day?.doneMin).toBeGreaterThan(0);
+  });
 });

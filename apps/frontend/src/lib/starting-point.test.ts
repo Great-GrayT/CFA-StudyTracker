@@ -38,3 +38,39 @@ test("correct above answered is the one thing the list can get wrong", () => {
   expect(itemsError([{ readingId: "r1", step: 2, correct: 5 }])).toBe("Enter questions answered before correct.");
   expect(itemsError([])).toBeNull();
 });
+
+import { applyDateToAll, dateError, defaultDeclaredDate, todayIn } from "./starting-point";
+
+test("a new step carries the date it was stated with", () => {
+  expect(setStep([], "r1", 1, true, "2026-09-01")).toEqual([
+    { readingId: "r1", step: 1, confidence: 3, date: "2026-09-01" },
+  ]);
+});
+
+test("default date is the first study day, never after today", () => {
+  expect(defaultDeclaredDate("2026-09-01T00:00:00.000Z", "2026-11-18")).toBe("2026-09-01");
+  expect(defaultDeclaredDate("2027-01-05", "2026-11-18")).toBe("2026-11-18");
+  expect(defaultDeclaredDate(undefined, "2026-11-18")).toBe("2026-11-18");
+});
+
+test("today is read in the plan's zone", () => {
+  const t = new Date("2026-11-18T23:30:00Z");
+  expect(todayIn("Asia/Tokyo", t)).toBe("2026-11-19");
+  expect(todayIn("America/New_York", t)).toBe("2026-11-18");
+  expect(todayIn("Not/AZone", t)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+});
+
+test("apply to all stamps every item", () => {
+  const out = applyDateToAll([{ readingId: "a", step: 1 }, { readingId: "b", step: 2 }], "2026-10-02");
+  expect(out.every((i) => i.date === "2026-10-02")).toBe(true);
+});
+
+test("date rules mirror the server", () => {
+  const today = "2026-11-18";
+  expect(dateError([{ readingId: "r1", step: 1, date: "2026-11-19" }], [], today)).toMatch(/after today/);
+  const first = { readingId: "r1", step: 1 as const, date: "2026-10-10" };
+  expect(dateError([{ readingId: "r1", step: 3, date: "2026-10-09" }], [first], today)).toMatch(/Review reading/);
+  expect(dateError([{ readingId: "r1", step: 3, date: "2026-10-10" }], [first], today)).toBeNull();
+  const q = { readingId: "r1", step: 2 as const, date: "2026-10-10" };
+  expect(dateError([{ readingId: "r1", step: 4, date: "2026-10-01" }], [q], today)).toMatch(/Review questions/);
+});

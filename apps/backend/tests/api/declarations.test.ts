@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { db } from "../../src/lib/db";
 import { resetDb } from "../helpers/test-db";
 import { readJson } from "../helpers/request";
-import { authedRequest, registerUser, setupPlanWithCatalogue } from "../helpers/fixtures";
-import { POST } from "../../src/app/api/plans/[id]/declarations/route";
+import { addQuestionBank, authedRequest, registerUser, setupPlanWithCatalogue } from "../helpers/fixtures";
+import { POST, GET } from "../../src/app/api/plans/[id]/declarations/route";
 import { DELETE } from "../../src/app/api/plans/[id]/declarations/[readingId]/[step]/route";
 import { generateHorizon } from "../../src/lib/FUNC-schedule";
 
@@ -42,6 +42,76 @@ describe("POST /api/plans/:id/declarations", () => {
     expect([row.answered, row.correct]).toEqual([10, 8]);
     const bad = await post(user, planId, { items: [{ readingId: r[0], step: 2, correct: 11 }] });
     expect(bad.status).toBe(400);
+  });
+
+  describe("dates", () => {
+    const day = (d: Date) => d.toISOString().slice(0, 10);
+
+    test("a new self-state defaults to the plan's first day, an update keeps its stored date", async () => {
+      const { planId, user, r } = await setup();
+      const plan = await db.studyPlan.findUniqueOrThrow({ where: { id: planId } });
+      await post(user, planId, { items: [{ readingId: r[0], step: 1, confidence: 4 }] });
+      let row = await db.stepDeclaration.findFirstOrThrow({ where: { planId, readingId: r[0] } });
+      expect(day(row.date)).toBe(day(plan.startDate));
+      await post(user, planId, { items: [{ readingId: r[0], step: 1, date: "2027-01-02" }] });
+      await post(user, planId, { items: [{ readingId: r[0], step: 1, confidence: 5 }] });
+      row = await db.stepDeclaration.findFirstOrThrow({ where: { planId, readingId: r[0] } });
+      expect(day(row.date)).toBe("2027-01-02");
+      expect(row.confidence).toBe(5);
+    });
+
+    test("GET returns the date as YYYY-MM-DD", async () => {
+      const { planId, user, r } = await setup();
+      await post(user, planId, { items: [{ readingId: r[0], step: 1, date: "2027-01-03" }] });
+      const res = await GET(authedRequest(user, `/api/plans/${planId}/declarations`));
+      const body = await readJson(res);
+      expect(body.items[0].date).toBe("2027-01-03");
+    });
+
+    test("a date after today or malformed is a 400", async () => {
+      const { planId, user, r } = await setup();
+      expect((await post(user, planId, { items: [{ readingId: r[0], step: 1, date: "2027-01-05" }] })).status).toBe(400);
+      expect((await post(user, planId, { items: [{ readingId: r[0], step: 1, date: "soon" }] })).status).toBe(400);
+    });
+
+    test("a review dated before its first read is rejected, on the same day is fine", async () => {
+      const { planId, user, r } = await setup();
+      const bad = await post(user, planId, { items: [
+        { readingId: r[0], step: 1, date: "2027-01-03" }, { readingId: r[0], step: 3, date: "2027-01-02" },
+      ] });
+      expect(bad.status).toBe(400);
+      expect((await readJson(bad)).error).toMatch(/before/);
+      const ok = await post(user, planId, { items: [
+        { readingId: r[0], step: 1, date: "2027-01-03" }, { readingId: r[0], step: 3, date: "2027-01-03" },
+      ] });
+      expect(ok.status).toBe(201);
+      // Moving the first read past a stored review is also refused.
+      expect((await post(user, planId, { items: [{ readingId: r[0], step: 1, date: "2027-01-04" }] })).status).toBe(400);
+      const q = await post(user, planId, { items: [
+        { readingId: r[1], step: 2, answered: 10, correct: 8, date: "2027-01-03" },
+        { readingId: r[1], step: 4, answered: 5, correct: 4, date: "2027-01-01" },
+      ] });
+      expect(q.status).toBe(400);
+    });
+
+    test("a self-state dated today uses that day's capacity", async () => {
+      const { planId, user, r } = await setup();
+      // 30 minutes a day: tight enough that stated work dated today leaves nothing for new tasks.
+      await db.studyPlan.update({
+        where: { id: planId },
+        data: { examDate: new Date("2027-04-01"), weeklyAvailability: { mon: 0.5, tue: 0.5, wed: 0.5, thu: 0.5, fri: 0.5, sat: 0.5, sun: 0.5 } },
+      });
+      await addQuestionBank({ questionsPerUnit: 200 });
+      await generateHorizon(planId, "2027-01-04");
+      const dayMin = async () => (await db.planTask.findMany({ where: { planId, date: new Date("2027-01-04") } }))
+        .reduce((a, t) => a + t.estimatedMinutes, 0);
+      expect(await dayMin()).toBeGreaterThan(0);
+      await post(user, planId, { items: r.flatMap((id) => [
+        { readingId: id, step: 1, date: "2027-01-04" },
+        { readingId: id, step: 2, answered: 100, correct: 90, date: "2027-01-04" },
+      ]) });
+      expect(await dayMin()).toBe(0);
+    });
   });
 
   test("review before the first read is rejected", async () => {

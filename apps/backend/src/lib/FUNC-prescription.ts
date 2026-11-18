@@ -13,6 +13,7 @@
 // packer has never set that column and the rows are frozen history: changing
 // what a past task meant is not something a catalogue refresh should be able
 // to do.
+import type { PlanTask } from "@prisma/client";
 import { db } from "./db";
 import { creditedMinutes, OFF_PLAN } from "../core/task-credit";
 
@@ -164,32 +165,13 @@ const ACTIONS: Record<string, string> = {
 };
 
 /**
- * The prescription for one plan over a date range, inclusive.
- *
- * Returns a day per date asked for, including days with nothing on them, so
- * the caller can render a week without inventing the gaps.
+ * Resolves each task's materials the way the day view shows them. Shared with the history route, so
+ * a recorded task names the same video or question set it was prescribed with.
  */
-export async function getPrescription(
+export async function resolveMaterials(
   planId: string,
-  fromISO: string,
-  toISO: string,
-): Promise<PrescribedDay[]> {
-  const from = new Date(`${fromISO}T00:00:00Z`);
-  const to = new Date(`${toISO}T00:00:00Z`);
-
-  const tasks = await db.planTask.findMany({
-    where: { planId, date: { gte: from, lte: to } },
-    orderBy: [{ date: "asc" }, { order: "asc" }],
-  });
-
-  // A record writes one row per outcome, all with the same confidence.
-  const recorded = await db.studyLogEntry.findMany({
-    where: { taskId: { in: tasks.map((t) => t.id) } },
-    select: { taskId: true, confidence: true },
-    distinct: ["taskId"],
-  });
-  const confidenceByTask = new Map(recorded.map((r) => [r.taskId!, r.confidence]));
-
+  tasks: PlanTask[],
+): Promise<{ materialsByTask: Map<string, PrescribedMaterial[]>; readingById: Map<string, { name: string; topic: { name: string } }> }> {
   // Which package plays which role for THIS candidate. A plan that tagged
   // UWorld for questions and Mark Meldrum for content must never be told to
   // watch a UWorld lecture that does not exist.
@@ -251,10 +233,9 @@ export async function getPrescription(
   });
   const namedById = new Map(namedResources.map((r) => [r.id, r]));
 
-  const byDate = new Map<string, PrescribedTask[]>();
+  const materialsByTask = new Map<string, PrescribedMaterial[]>();
 
   for (const task of tasks) {
-    const dateStr = task.date.toISOString().slice(0, 10);
     const reading = task.readingIds.map((id) => readingById.get(id)).find(Boolean);
     const wantedRole = roleFor(task.kind);
     const offPlan = task.insertedBecause === OFF_PLAN;
@@ -369,6 +350,49 @@ export async function getPrescription(
         questionCount: null,
       });
     }
+    materialsByTask.set(task.id, materials);
+  }
+  return { materialsByTask, readingById };
+}
+
+/**
+ * The prescription for one plan over a date range, inclusive.
+ *
+ * Returns a day per date asked for, including days with nothing on them, so
+ * the caller can render a week without inventing the gaps.
+ */
+export async function getPrescription(
+  planId: string,
+  fromISO: string,
+  toISO: string,
+): Promise<PrescribedDay[]> {
+  const from = new Date(`${fromISO}T00:00:00Z`);
+  const to = new Date(`${toISO}T00:00:00Z`);
+
+  const tasks = await db.planTask.findMany({
+    where: { planId, date: { gte: from, lte: to } },
+    orderBy: [{ date: "asc" }, { order: "asc" }],
+  });
+
+  // A record writes one row per outcome, all with the same confidence.
+  const recorded = await db.studyLogEntry.findMany({
+    where: { taskId: { in: tasks.map((t) => t.id) } },
+    select: { taskId: true, confidence: true },
+    distinct: ["taskId"],
+  });
+  const confidenceByTask = new Map(recorded.map((r) => [r.taskId!, r.confidence]));
+
+
+  const { materialsByTask, readingById } = await resolveMaterials(planId, tasks);
+
+  const byDate = new Map<string, PrescribedTask[]>();
+
+  for (const task of tasks) {
+    const dateStr = task.date.toISOString().slice(0, 10);
+    const reading = task.readingIds.map((id) => readingById.get(id)).find(Boolean);
+    const offPlan = task.insertedBecause === OFF_PLAN;
+    const materials = materialsByTask.get(task.id)!;
+
 
     const entry: PrescribedTask = {
       id: task.id,

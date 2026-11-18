@@ -94,21 +94,22 @@ export async function POST(req: Request): Promise<Response> {
     await ensureCfaiPackage();
   }
 
-  // Dated now rather than backdated to whenever the study happened, which the
-  // candidate was not asked and would not reliably remember. Freshness then
-  // decays from the declaration, the conservative direction.
-  const declaredAt = new Date();
-  const rows = declaredRows(declarations, byTopicId).map((r) => ({
+  // Each item carries the day the work was done; the plan's first day when it names none.
+  const planToday = new Intl.DateTimeFormat("en-CA", { timeZone: plan.timeZone ?? "UTC" }).format(new Date());
+  if (declarations.some((d) => d.date && d.date > planToday)) {
+    return Response.json({ error: "A date cannot be after today" }, { status: 400 });
+  }
+  const defaultDate = new Date(`${plan.startDate.toISOString().slice(0, 10)}T00:00:00Z`);
+  const rows = declaredRows(declarations, byTopicId, defaultDate).map((r) => ({
     ...r,
     userId: auth.userId,
     planId,
     selfDeclared: true,
-    date: declaredAt,
   }));
 
   // The same form as engine self-states. A resubmit replaces what the form said before, including
   // modules the new form no longer mentions, and leaves self-states declared one module at a time.
-  const steps = declaredSteps(declarations, byTopicId);
+  const steps = declaredSteps(declarations, byTopicId, defaultDate);
   const touched = new Set(scopeReadingIds(declarations, byTopicId));
   const before = priorWorkSchema.safeParse({ declarations: plan.priorWork ?? [] });
   if (before.success && before.data.declarations.length > 0) {
@@ -140,10 +141,7 @@ export async function POST(req: Request): Promise<Response> {
   // Fold it straight into the schedule, so the candidate sees the effect of
   // what they just told us rather than waiting for the nightly tick.
   try {
-    const today = new Intl.DateTimeFormat("en-CA", {
-      timeZone: plan.timeZone ?? "UTC",
-    }).format(new Date());
-    await generateHorizon(planId, today);
+    await generateHorizon(planId, planToday);
   } catch (err) {
     // The declaration is saved either way, and the next tick rebuilds the
     // horizon from it.

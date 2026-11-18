@@ -3,7 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ApiError } from "@/lib/api";
-import { useDeclarations, useDeclare, useProjection } from "@/lib/hooks";
+import { useDeclarations, useDeclare, usePlan, useProjection } from "@/lib/hooks";
+import { dateError, defaultDeclaredDate, todayIn } from "@/lib/starting-point";
+import { DeclaredDate } from "./declared-date";
 import { declarationError, declarationItem, questionsError } from "@/lib/record";
 import type { StepNo } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -17,6 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { dayText } from "@/lib/history";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 export const STEP_LABELS: Record<StepNo, string> = {
@@ -45,6 +48,10 @@ export function DeclareSheet({
   const declare = useDeclare(planId);
   const declarations = useDeclarations(planId);
   const projection = useProjection(planId);
+  const plan = usePlan();
+  const today = todayIn(plan.data?.timeZone);
+  const firstDay = defaultDeclaredDate(plan.data?.startDate, today);
+  const [date, setDate] = useState(firstDay);
   const [step, setStep] = useState<StepNo>(1);
   const [confidence, setConfidence] = useState(3);
   const [answered, setAnswered] = useState("");
@@ -57,7 +64,10 @@ export function DeclareSheet({
     setConfidence(3);
     setAnswered("");
     setCorrect("");
+    setDate(firstDay);
     setError(null);
+    // firstDay is read once per opening; a plan refetch must not reset a chosen date.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [target]);
 
   // What is already stated or finished, as "readingId|step".
@@ -73,15 +83,18 @@ export function DeclareSheet({
   const asksCounts = step === 2 || step === 4;
   const countsMsg = asksCounts && (answered !== "" || correct !== "") ? questionsError(answered, correct) : null;
   const orderMsg = target ? declarationError([{ readingId: target.readingId, step }], doneSteps) : null;
-  const message = countsMsg ?? orderMsg;
+  const dateMsg = target
+    ? dateError([{ readingId: target.readingId, step, date }], declarations.data ?? [], today)
+    : null;
+  const message = countsMsg ?? orderMsg ?? dateMsg;
 
   async function submit() {
     if (!target) return;
     if (message) return setError(message);
     setError(null);
     try {
-      await declare.mutateAsync([declarationItem(target.readingId, step, { confidence, answered, correct })]);
-      toast.success("Noted. The days ahead are replanned around it.");
+      await declare.mutateAsync([declarationItem(target.readingId, step, { confidence, answered, correct, date })]);
+      toast.success(`Noted. The plan was rebuilt from today with this work counted on ${dayText(date)}.`);
       onOpenChange(false);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not save that. Nothing was changed.");
@@ -96,7 +109,7 @@ export function DeclareSheet({
         <DialogHeader className="text-left sm:text-left">
           <DialogTitle className="text-[20px] font-semibold">Did this before</DialogTitle>
           <DialogDescription className="text-[13px]">
-            {target?.moduleName}. Say which step you already finished and the plan stops asking for it.
+            {target?.moduleName}. Say which step you already finished and when. It counts as real study on that day, and the plan stops asking for it.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -191,6 +204,8 @@ export function DeclareSheet({
               ) : null}
             </fieldset>
           )}
+
+          <DeclaredDate id="declare-date" value={date} max={today} onChange={setDate} />
 
           {shown ? (
             <p className="text-alarm-ink text-[13px]" role="alert">

@@ -185,6 +185,8 @@ const priorWorkDeclarationSchema = z
       .nullable()
       .optional(),
     confidence: z.number().int().min(1).max(5).nullable().optional(),
+    // The day the work was done; the plan's first day when left out.
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((d) => !Number.isNaN(Date.parse(d)), "Not a date").nullable().optional(),
     read: z.boolean().optional(),
     questionsAnswered: z.number().int().min(0).max(100_000).optional(),
     accuracyPercent: z.number().min(0).max(100).nullable().optional(),
@@ -204,6 +206,7 @@ const priorWorkDeclarationSchema = z
       videosFrom: d.videosFrom ?? (legacyRead ? UNATTRIBUTED : null),
       questions: d.questions ?? legacyQuestions,
       confidence: d.confidence ?? null,
+      date: d.date ?? null,
     };
   });
 
@@ -234,6 +237,9 @@ export const submitTaskSchema = z
     answerReviewDone: z.boolean().optional(),
     answerReviewMinutes: z.number().int().min(0).max(600).optional(),
     note: z.string().max(2000).optional(),
+    // Editing a recorded task: move it to another day or re-tag its package.
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((d) => !Number.isNaN(Date.parse(d)), "Not a date").optional(),
+    packageId: z.string().min(1).optional(),
   })
   .refine((b) => b.status !== "partial" || b.actualMinutes !== undefined, {
     message: "A partial submission needs the minutes worked",
@@ -320,6 +326,13 @@ export const createMockExamSchema = z.object({
   path: ["scorePercent"],
 });
 
+// Edit in place: any field may change; topic scores replace the whole set.
+export const updateMockExamSchema = z.object({
+  date: z.coerce.date().optional(),
+  scorePercent: z.number().int().min(0).max(100).optional(),
+  topicScores: z.array(mockTopicScoreSchema).max(30).optional(),
+});
+
 export const declarationsSchema = z.object({
   items: z
     .array(
@@ -330,6 +343,8 @@ export const declarationsSchema = z.object({
           confidence: z.number().int().min(1).max(5).optional(),
           answered: z.number().int().min(0).max(5000).optional(),
           correct: z.number().int().min(0).max(5000).optional(),
+          // The day the work was done; the plan's first day on create when left out.
+          date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((d) => !Number.isNaN(Date.parse(d)), "Not a date").optional(),
         })
         .refine((d) => d.answered === undefined || d.correct === undefined || d.correct <= d.answered, {
           message: "More correct than answered",

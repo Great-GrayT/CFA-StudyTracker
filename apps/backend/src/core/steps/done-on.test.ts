@@ -19,4 +19,10 @@ describe("deriveDoneOn", () => {
     const out = deriveDoneOn([module("r1", 1, 1, 60)], [t("a", "2026-03-01", { minutes: 30 })], [], []);
     expect(out.r1?.[1]).toBeUndefined();
   });
+  it("a stated step is done on its declaration date", () => {
+    const out = deriveDoneOn([module("r1", 1, 1, 60)], [t("a", "2026-03-20", { minutes: 5 })], [
+      { readingId: "r1", step: 1, confidence: 5, answered: null, correct: null, date: "2026-02-10" },
+    ], []);
+    expect(out.r1?.[1]).toBe("2026-02-10");
+  });
 });

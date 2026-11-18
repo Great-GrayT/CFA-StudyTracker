@@ -70,6 +70,7 @@ export type DeclaredRow = {
   questionsCorrect: number;
   declaredRead: boolean;
   declaredWatched: boolean;
+  date: Date;
 };
 
 type TopicShape = { id: string; readings: Array<{ id: string; los: Array<{ id: string }> }> };
@@ -83,7 +84,14 @@ type TopicShape = { id: string; readings: Array<{ id: string; los: Array<{ id: s
  * Question counts are spread over the scope's outcomes in equal shares, the
  * remainder on the first ones, so the stored totals are the typed totals.
  */
-export function declaredRows(declarations: PriorWorkDeclaration[], topics: Map<string, TopicShape>): DeclaredRow[] {
+/** The day a form row's work was done: its own date, else the plan's first day. */
+function dateOf(d: PriorWorkDeclaration, fallback: Date): Date {
+  return d.date ? new Date(`${d.date}T00:00:00Z`) : fallback;
+}
+
+export function declaredRows(
+  declarations: PriorWorkDeclaration[], topics: Map<string, TopicShape>, defaultDate: Date,
+): DeclaredRow[] {
   const overridden = new Set(declarations.filter((d) => d.readingId).map((d) => d.readingId!));
   const rows: DeclaredRow[] = [];
 
@@ -120,6 +128,7 @@ export function declaredRows(declarations: PriorWorkDeclaration[], topics: Map<s
             questionsCorrect: 0,
             declaredRead: false,
             declaredWatched: false,
+            date: dateOf(d, defaultDate),
           };
           bySource.set(key, row);
         }
@@ -162,10 +171,13 @@ export function scopeReadingIds(declarations: PriorWorkDeclaration[], topics: Ma
 
 export type DeclaredStep = {
   readingId: string; step: 1 | 2; confidence: number | null; answered: number | null; correct: number | null;
+  date: Date;
 };
 
 /** The prior-work form as engine self-states: any read or watch is step 1, answered questions are step 2. */
-export function declaredSteps(declarations: PriorWorkDeclaration[], topics: Map<string, TopicShape>): DeclaredStep[] {
+export function declaredSteps(
+  declarations: PriorWorkDeclaration[], topics: Map<string, TopicShape>, defaultDate: Date,
+): DeclaredStep[] {
   const out: DeclaredStep[] = [];
   for (const { d, readings } of scopeReadings(declarations, topics)) {
     if (readings.length === 0) continue;
@@ -175,10 +187,10 @@ export function declaredSteps(declarations: PriorWorkDeclaration[], topics: Map<
     const c = spread(correct, readings.length);
     readings.forEach((r, i) => {
       if (d.notesFrom || d.videosFrom) {
-        out.push({ readingId: r.id, step: 1, confidence: d.confidence ?? 3, answered: null, correct: null });
+        out.push({ readingId: r.id, step: 1, confidence: d.confidence ?? 3, answered: null, correct: null, date: dateOf(d, defaultDate) });
       }
       if (a[i]! > 0) {
-        out.push({ readingId: r.id, step: 2, confidence: null, answered: a[i]!, correct: Math.min(a[i]!, c[i]!) });
+        out.push({ readingId: r.id, step: 2, confidence: null, answered: a[i]!, correct: Math.min(a[i]!, c[i]!), date: dateOf(d, defaultDate) });
       }
     });
   }

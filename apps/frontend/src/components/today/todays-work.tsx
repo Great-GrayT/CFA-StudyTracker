@@ -14,6 +14,9 @@ import {
 import { DeclareSheet, type DeclareTarget } from "@/components/record/declare-sheet";
 import { stepForTask } from "@/lib/record";
 import { useState } from "react";
+import { useProjection } from "@/lib/hooks";
+import { findModule, questionStats } from "@/lib/question-stats";
+import { QuestionStatsBlock } from "./question-stats";
 import { useRecord } from "@/components/record/record-provider";
 import { useUndoRecord } from "@/components/record/use-undo-record";
 import { cn } from "@/lib/utils";
@@ -128,12 +131,27 @@ function WorkRow({
   const moduleName = [task.topicName, task.moduleTitle].filter(Boolean).join(", ") || "Unassigned work";
   const step = stepForTask(task);
   const readingId = task.readingIds[0];
+  // Question rows of step 2 and 4 carry the module's numbers; the projection is shared across rows.
+  const statStep = task.kind === "questions" && (step === 2 || step === 4) ? step : null;
+  const projection = useProjection(statStep && readingId ? planId : undefined);
+  const mod = statStep ? findModule(projection.data, readingId) : undefined;
+  const stats = statStep
+    ? questionStats(
+        statStep,
+        statStep === 2 ? mod?.performance.s2 : mod?.performance.s4,
+        mod?.totals,
+        mod?.performance.s2,
+        mod?.performance.s4,
+        task.extraReason ? (task.questionCount ?? 0) : null,
+      )
+    : null;
   const canDeclare = !recorded && !task.offPlan && step !== null && !!readingId;
 
   return (
     <li
       className={cn(
-        "border-border flex min-h-11 flex-wrap items-center gap-x-3 gap-y-1 border-b py-1.5 md:min-h-9 md:flex-nowrap md:py-1",
+        "border-border flex min-h-11 flex-wrap items-center gap-x-3 gap-y-1 border-b py-1.5 md:min-h-9 md:py-1",
+        stats ? "lg:flex-nowrap" : "md:flex-nowrap",
         // Settles into its recorded look rather than snapping.
         "transition-colors duration-(--dur-move) ease-(--ease-settle) motion-reduce:transition-none",
       )}
@@ -167,6 +185,8 @@ function WorkRow({
           ) : null}
         </span>
       ) : null}
+
+      {stats ? <QuestionStatsBlock stats={stats} /> : null}
 
       <span className="text-muted-foreground shrink-0 text-right text-[13px] tabular-nums md:w-24">
         {done

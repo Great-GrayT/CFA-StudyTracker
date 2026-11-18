@@ -142,7 +142,7 @@ describe("remainingWork", () => {
 
   it("low-confidence step 1 is replaced by half-time review work", () => {
     const cat = [mod([bank("uw", 200)])];
-    const w = remainingWork(cat, deriveState(cat, [], [{ readingId: "r1", step: 1, confidence: 2, answered: null, correct: null }], []));
+    const w = remainingWork(cat, deriveState(cat, [], [{ readingId: "r1", step: 1, confidence: 2, answered: null, correct: null, date: "2026-01-01" }], []));
     expect(w[0].kind).toBe("read");
     expect(w[0].minutes).toBe(30);
   });

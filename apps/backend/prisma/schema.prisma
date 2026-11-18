@@ -415,6 +415,8 @@ model StepDeclaration {
   confidence Int?
   answered   Int?
   correct    Int?
+  // The day the work was done, UTC midnight like PlanTask.date. Defaults to the plan's first day.
+  date       DateTime
   createdAt  DateTime  @default(now())
   plan       StudyPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
   @@unique([planId, readingId, step])

@@ -7,7 +7,8 @@ import { OfflineLine, regionState } from "@/components/states/region-states";
 import { StartingPoint } from "@/components/plan/starting-point";
 import { ApiError } from "@/lib/api";
 import { useCurriculum, useDeclarations, useDeclare, useRemoveDeclaration } from "@/lib/hooks";
-import { itemsError } from "@/lib/starting-point";
+import { dateError, defaultDeclaredDate, itemsError, todayIn } from "@/lib/starting-point";
+import { dayText } from "@/lib/history";
 import { useOnline } from "@/hooks/use-online";
 import type { DeclarationItem, Plan } from "@/lib/types";
 
@@ -26,7 +27,8 @@ export function PriorWorkForm({ plan, onSaved }: { plan: Plan; onSaved?: () => v
   const [error, setError] = useState<string | null>(null);
 
   const states = [curriculum, stored].map(regionState);
-  const msg = itemsError(draft);
+  const today = todayIn(plan.timeZone);
+  const msg = itemsError(draft) ?? dateError(draft, stored.data ?? [], today);
 
   async function removeStored(item: DeclarationItem) {
     setError(null);
@@ -43,7 +45,9 @@ export function PriorWorkForm({ plan, onSaved }: { plan: Plan; onSaved?: () => v
     setError(null);
     try {
       await declare.mutateAsync(draft);
-      toast.success("Saved. The days ahead have been replanned around it.");
+      toast.success(
+        `Saved. The plan was rebuilt from today with this work counted on ${[...new Set(draft.map((d) => d.date).filter(Boolean))].map((d) => dayText(d!)).join(", ")}.`,
+      );
       setDraft([]);
       onSaved?.();
     } catch (err) {
@@ -63,6 +67,8 @@ export function PriorWorkForm({ plan, onSaved }: { plan: Plan; onSaved?: () => v
         loading={states.some((s) => s.loading)}
         failed={states.some((s) => s.error) && !(curriculum.data && stored.data)}
         onChange={setDraft}
+        defaultDate={defaultDeclaredDate(plan.startDate, today)}
+        maxDate={today}
       />
       {error ? (
         <p className="text-alarm-ink text-[13px]" role="alert">

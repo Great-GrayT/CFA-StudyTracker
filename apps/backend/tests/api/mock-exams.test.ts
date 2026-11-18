@@ -4,7 +4,7 @@ import { readJson } from "../helpers/request";
 import { registerUser, setupUserWithPlan, authedRequest } from "../helpers/fixtures";
 import { db } from "../../src/lib/db";
 import { POST, GET } from "../../src/app/api/mock-exams/route";
-import { DELETE } from "../../src/app/api/mock-exams/[id]/route";
+import { DELETE, PATCH } from "../../src/app/api/mock-exams/[id]/route";
 
 beforeEach(resetDb);
 
@@ -154,4 +154,45 @@ test("totals must equal the session's question count when it is known", async ()
     }),
   );
   expect(res.status).toBe(400);
+});
+
+test("PATCH /api/mock-exams/:id edits date and topic scores and rederives the score", async () => {
+  const { user, plan } = await setupUserWithPlan();
+  const [a, b] = await twoTopics(plan.id);
+  const mock = await readJson(await POST(authedRequest(user, "/api/mock-exams", {
+    planId: plan.id, date: "2026-11-01",
+    topicScores: [{ topicId: a, answered: 10, correct: 5 }, { topicId: b, answered: 10, correct: 7 }],
+  })));
+  const res = await PATCH(authedRequest(user, `/api/mock-exams/${mock.id}`, {
+    date: "2026-11-02", topicScores: [{ topicId: a, answered: 10, correct: 8 }, { topicId: b, answered: 10, correct: 8 }],
+  }, "PATCH"));
+  expect(res.status).toBe(200);
+  const row = await db.mockExam.findUniqueOrThrow({ where: { id: mock.id }, include: { topicScores: true } });
+  expect(row.date.toISOString().slice(0, 10)).toBe("2026-11-02");
+  expect(row.scorePercent).toBe(80);
+  expect(row.topicScores.map((t) => t.correct).sort()).toEqual([8, 8]);
+
+  // A lone topic row upserts and leaves the other topic alone.
+  const one = await PATCH(authedRequest(user, `/api/mock-exams/${mock.id}`, {
+    topicScores: [{ topicId: a, answered: 10, correct: 10 }],
+  }, "PATCH"));
+  expect(one.status).toBe(200);
+  const after = await db.mockExam.findUniqueOrThrow({ where: { id: mock.id }, include: { topicScores: true } });
+  expect(after.topicScores.map((t) => t.correct).sort()).toEqual([10, 8]);
+  expect(after.scorePercent).toBe(90);
+});
+
+test("PATCH /api/mock-exams/:id rejects correct above answered and foreign callers", async () => {
+  const { user, plan } = await setupUserWithPlan();
+  const [a] = await twoTopics(plan.id);
+  const mock = await readJson(await POST(authedRequest(user, "/api/mock-exams", { planId: plan.id, date: "2026-11-01", scorePercent: 60 })));
+  const bad = await PATCH(authedRequest(user, `/api/mock-exams/${mock.id}`, {
+    topicScores: [{ topicId: a, answered: 5, correct: 6 }],
+  }, "PATCH"));
+  expect(bad.status).toBe(400);
+  const ok = await PATCH(authedRequest(user, `/api/mock-exams/${mock.id}`, { scorePercent: 70 }, "PATCH"));
+  expect(ok.status).toBe(200);
+  expect((await db.mockExam.findUniqueOrThrow({ where: { id: mock.id } })).scorePercent).toBe(70);
+  const other = await registerUser();
+  expect((await PATCH(authedRequest(other, `/api/mock-exams/${mock.id}`, { scorePercent: 10 }, "PATCH"))).status).toBe(404);
 });

@@ -1,11 +1,13 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { canState, itemsError, patchItem, setStep } from "@/lib/starting-point";
+import { applyDateToAll, canState, dateError, itemsError, patchItem, setStep } from "@/lib/starting-point";
+import { DeclaredDate } from "@/components/record/declared-date";
+import { dayText } from "@/lib/history";
 import { cn } from "@/lib/utils";
 import type { DeclarationItem, StepNo, Topic } from "@/lib/types";
 
@@ -34,6 +36,8 @@ export function StartingPoint({
   loading = false,
   failed = false,
   onRemove,
+  defaultDate,
+  maxDate,
 }: {
   topics: Topic[];
   stored: DeclarationItem[];
@@ -44,6 +48,10 @@ export function StartingPoint({
   failed?: boolean;
   /** Takes back a stored step. Omitted where nothing is stored yet. */
   onRemove?: (item: DeclarationItem) => void;
+  /** New steps start on this day: the plan's first day of study. */
+  defaultDate: string;
+  /** Last selectable day: today in the plan's zone. */
+  maxDate: string;
 }) {
   const sorted = useMemo(
     () =>
@@ -53,7 +61,8 @@ export function StartingPoint({
     [topics],
   );
   const all = useMemo(() => [...stored, ...value], [stored, value]);
-  const error = itemsError(value);
+  const [applyAll, setApplyAll] = useState(defaultDate);
+  const error = itemsError(value) ?? dateError(value, stored, maxDate);
 
   if (loading) return <Skeleton aria-label="Loading modules" className="h-40 w-full rounded-none" />;
   if (failed) return <p className="text-alarm-ink text-[14px]">The modules did not load. Reload to try again.</p>;
@@ -63,10 +72,28 @@ export function StartingPoint({
       <div>
         <h2 className="text-[16px] font-semibold">Starting point</h2>
         <p className="text-muted-foreground max-w-prose text-[14px]">
-          Tick each step you already finished for a module. The plan skips it and plans what is left. Remove a saved step to have it planned again. Review reading
+          Tick each step you already finished for a module and say when. It counts as real study on that day, the plan skips it and plans what is left. Remove a saved step to have it planned again. Review reading
           opens after the first read, and review questions after the first questions.
         </p>
       </div>
+
+      {value.length >= 4 ? (
+        <div className="border-border flex flex-wrap items-end gap-x-4 gap-y-2 border-t pt-3">
+          <DeclaredDate
+            id="sp-all-date"
+            label="Date for every stated step"
+            hint="Replaces the date on each step you ticked below."
+            value={applyAll}
+            max={maxDate}
+            onChange={(d) => {
+              setApplyAll(d);
+              onChange(applyDateToAll(value, d));
+            }}
+            disabled={disabled}
+            className="w-full sm:w-64"
+          />
+        </div>
+      ) : null}
 
       <div className="border-border border-t">
         {sorted.map((topic) => {
@@ -98,14 +125,14 @@ export function StartingPoint({
                               id={id}
                               checked={on}
                               disabled={disabled || isStored || (!on && !open)}
-                              onCheckedChange={(v) => onChange(setStep(value, r.id, step, v === true))}
+                              onCheckedChange={(v) => onChange(setStep(value, r.id, step, v === true, defaultDate))}
                             />
                             <Label
                               htmlFor={id}
                               className={cn("text-[13px] font-normal", !on && !open && "text-muted-foreground")}
                             >
                               {label}
-                              {isStored ? " (saved)" : ""}
+                              {isStored ? ` (saved${find(stored, r.id, step)?.date ? `, ${dayText(find(stored, r.id, step)!.date!)}` : ""})` : ""}
                             </Label>
                             {isStored && onRemove ? (
                               <button
@@ -131,6 +158,7 @@ export function StartingPoint({
                           label={label}
                           item={it}
                           disabled={disabled}
+                          maxDate={maxDate}
                           onPatch={(p) => onChange(patchItem(value, r.id, step, p))}
                         />
                       );
@@ -151,7 +179,39 @@ export function StartingPoint({
   );
 }
 
+/** One stated step's results plus the day it counts on. */
 function Detail({
+  label,
+  item,
+  disabled,
+  maxDate,
+  onPatch,
+}: {
+  label: string;
+  item: DeclarationItem;
+  disabled: boolean;
+  maxDate: string;
+  onPatch: (p: Partial<Pick<DeclarationItem, "confidence" | "answered" | "correct" | "date">>) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <DetailFields label={label} item={item} disabled={disabled} onPatch={onPatch} />
+      <DeclaredDate
+        id={`sp-${item.readingId}-${item.step}-date`}
+        label={`${label}: when did you do it?`}
+        hint={null}
+        compact
+        value={item.date ?? maxDate}
+        max={maxDate}
+        disabled={disabled}
+        onChange={(date) => onPatch({ date })}
+        className="pl-6 sm:max-w-xs"
+      />
+    </div>
+  );
+}
+
+function DetailFields({
   label,
   item,
   disabled,
@@ -160,7 +220,7 @@ function Detail({
   label: string;
   item: DeclarationItem;
   disabled: boolean;
-  onPatch: (p: Partial<Pick<DeclarationItem, "confidence" | "answered" | "correct">>) => void;
+  onPatch: (p: Partial<Pick<DeclarationItem, "confidence" | "answered" | "correct" | "date">>) => void;
 }) {
   const base = `sp-${item.readingId}-${item.step}`;
   const num = (v: string) => (v === "" ? undefined : Math.max(0, Math.floor(Number(v))));

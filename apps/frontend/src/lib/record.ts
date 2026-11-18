@@ -102,9 +102,9 @@ export function declarationError(items: { readingId: string; step: StepNo }[], d
 export function declarationItem(
   readingId: string,
   step: StepNo,
-  f: { confidence: number; answered: string; correct: string },
+  f: { confidence: number; answered: string; correct: string; date?: string },
 ): DeclarationItem {
-  const item: DeclarationItem = { readingId, step };
+  const item: DeclarationItem = { readingId, step, ...(f.date ? { date: f.date } : {}) };
   if (step === 1 || step === 3) {
     if (f.confidence >= 1) item.confidence = f.confidence;
   } else if (f.answered !== "" && WHOLE.test(f.answered)) {

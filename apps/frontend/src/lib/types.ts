@@ -304,7 +304,15 @@ export type StepPerformance = {
   minutes: number;
   adequateMin: number;
   passed: boolean;
+  /** m: questions that fill adequateMin at perQ minutes each. Optional so an older server still renders. */
+  adequateQ?: number;
+  /** q: pending extra questions the plan holds for this round. */
+  extraPendingQ?: number;
+  /** Minutes per question including answer review. */
+  perQ?: number;
 };
+/** Module-wide question totals; mock counts are the topic's, as mocks are scored per topic. */
+export type ModuleTotals = { answered: number; correct: number; mockAnswered: number; mockCorrect: number };
 export type Tally = { answered: number; correct: number };
 export type ProjectionSection = {
   topicId: string;
@@ -322,6 +330,7 @@ export type ProjectionSection = {
     name: string;
     windows: ProjectionWindow[];
     performance: { s2: StepPerformance | null; s4: StepPerformance | null };
+    totals?: ModuleTotals;
   }[];
   performance: {
     initial: Tally | null;
@@ -371,6 +380,8 @@ export type DeclarationItem = {
   confidence?: number;
   answered?: number;
   correct?: number;
+  /** YYYY-MM-DD the work was done. The server defaults it to the plan's first day. */
+  date?: string;
 };
 export type MockSession = {
   ref: string;
@@ -385,4 +396,76 @@ export type PlanSettingsPatch = {
   stepPriority?: Record<string, string[]>;
   lesReadingHours?: number;
   belowPassAccepted?: boolean;
+};
+
+// GET plans/:id/history?topicId=X: everything done per module and engine step.
+export type HistoryMaterial = { label: string; url: string | null };
+export type HistoryTaskRecord = {
+  type: "task";
+  id: string;
+  date: string;
+  recordedAt: string;
+  kind: string;
+  step: number | null;
+  round: number | null;
+  status: "done" | "partial";
+  offPlan: boolean;
+  extraReason: string | null;
+  packageId: string | null;
+  packageName: string | null;
+  materials: HistoryMaterial[];
+  estimatedMinutes: number;
+  actualMinutes: number | null;
+  answerReviewDone: boolean;
+  answerReviewMinutes: number | null;
+  answered: number;
+  correct: number;
+  confidence: number | null;
+  note: string | null;
+};
+export type HistoryDeclarationRecord = {
+  type: "declaration";
+  step: StepNo;
+  /** YYYY-MM-DD the self-stated work counts on; records are sorted by it. */
+  date: string;
+  createdAt: string;
+  updatedAt: string;
+  confidence: number | null;
+  answered: number | null;
+  correct: number | null;
+};
+export type HistoryRecord = HistoryTaskRecord | HistoryDeclarationRecord;
+export type HistoryQuestions = {
+  n: number;
+  m: number;
+  q: number;
+  answered: number;
+  correct: number;
+  adequateMin: number;
+  minutes: number;
+  passed: boolean;
+};
+export type HistoryStep = {
+  step: StepNo;
+  status: "done" | "in-progress" | "not-started";
+  round: number | null;
+  doneMin: number;
+  targetMin: number;
+  questions: HistoryQuestions | null;
+  records: HistoryRecord[];
+};
+export type HistoryMock = {
+  id: string;
+  date: string;
+  createdAt: string;
+  sessionRef: string | null;
+  packageName: string | null;
+  scorePercent: number;
+  answered: number;
+  correct: number;
+};
+export type HistoryResponse = {
+  topicId: string;
+  mocks: HistoryMock[];
+  modules: { readingId: string; name: string; order: number; steps: HistoryStep[] }[];
 };
