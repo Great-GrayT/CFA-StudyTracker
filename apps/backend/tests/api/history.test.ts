@@ -91,6 +91,8 @@ describe("GET /api/plans/:id/history", () => {
       offPlan: false, answered: 20, correct: 10, confidence: 4, note: "hard", answerReviewDone: true,
     });
     expect(Array.isArray(s2.records[0].materials)).toBe(true);
+    // A real timestamp (when it was recorded), not the task's midnight date.
+    expect(s2.records[0].recordedAt.endsWith("T00:00:00.000Z")).toBe(false);
     expect(mod.steps[0].records).toHaveLength(1);
     expect(mod.steps[0].records[0]).toMatchObject({ type: "declaration", step: 1, confidence: 5, date: "2027-01-02" });
     expect(h.mocks).toHaveLength(1);

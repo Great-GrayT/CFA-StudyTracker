@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   deleteEffect,
+  extraReasonLabel,
   minutesText,
   mockFormError,
   questionProgress,
@@ -43,7 +44,9 @@ describe("sourceOf", () => {
   test("names each origin", () => {
     expect(sourceOf(task()).label).toBe("Recorded");
     expect(sourceOf(task({ offPlan: true })).kind).toBe("off-plan");
-    expect(sourceOf(task({ extraReason: "below 80%" })).label).toBe("Extra: below 80%");
+    expect(sourceOf(task({ extraReason: "top-up-80" })).label).toBe("Extra: Accuracy top-up");
+    expect(extraReasonLabel("answer-review-owed")).toBe("Owed answer review");
+    expect(extraReasonLabel("new-thing")).toBe("New thing");
     expect(
       sourceOf({ type: "declaration", step: 1, date: "2026-10-01", createdAt: "", updatedAt: "", confidence: 3, answered: null, correct: null }).label,
     ).toBe("Self-stated");

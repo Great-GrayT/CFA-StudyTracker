@@ -200,14 +200,14 @@ function TaskFormBody({ planId, rec, onClose }: { planId: string; rec: HistoryTa
           </Field>
         </div>
 
-        <div className="grid grid-cols-[1fr_7rem] items-end gap-3">
-          <fieldset>
-            <legend className="mb-1.5 text-[13px] font-medium">Status</legend>
+        <div className="grid grid-cols-[1fr_7rem] items-start gap-3">
+          <fieldset className="space-y-1.5">
+            <legend className="mb-1.5 text-[13px] leading-none font-medium">Status</legend>
             <RadioGroup
               aria-label="Status"
               value={f.status}
               onValueChange={(v) => set("status", v as TaskForm["status"])}
-              className="flex gap-5"
+              className="flex h-9 items-center gap-5 max-md:h-11"
             >
               <div className="flex items-center gap-2">
                 <RadioGroupItem id="et-done" value="done" />

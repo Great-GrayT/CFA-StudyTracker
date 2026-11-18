@@ -10,6 +10,7 @@ import { usePrescription, useProjection } from "@/lib/hooks";
 import { heatLevel, isMissed, monthCells, monthOf, monthPlannedMin, shiftMonth } from "@/lib/calendar";
 import { kindLabel, minutesShort } from "@/lib/today";
 import type { Plan, PrescribedTask, Projection } from "@/lib/types";
+import { extraReasonLabel } from "@/lib/history";
 import { cn } from "@/lib/utils";
 import { useOnline } from "@/hooks/use-online";
 
@@ -246,7 +247,7 @@ function TaskLine({
         ) : (
           [task.topicName, task.moduleTitle].filter(Boolean).join(", ") || "Unassigned work"
         )}
-        {task.extraReason ? <span className="text-muted-foreground"> (extra: {task.extraReason})</span> : null}
+        {task.extraReason ? <span className="text-muted-foreground"> (extra: {extraReasonLabel(task.extraReason).toLowerCase()})</span> : null}
       </span>
       <span className="text-muted-foreground text-[13px] tabular-nums">
         {done ? `done ${minutesShort(task.actualMinutes ?? task.estimatedMinutes)}` : minutesShort(task.estimatedMinutes)}

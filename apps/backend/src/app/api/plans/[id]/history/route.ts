@@ -4,7 +4,7 @@ import { requireUser } from "../../../../../lib/FUNC-auth";
 import { todayIn } from "../../../../../lib/FUNC-today";
 import { generateHorizon } from "../../../../../lib/FUNC-schedule";
 import { resolveMaterials } from "../../../../../lib/FUNC-prescription";
-import { adequateQuestions, owedExtraQuestions, stepOf } from "../../../../../lib/FUNC-projection";
+import { owedExtraQuestions, questionStats, stepOf } from "../../../../../lib/FUNC-projection";
 import { plannedMinutes } from "../../../../../core/steps/metrics";
 import { adequateMinutes } from "../../../../../core/steps/catalog";
 import { OFF_PLAN } from "../../../../../core/task-credit";
@@ -40,7 +40,7 @@ export async function GET(req: Request): Promise<Response> {
     db.planTask.findMany({
       where: { planId, status: { in: ["done", "partial"] }, readingIds: { hasSome: readingIds } },
       orderBy: [{ date: "desc" }, { order: "desc" }],
-      include: { logs: { select: { date: true, confidence: true, questionsAnswered: true, questionsCorrect: true, note: true, los: { select: { readingId: true } } } } },
+      include: { logs: { select: { updatedAt: true, confidence: true, questionsAnswered: true, questionsCorrect: true, note: true, los: { select: { readingId: true } } } } },
     }),
     db.stepDeclaration.findMany({ where: { planId, readingId: { in: readingIds } } }),
     db.mockExam.findMany({
@@ -78,7 +78,7 @@ export async function GET(req: Request): Promise<Response> {
     const steps = STEPS.map((step) => {
       const taskRecs = mine.filter((t) => stepOf(t) === step).map((t) => {
         const logs = t.logs.filter((l) => l.los.readingId === m.readingId);
-        const latest = t.logs.reduce<Date | null>((a, l) => (!a || l.date > a ? l.date : a), null);
+        const latest = t.logs.reduce<Date | null>((a, l) => (!a || l.updatedAt > a ? l.updatedAt : a), null);
         const recordedAt = (latest ?? t.updatedAt).toISOString();
         return {
           day: iso(t.date), sort: Date.parse(recordedAt),
@@ -113,9 +113,9 @@ export async function GET(req: Request): Promise<Response> {
       const status = passed ? "done" as const
         : doneMin > 0 || (r?.answered ?? 0) > 0 || records.length > 0 ? "in-progress" as const : "not-started" as const;
       const questions = r ? (() => {
-        const { adequateQ } = adequateQuestions(m, step as 2 | 4);
+        const { adequateQ, extraPendingQ } = questionStats(m, step as 2 | 4, st, owedQ);
         return {
-          n: r.answered, m: adequateQ, q: owedQ.get(`${m.readingId}|${step}|${r.round}`) ?? 0,
+          n: r.answered, m: adequateQ, q: extraPendingQ,
           answered: r.answered, correct: r.correct, adequateMin: Math.round(adequateMinutes(m, step as 2 | 4)),
           minutes: Math.round(r.minutes), passed: r.passed,
         };

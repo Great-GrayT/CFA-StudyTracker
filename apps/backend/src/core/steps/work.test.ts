@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { remainingWork } from "./work";
+import { adequacyNeeded, adequateQuestionCount, remainingWork } from "./work";
 import { deriveState, type HistoryTask } from "./state";
 import type { ModuleCatalog, SourceOption } from "./types";
 
@@ -145,5 +145,44 @@ describe("remainingWork", () => {
     const w = remainingWork(cat, deriveState(cat, [], [{ readingId: "r1", step: 1, confidence: 2, answered: null, correct: null, date: "2026-01-01" }], []));
     expect(w[0].kind).toBe("read");
     expect(w[0].minutes).toBe(30);
+  });
+
+  describe("adequacy sized in minutes per allocated package", () => {
+    // adequate2 = 60.6 min. uw costs 5.065 min a question, kaplan 4.0, and the uw bank is spent.
+    const priced = (slug: string, questions: number, perQ: number): SourceOption => ({
+      ...bank(slug, questions), minutesPerQuestion: perQ - 1.165, answerReviewPerQuestion: 1.165,
+    });
+    const cat = (): ModuleCatalog[] => [{
+      readingId: "r1", topicId: "t1", topicOrder: 1, readingOrder: 1, examWeight: 0.1,
+      options: { 1: [read("mm", 30.3)], 2: [priced("uw", 8, 5.065), { ...bank("kap", 500) }], 3: [read("mm", 10)], 4: [bank("kap", 500)] },
+    }];
+    const stated = [{ readingId: "r1", step: 2 as const, confidence: null, answered: 8, correct: 7, date: "2026-01-01" }];
+    const stateOf = (tasks: HistoryTask[] = []) => deriveState(cat(), tasks, stated, []);
+
+    it("one rebuild plans enough to pass, and recording it leaves no further top-up", () => {
+      const q = remainingWork(cat(), stateOf()).filter((i) => i.step === 2 && i.kind === "questions");
+      expect(q).toHaveLength(1);
+      expect(q[0].packageId).toBe("p-kap");
+      expect(q[0].questions).toBe(6);
+      expect(q[0].extraReason).toBe("top-up-adequacy");
+
+      const done = task({
+        kind: "questions", step: 2, minutes: 18, answered: 6, correct: 6, packageSlug: "kap", date: "2026-01-02",
+      });
+      const st = stateOf([done]);
+      expect(st.get("r1")!.s2.passed).toBe(true);
+      expect(remainingWork(cat(), st).filter((i) => i.step === 2)).toEqual([]);
+    });
+
+    it("adequateQuestionCount: passed is capped by answered, otherwise answered plus what is still needed", () => {
+      const m = cat()[0];
+      const st = stateOf().get("r1")!;
+      expect(adequacyNeeded(m, 2, st)).toBe(6);
+      expect(adequateQuestionCount(m, 2, st)).toBe(14);
+      const passed = stateOf([task({
+        kind: "questions", step: 2, minutes: 18, answered: 6, correct: 6, packageSlug: "kap", date: "2026-01-02",
+      })]).get("r1")!;
+      expect(adequateQuestionCount(m, 2, passed)).toBe(12); // min(14 answered, ceil(60.6 / 5.065))
+    });
   });
 });

@@ -22,13 +22,28 @@ export const CONF_WORD = ["Shaky", "Unsure", "Fair", "Solid", "Sure"];
 
 export const isQuestionStep = (step: number) => step === 2 || step === 4;
 
+const EXTRA_REASONS: Record<string, string> = {
+  "top-up-80": "Accuracy top-up",
+  "top-up-adequacy": "Adequacy top-up",
+  "exemption-review": "Exemption review",
+  "mock-retest": "Mock retest",
+  "answer-review-owed": "Owed answer review",
+};
+
+/** Why an extra task exists, in the candidate's words; an unknown code is made readable, not hidden. */
+export function extraReasonLabel(reason: string): string {
+  if (EXTRA_REASONS[reason]) return EXTRA_REASONS[reason];
+  const words = reason.replace(/[-_]/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 export type SourceKind = "recorded" | "self" | "off-plan" | "extra";
 
 /** Where a record came from, as the badge shows it. */
 export function sourceOf(rec: HistoryRecord): { kind: SourceKind; label: string } {
   if (rec.type === "declaration") return { kind: "self", label: "Self-stated" };
   if (rec.offPlan) return { kind: "off-plan", label: "Off plan" };
-  if (rec.extraReason) return { kind: "extra", label: `Extra: ${rec.extraReason}` };
+  if (rec.extraReason) return { kind: "extra", label: `Extra: ${extraReasonLabel(rec.extraReason)}` };
   return { kind: "recorded", label: "Recorded" };
 }
 
@@ -226,13 +241,13 @@ export type DeclarationLike = Pick<HistoryDeclarationRecord, "step" | "date" | "
 export function stepStats(s: HistoryStep): { progress: Stat; round: Stat | null; overall: Stat | null } | null {
   const q = s.questions;
   if (!q) return null;
-  const metTime = q.minutes >= q.adequateMin - 1e-6;
+  const metTime = q.n >= q.m;
   const progress: Stat = {
     text: questionProgress(q),
     met: metTime,
     hint: `${q.n} answered this round of ${q.m} needed${q.q > 0 ? `, plus ${q.q} extra` : ""}. ${
-      metTime ? "Enough time spent" : "Not yet enough time spent"
-    }: adequate means ${q.adequateMin} minutes of questions and answer review.`,
+      metTime ? "Enough questions for this round" : "Not enough questions yet"
+    }: adequate means ${q.m} questions, about ${q.adequateMin} minutes with answer review.`,
   };
   const rate = (label: string, correct: number, answered: number, scope: string): Stat | null => {
     const p = ratePercent(correct, answered);

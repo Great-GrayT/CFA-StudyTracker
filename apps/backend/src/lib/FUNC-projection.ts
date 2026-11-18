@@ -4,7 +4,9 @@
 import { db } from "./db";
 import { generateHorizon, horizonVersion, type HorizonResult } from "./FUNC-schedule";
 import { adequateMinutes } from "../core/steps/catalog";
-import { EPS, MIN_PER_QUESTION } from "../core/steps/rules";
+import { MIN_PER_QUESTION } from "../core/steps/rules";
+import { adequacyNeeded, adequateQuestionCount } from "../core/steps/work";
+import type { ModuleState } from "../core/steps/state";
 import { declaredMinutes } from "../core/steps/declared-credit";
 import { plannedMinutes } from "../core/steps/metrics";
 import { EXTRA_REASONS } from "../core/steps/work";
@@ -64,17 +66,12 @@ export function stepOf(t: { step: number | null; kind: string }): number {
   return 5;
 }
 
-/** Same rate `work.ts` sizes question sets with, and the question count that reaches adequacy at it. */
-export function adequateQuestions(m: HorizonResult["catalog"][number], step: 2 | 4): { adequateQ: number; perQ: number } {
-  const o = m.options[step][0];
-  if (!o) return { adequateQ: 0, perQ: 0 };
-  const perQ = (o.minutesPerQuestion ?? MIN_PER_QUESTION) + (o.answerReviewPerQuestion ?? MIN_PER_QUESTION / 3);
-  return { adequateQ: perQ > 0 ? Math.ceil(adequateMinutes(m, step) / perQ - EPS) : 0, perQ };
-}
+const PENALTY_REASONS: ReadonlySet<string> = new Set(["top-up-80", "exemption-review", "mock-retest"]);
 
 /**
- * Still-owed top-up questions keyed readingId|step|round. The dry run covers placed and unplaced
- * work, and one item can span several days, so each id is counted once.
+ * Still-owed penalty questions keyed readingId|step|round: planned and unplaced question items
+ * tagged top-up-80, exemption-review or mock-retest. top-up-adequacy is part of m, not a penalty.
+ * One item can span several days, so each id is counted once.
  */
 export function owedExtraQuestions(hz: HorizonResult): Map<string, number> {
   const owedQ = new Map<string, number>();
@@ -82,11 +79,29 @@ export function owedExtraQuestions(hz: HorizonResult): Map<string, number> {
   for (const it of [...hz.tasks.map((t) => t.item), ...hz.unplaced]) {
     if (seen.has(it.id)) continue;
     seen.add(it.id);
-    if (!it.extraReason || it.kind !== "questions" || (it.step !== 2 && it.step !== 4)) continue;
+    if (!it.extraReason || !PENALTY_REASONS.has(it.extraReason) || it.kind !== "questions" || (it.step !== 2 && it.step !== 4)) continue;
     const k = `${it.readingId}|${it.step}|${it.round}`;
     owedQ.set(k, (owedQ.get(k) ?? 0) + (it.questions ?? 0));
   }
   return owedQ;
+}
+
+/**
+ * m: questions the round needs for adequacy (shared with the engine's sizing). q: owed penalty
+ * questions beyond the adequacy part, since one item covers both when accuracy sets the count.
+ */
+export function questionStats(
+  m: HorizonResult["catalog"][number], step: 2 | 4, st: ModuleState, owedQ: Map<string, number>,
+): { adequateQ: number; extraPendingQ: number; perQ: number } {
+  const o = m.options[step][0];
+  const perQ = o ? (o.minutesPerQuestion ?? MIN_PER_QUESTION) + (o.answerReviewPerQuestion ?? MIN_PER_QUESTION / 3) : 0;
+  const r = step === 2 ? st.s2 : st.s4;
+  const owed = owedQ.get(`${m.readingId}|${step}|${r.round}`) ?? 0;
+  return {
+    adequateQ: adequateQuestionCount(m, step, st),
+    extraPendingQ: Math.max(0, owed - adequacyNeeded(m, step, st)),
+    perQ,
+  };
 }
 
 const CACHE_MAX = 200;
@@ -272,16 +287,16 @@ export async function buildProjection(planId: string, today: string): Promise<Pr
 
   // Null until the step has an attempt or is passed, so the table shows a dash rather than 0 of 0.
   const stepPerf = (m: (typeof hz.catalog)[number], step: 2 | 4): StepPerformance | null => {
-    const r = hz.state.get(m.readingId)?.[step === 2 ? "s2" : "s4"];
-    const { adequateQ, perQ } = adequateQuestions(m, step);
+    const st = hz.state.get(m.readingId);
+    const r = st?.[step === 2 ? "s2" : "s4"];
+    if (!st || !r) return null;
+    const { adequateQ, extraPendingQ, perQ } = questionStats(m, step, st, owedQ);
     // Shown from the start when the step has a question option, so Today can say 0 of m.
-    if (!r || (adequateQ <= 0 && !r.passed && r.answered === 0 && r.minutes === 0)) return null;
+    if ((adequateQ <= 0 && !r.passed && r.answered === 0 && r.minutes === 0)) return null;
     return {
       round: r.round, answered: r.answered, correct: r.correct, minutes: Math.round(r.minutes),
       adequateMin: Math.round(adequateMinutes(m, step)), passed: r.passed,
-      adequateQ,
-      extraPendingQ: owedQ.get(`${m.readingId}|${step}|${r.round}`) ?? 0,
-      perQ,
+      adequateQ, extraPendingQ, perQ,
     };
   };
 

@@ -15,7 +15,7 @@ import { DeclareSheet, type DeclareTarget } from "@/components/record/declare-sh
 import { stepForTask } from "@/lib/record";
 import { useState } from "react";
 import { useProjection } from "@/lib/hooks";
-import { findModule, questionStats } from "@/lib/question-stats";
+import { findModule, penaltyExtraQuestions, questionStats } from "@/lib/question-stats";
 import { QuestionStatsBlock } from "./question-stats";
 import { useRecord } from "@/components/record/record-provider";
 import { useUndoRecord } from "@/components/record/use-undo-record";
@@ -142,16 +142,17 @@ function WorkRow({
         mod?.totals,
         mod?.performance.s2,
         mod?.performance.s4,
-        task.extraReason ? (task.questionCount ?? 0) : null,
+        penaltyExtraQuestions(task),
       )
     : null;
   const canDeclare = !recorded && !task.offPlan && step !== null && !!readingId;
 
   return (
-    <li
+    <li className="border-border border-b">
+    {/* The main line is the same for every row; stats never share it, so they cannot squeeze the name. */}
+    <div
       className={cn(
-        "border-border flex min-h-11 flex-wrap items-center gap-x-3 gap-y-1 border-b py-1.5 md:min-h-9 md:py-1",
-        stats ? "lg:flex-nowrap" : "md:flex-nowrap",
+        "flex min-h-11 flex-wrap items-center gap-x-3 gap-y-1 py-1.5 md:min-h-9 md:flex-nowrap md:py-1",
         // Settles into its recorded look rather than snapping.
         "transition-colors duration-(--dur-move) ease-(--ease-settle) motion-reduce:transition-none",
       )}
@@ -185,8 +186,6 @@ function WorkRow({
           ) : null}
         </span>
       ) : null}
-
-      {stats ? <QuestionStatsBlock stats={stats} /> : null}
 
       <span className="text-muted-foreground shrink-0 text-right text-[13px] tabular-nums md:w-24">
         {done
@@ -240,6 +239,8 @@ function WorkRow({
           <span className="w-16" />
         )}
       </span>
+    </div>
+    {stats ? <QuestionStatsBlock stats={stats} /> : null}
     </li>
   );
 }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { questionStats, rateMet, ratePercent } from "./question-stats";
+import { penaltyExtraQuestions, questionStats, rateMet, ratePercent } from "./question-stats";
 import type { StepPerformance } from "./types";
 
 const perf = (o: Partial<StepPerformance> = {}): StepPerformance => ({
@@ -34,11 +34,11 @@ describe("questionStats", () => {
     expect(questionStats(2, perf({ adequateQ: undefined }), totals, null, null, null)).toBeNull();
   });
 
-  test("progress shows n / m and is unmet until the minutes are adequate", () => {
+  test("progress shows n / m and is met only when n reaches m", () => {
     const s = questionStats(2, perf(), totals, perf(), null, null)!;
     expect(s.progress.text).toBe("10 / 15");
     expect(s.progress.met).toBe(false);
-    const done = questionStats(2, perf({ minutes: 30 }), totals, perf(), null, null)!;
+    const done = questionStats(2, perf({ answered: 15 }), totals, perf(), null, null)!;
     expect(done.progress.met).toBe(true);
   });
 
@@ -75,5 +75,14 @@ describe("questionStats", () => {
     const s = questionStats(4, perf({ answered: 0, correct: 0 }), undefined, null, null, null)!;
     expect(s.round).toBeNull();
     expect(s.total).toBeNull();
+  });
+});
+
+describe("penaltyExtraQuestions", () => {
+  test("only penalty extras show their own count", () => {
+    expect(penaltyExtraQuestions({ extraReason: "top-up-80", questionCount: 5 })).toBe(5);
+    expect(penaltyExtraQuestions({ extraReason: "mock-retest", questionCount: null })).toBe(0);
+    expect(penaltyExtraQuestions({ extraReason: "top-up-adequacy", questionCount: 5 })).toBeNull();
+    expect(penaltyExtraQuestions({ extraReason: null, questionCount: 5 })).toBeNull();
   });
 });

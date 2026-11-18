@@ -41,23 +41,18 @@ export function StatValue({ stat, className }: { stat: Stat; className?: string 
 }
 
 /**
- * Desktop: three columns (n / m, module total, rates stacked). Below lg the
- * block drops to its own line under the row, indented past the status mark.
+ * The four numbers on their own line under the row. Indented to sit under the
+ * module name (status mark 12px + kind column 96px + three 12px gaps = 8.25rem
+ * from md up, past the mark only on mobile), and wrapping, so a narrow column
+ * costs height, never width.
  */
 export function QuestionStatsBlock({ stats }: { stats: QuestionStats }) {
   return (
-    <span
-      className={cn(
-        "flex shrink-0 items-start gap-x-4 text-[13px] tabular-nums",
-        "max-lg:order-last max-lg:basis-full max-lg:flex-wrap max-lg:pl-6",
-      )}
-    >
-      <StatValue stat={stats.progress} className="lg:w-20" />
-      {stats.total ? <StatValue stat={stats.total} className="lg:w-20" /> : <span className="lg:w-20" />}
-      <span className="flex flex-col gap-0.5 lg:w-28">
-        {stats.overall ? <StatValue stat={stats.overall} /> : null}
-        {stats.round ? <StatValue stat={stats.round} /> : null}
-      </span>
-    </span>
+    <div className="flex flex-wrap gap-x-5 gap-y-0.5 pb-1.5 pl-6 text-[13px] tabular-nums md:pl-[8.25rem]">
+      <StatValue stat={stats.progress} />
+      {stats.total ? <StatValue stat={stats.total} /> : null}
+      {stats.overall ? <StatValue stat={stats.overall} /> : null}
+      {stats.round ? <StatValue stat={stats.round} /> : null}
+    </div>
   );
 }

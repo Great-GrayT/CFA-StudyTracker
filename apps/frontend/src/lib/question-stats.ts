@@ -4,7 +4,6 @@ import type { ModuleTotals, Projection, StepPerformance } from "./types";
 // 80% accuracy, and adequacy measured in minutes (see the step engine design).
 
 export const RATE_TARGET = 80;
-const EPS = 1e-6;
 
 /** Whole-number percent, or null with nothing answered. */
 export function ratePercent(correct: number, answered: number): number | null {
@@ -32,6 +31,17 @@ export type QuestionStats = {
 };
 
 const q = (n: number) => `${n} question${n === 1 ? "" : "s"}`;
+
+const PENALTY_REASONS = new Set(["top-up-80", "exemption-review", "mock-retest"]);
+
+/**
+ * A penalty extra shows its own question count as the `+ q`. Adequacy top-ups
+ * are already folded into m, and base work has no extra, so both use the
+ * round's pending penalty pool instead (null here).
+ */
+export function penaltyExtraQuestions(task: { extraReason: string | null; questionCount: number | null }): number | null {
+  return task.extraReason && PENALTY_REASONS.has(task.extraReason) ? (task.questionCount ?? 0) : null;
+}
 
 export function findModule(projection: Projection | undefined, readingId: string | undefined) {
   if (!projection || !readingId) return undefined;
@@ -71,14 +81,14 @@ export function questionStats(
   if (!perf || perf.adequateQ === undefined) return null;
   const m = perf.adequateQ;
   const extra = taskExtraQ ?? perf.extraPendingQ ?? 0;
-  const met = perf.minutes >= perf.adequateMin - EPS;
+  const met = perf.answered >= m;
   const progress: Stat = {
     text: `${perf.answered} / ${m}${extra > 0 ? ` + ${extra}` : ""}`,
     met,
     hint:
       `${q(perf.answered)} answered this round of ${m} needed` +
       (extra > 0 ? `, plus ${extra} extra to firm up the round` : "") +
-      `. ${met ? "Enough time spent" : "Not yet enough time spent"}: adequate means ${perf.adequateMin} minutes of questions and answer review.`,
+      `. ${met ? "Enough questions for this round" : "Not enough questions yet"}: adequate means ${m} questions, about ${perf.adequateMin} minutes with answer review.`,
   };
 
   let total: Stat | null = null;

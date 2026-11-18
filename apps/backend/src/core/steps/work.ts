@@ -20,47 +20,99 @@ export type WorkItem = {
 
 type QState = ModuleState["s2"];
 
-// Question demand for one round. Counts are sized with the first option's
-// per-question minutes (simplest choice); a later package with other rates can
-// leave a small adequacy gap, which the next rebuild tops up.
+const rate = (o: SourceOption) => (o.minutesPerQuestion ?? MIN_PER_QUESTION) + (o.answerReviewPerQuestion ?? 1);
+const bankLeft = (o: SourceOption, used: Record<string, number>) =>
+  o.questions == null ? Infinity : Math.max(0, o.questions - (used[o.packageSlug] ?? 0));
+
+type Alloc = { o: SourceOption; idx: number; n: number };
+
+/**
+ * Spreads a question demand over the packages in priority order. The adequacy part is sized in
+ * minutes at each package's own rate, so a cheaper package later in the list asks for more
+ * questions rather than leaving a gap the next rebuild would chase one question at a time.
+ * `n80` is the accuracy part, in questions. `roomMin` caps the total so the round stops at the
+ * exemption point, never below one question.
+ */
+export function allocateQuestions(
+  opts: SourceOption[], used: Record<string, number>, n80: number, shortMin: number, roomMin = Infinity,
+): Alloc[] {
+  const alloc: Alloc[] = [];
+  let short = shortMin, n80Left = n80, room = roomMin;
+  const done = () => short <= EPS && n80Left <= 0;
+  opts.forEach((o, idx) => {
+    if (done()) return;
+    const r = rate(o);
+    const cap = r > 0 ? Math.floor(room / r + EPS) : Infinity;
+    const n = Math.min(bankLeft(o, used), cap, Math.max(r > 0 ? Math.ceil(short / r - EPS) : 0, n80Left));
+    if (n <= 0) return;
+    alloc.push({ o, idx, n });
+    short -= n * r; n80Left -= n; room -= n * r;
+  });
+  // Every bank is spent (or the room is gone) and no unlimited source is on the plan: keep it
+  // plannable on the last package rather than leaving an unplannable deficit.
+  if (!done() && opts.length && (alloc.length === 0 || room > EPS)) {
+    const idx = opts.length - 1;
+    const r = rate(opts[idx]!);
+    let n = Math.max(r > 0 ? Math.ceil(short / r - EPS) : 0, n80Left);
+    if (alloc.length === 0) n = Math.max(1, Math.min(n, Math.max(1, Math.floor(room / r + EPS))));
+    else n = Math.min(n, Math.max(0, Math.floor(room / r + EPS)));
+    if (n > 0) {
+      const hit = alloc.find((a) => a.idx === idx);
+      if (hit) hit.n += n; else alloc.push({ o: opts[idx]!, idx, n });
+    }
+  }
+  return alloc;
+}
+
+type StepState = ModuleState["s2"];
+const stepUsed = (st: ModuleState) => {
+  const used = { ...st.s2.usedByPackage };
+  for (const [k, v] of Object.entries(st.s4.usedByPackage)) used[k] = (used[k] ?? 0) + v;
+  return used;
+};
+
+/** Questions the current round still needs for adequacy alone (accuracy ignored), per-package sized. */
+export function adequacyNeeded(m: ModuleCatalog, step: 2 | 4, st: ModuleState): number {
+  const r: StepState = step === 2 ? st.s2 : st.s4;
+  const adequate = adequateMinutes(m, step);
+  if (!m.options[step].length || adequate <= 0 || r.passed) return 0;
+  const short = Math.max(0, adequate - (r.minutes + r.pendingAnswerReview));
+  return allocateQuestions(m.options[step], stepUsed(st), 0, short).reduce((a, x) => a + x.n, 0);
+}
+
+/**
+ * The question count that makes this round adequate: answered plus what adequacy still needs, or
+ * once passed, the base count (never more than was answered). A fresh round gives the planned count.
+ */
+export function adequateQuestionCount(m: ModuleCatalog, step: 2 | 4, st: ModuleState): number {
+  const r: StepState = step === 2 ? st.s2 : st.s4;
+  const o = m.options[step][0];
+  const adequate = adequateMinutes(m, step);
+  if (!o || adequate <= 0) return 0;
+  if (r.passed) return Math.min(r.answered, Math.ceil(adequate / rate(o) - EPS));
+  return r.answered + adequacyNeeded(m, step, st);
+}
+
+// Question demand for one round, sized in minutes per allocated package (see allocateQuestions).
 function questionItems(m: ModuleCatalog, step: 2 | 4, r: QState, retest: string | null,
   used: Record<string, number>, prev: string[]): WorkItem[] {
   const opts = m.options[step];
   const adequate = adequateMinutes(m, step);
   if (!opts.length || adequate <= 0) return [];
-  const rate = (o: SourceOption) => (o.minutesPerQuestion ?? MIN_PER_QUESTION) + (o.answerReviewPerQuestion ?? 1);
-  const perT = rate(opts[0]);
   const credited = r.minutes + r.pendingAnswerReview; // owed review gets planned separately
-  let need: number;
+  let alloc: Alloc[];
   let reason: ExtraReason | null = null;
   if (r.answered <= 0) {
-    need = Math.ceil(Math.max(0, adequate - credited) / perT - EPS);
+    alloc = allocateQuestions(opts, used, 0, Math.max(0, adequate - credited));
     if (step === 4 && retest) reason = "mock-retest";
   } else {
+    const perT = rate(opts[0]!);
     const { n80, nAdq } = topUpParts({ answered: r.answered, correct: r.correct, minutes: credited, adequate, perQ: perT });
-    need = Math.max(n80, nAdq);
     // Past 2x adequate minutes the exemption applies, so plan only up to that point.
-    const room = Math.floor((2 * adequate - credited) / perT + EPS);
-    need = Math.min(need, Math.max(1, room));
+    alloc = allocateQuestions(opts, used, n80, Math.max(0, adequate - credited), Math.max(0, 2 * adequate - credited));
     reason = n80 >= nAdq ? "top-up-80" : "top-up-adequacy";
   }
-  if (need <= 0) return [];
-
-  const alloc: Array<{ o: SourceOption; idx: number; n: number }> = [];
-  let left = need;
-  opts.forEach((o, idx) => {
-    if (left <= 0) return;
-    const avail = o.questions == null ? Infinity : Math.max(0, o.questions - (used[o.packageSlug] ?? 0));
-    const n = Math.min(left, avail);
-    if (n > 0) { alloc.push({ o, idx, n }); left -= n; }
-  });
-  // Every bank is spent and no unlimited source is on the plan: keep it plannable
-  // on the last package rather than leaving an unplannable deficit.
-  if (left > 0) {
-    const idx = opts.length - 1;
-    const hit = alloc.find((a) => a.idx === idx);
-    if (hit) hit.n += left; else alloc.push({ o: opts[idx], idx, n: left });
-  }
+  if (alloc.length === 0) return [];
 
   for (const a of alloc) used[a.o.packageSlug] = (used[a.o.packageSlug] ?? 0) + a.n;
 
