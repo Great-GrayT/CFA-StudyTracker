@@ -1,4 +1,4 @@
-import type { Projection, ProjectionExtra, ProjectionSection, ProjectionWindow, StepNo, Tally } from "./types";
+import type { Projection, ProjectionExtra, ProjectionSection, PlanTotals, ProjectionWindow, StepNo, Tally } from "./types";
 
 // Pure view helpers for the Pace page. Dates are YYYY-MM-DD in the plan's
 // own calendar; they are compared as UTC midnights so no time zone shifts them.
@@ -327,8 +327,6 @@ export type PerfRow = {
   extras: { taskId: string | null; text: string; reason: string; date: string | null }[];
 };
 
-const QUESTION_BAR = 0.8;
-
 /**
  * One row per module and question step that has attempts. Extras follow their
  * module and step; an extra on another step (an exemption review, say) rides
@@ -352,7 +350,7 @@ export function perfRows(p: Projection): PerfRow[] {
           answered: x.answered,
           correct: x.correct,
           accuracy: acc,
-          low: acc < QUESTION_BAR,
+          low: acc * 100 < accuracyTarget(p),
           enough: x.minutes >= x.adequateMin,
           minutes: Math.round(x.minutes),
           adequateMin: Math.round(x.adequateMin),
@@ -379,4 +377,65 @@ function extraCell(e: ProjectionExtra) {
     reason: reasonText(e.reason),
     date: e.date,
   };
+}
+
+// ---- Plan metrics ----------------------------------------------------------
+
+const DEFAULT_TARGET = 80;
+export const accuracyTarget = (p: Projection): number => p.rules?.accuracyTarget ?? DEFAULT_TARGET;
+
+/** "412 h planned, 1,840 questions, 6 mocks"; null for an older server without totals. */
+export function planTotalsLine(p: Projection): string | null {
+  const t = p.totals;
+  if (!t) return null;
+  const mocks = p.mocks.done + p.mocks.planned;
+  const parts = [`${formatHours(t.requiredMin)} planned`];
+  if (t.questions.required > 0) parts.push(`${t.questions.required.toLocaleString("en-US")} questions`);
+  if (mocks > 0) parts.push(`${mocks} mock${mocks === 1 ? "" : "s"}`);
+  return parts.join(", ");
+}
+
+/** Hours per day needed against available; short when the need exceeds what the week allows. */
+export function dailyNeed(t: PlanTotals): { needed: number; available: number; short: boolean } {
+  return { needed: t.minPerDayNeeded, available: t.minPerDayAvailable, short: t.minPerDayNeeded > t.minPerDayAvailable };
+}
+
+export type StepSlice = { key: "1" | "2" | "3" | "4" | "5"; label: string; requiredMin: number; doneMin: number; width: number; done: number };
+const SLICE_LABEL: Record<StepSlice["key"], string> = {
+  "1": STEP_LABEL[1], "2": STEP_LABEL[2], "3": STEP_LABEL[3], "4": STEP_LABEL[4], "5": "Mocks",
+};
+
+/** Required hours by step as shares of the whole bar, with each step's done share of its own slice. */
+export function stepSlices(t: PlanTotals): StepSlice[] {
+  const keys = ["1", "2", "3", "4", "5"] as const;
+  return keys.map((key) => {
+    const { requiredMin, doneMin } = t.byStep[key];
+    return {
+      key, label: SLICE_LABEL[key], requiredMin, doneMin,
+      width: t.requiredMin > 0 ? (requiredMin / t.requiredMin) * 100 : 0,
+      done: requiredMin > 0 ? clamp01(doneMin / requiredMin) : 0,
+    };
+  });
+}
+
+export type TopicMetric = {
+  topicId: string; name: string; examWeight: number;
+  plannedMin: number; doneMin: number;
+  required: number; answered: number; accuracy: number | null; below: boolean;
+};
+
+/** One row per topic. Done is passed plus spent-but-unpassed minutes, as the step bars show. */
+export function topicMetrics(p: Projection): TopicMetric[] {
+  const target = accuracyTarget(p);
+  return p.sections.map((sec) => {
+    const q = sec.questions ?? { required: 0, answered: 0, correct: 0 };
+    const a = q.answered > 0 ? q.correct / q.answered : null;
+    return {
+      topicId: sec.topicId, name: sec.name, examWeight: sec.examWeight,
+      plannedMin: sec.steps.reduce((x, st) => x + st.plannedMin, 0),
+      doneMin: sec.steps.reduce((x, st) => x + st.donePassedMin + st.spentUnpassedMin, 0),
+      required: q.required, answered: q.answered, accuracy: a,
+      below: a !== null && q.correct * 100 < target * q.answered,
+    };
+  });
 }

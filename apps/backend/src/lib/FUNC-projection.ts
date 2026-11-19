@@ -4,13 +4,14 @@
 import { db } from "./db";
 import { generateHorizon, horizonVersion, type HorizonResult } from "./FUNC-schedule";
 import { adequateMinutes } from "../core/steps/catalog";
-import { MIN_PER_QUESTION } from "../core/steps/rules";
+import { MIN_PER_QUESTION, DEFAULT_RULES, type StepRules } from "../core/steps/rules";
 import { adequacyNeeded, adequateQuestionCount } from "../core/steps/work";
 import type { ModuleState } from "../core/steps/state";
 import { declaredMinutes } from "../core/steps/declared-credit";
 import { plannedMinutes } from "../core/steps/metrics";
 import { EXTRA_REASONS } from "../core/steps/work";
 import { gateDate } from "../core/steps/schedule";
+import { addDays, diffDays } from "../core/steps/dates";
 import type { FitReport, ModuleWindow } from "../core/steps";
 import type { StepNo } from "../core/steps/types";
 
@@ -29,8 +30,17 @@ type StepKey = "1" | "2" | "3" | "4" | "5";
 export type Projection = {
   asOf: string; exam: string; gate: string;
   fit: FitReport;
+  rules: StepRules;
+  /** Whole-plan figures: steps 1-4 planned minutes plus mock minutes, questions over steps 2 and 4. */
+  totals: {
+    requiredMin: number; doneMin: number; leftMin: number;
+    byStep: Record<StepKey, { requiredMin: number; doneMin: number }>;
+    questions: { required: number; answered: number; correct: number };
+    daysLeft: number; minPerDayNeeded: number; minPerDayAvailable: number;
+  };
   sections: Array<{
     topicId: string; name: string; examWeight: number;
+    questions: { required: number; answered: number; correct: number };
     steps: Array<{ step: 1 | 2 | 3 | 4; plannedMin: number; donePassedMin: number; spentUnpassedMin: number; planTodayMin: number }>;
     modules: Array<{
       readingId: string; name: string; windows: ModuleWindow["steps"];
@@ -300,6 +310,13 @@ export async function buildProjection(planId: string, today: string): Promise<Pr
     };
   };
 
+  // Questions the plan asks for over steps 2 and 4, at the first option's rate; 0 without an option.
+  const requiredQ = (m: (typeof hz.catalog)[number]) => ([2, 4] as const).reduce((a, step) => {
+    const o = m.options[step][0];
+    const perQ = o ? (o.minutesPerQuestion ?? MIN_PER_QUESTION) + (o.answerReviewPerQuestion ?? MIN_PER_QUESTION / 3) : 0;
+    return a + (perQ > 0 ? Math.ceil(adequateMinutes(m, step) / perQ - 1e-9) : 0);
+  }, 0);
+
   const byTopic = new Map<string, typeof hz.catalog>();
   for (const m of hz.catalog) byTopic.set(m.topicId, [...(byTopic.get(m.topicId) ?? []), m]);
   const sections: Projection["sections"] = [...byTopic.entries()]
@@ -330,6 +347,11 @@ export async function buildProjection(planId: string, today: string): Promise<Pr
       const p = perf.get(topicId);
       return {
         topicId, name: topicName.get(topicId) ?? topicId, examWeight: mods[0]!.examWeight, steps,
+        questions: {
+          required: mods.reduce((a, m) => a + requiredQ(m), 0),
+          answered: mods.reduce((a, m) => a + (readingTotals.get(m.readingId)?.answered ?? 0), 0),
+          correct: mods.reduce((a, m) => a + (readingTotals.get(m.readingId)?.correct ?? 0), 0),
+        },
         modules: mods.map((m) => ({
           readingId: m.readingId, name: readingName.get(m.readingId) ?? m.readingId,
           windows: windowOf.get(m.readingId)?.steps ?? [],
@@ -384,9 +406,53 @@ export async function buildProjection(planId: string, today: string): Promise<Pr
     for (const k of ["1", "2", "3", "4", "5"] as StepKey[]) r.byStep[k] += Math.round(d.byStep[Number(k) as 1 | 2 | 3 | 4 | 5]);
   }
 
+  // ---- totals ----------------------------------------------------------------
+  // Done minutes follow the daily rows (credited plus stated), split by step.
+  const doneByStep = emptySteps();
+  for (const t of tasks) if (t.status === "done" || t.status === "partial") doneByStep[String(stepOf(t)) as StepKey] += credit(t);
+  for (const d of hz.declarations) {
+    const m = catalogOf.get(d.readingId);
+    if (m) doneByStep[String(d.step) as StepKey] += Math.round(declaredMinutes(m, d));
+  }
+  const reqByStep = emptySteps();
+  for (const s of sections) for (const st of s.steps) reqByStep[String(st.step) as StepKey] += st.plannedMin;
+  for (const d of rows.values()) reqByStep["5"] += d.byStep["5"];
+  const byStep = Object.fromEntries((["1", "2", "3", "4", "5"] as StepKey[]).map((k) => [k, {
+    requiredMin: Math.round(reqByStep[k]), doneMin: Math.round(doneByStep[k]),
+  }])) as Projection["totals"]["byStep"];
+  const requiredMin = Object.values(byStep).reduce((a, x) => a + x.requiredMin, 0);
+  const doneMin = Object.values(byStep).reduce((a, x) => a + x.doneMin, 0);
+  // The engine's own remaining work, so penalty extras and unplaced work count as left.
+  const leftMin = Math.round(hz.metrics.requiredMinutes);
+  // Same day arithmetic as the scheduler's caps: weekday hours, none on a holiday that still stands.
+  const plan = await db.studyPlan.findUnique({ where: { id: planId }, select: { weeklyAvailability: true } });
+  const avail = (plan?.weeklyAvailability ?? {}) as Record<string, number>;
+  const WEEKDAY = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+  const live = holidays.filter((h) => !hz.fit.cancelledHolidayIds.includes(h.id));
+  const daysLeft = Math.max(0, diffDays(asOf, hz.exam));
+  let workDays = 0, availMin = 0;
+  for (let i = 0; i < daysLeft; i++) {
+    const date = addDays(asOf, i);
+    if (live.some((h) => iso(h.startDate) <= date && date <= iso(h.endDate))) continue;
+    workDays++;
+    availMin += Math.max(0, Number(avail[WEEKDAY[new Date(`${date}T00:00:00Z`).getUTCDay()]!] ?? 0) || 0) * 60;
+  }
+  const allMods = sections.flatMap((s) => s.questions);
+  const questions = {
+    required: allMods.reduce((a, q) => a + q.required, 0),
+    answered: allMods.reduce((a, q) => a + q.answered, 0),
+    correct: allMods.reduce((a, q) => a + q.correct, 0),
+  };
+
   const mockTasks = hz.tasks.filter((t) => t.item.kind === "mock");
   return {
     asOf, exam: hz.exam, gate: gateDate(asOf, hz.exam), fit: hz.fit, sections,
+    rules: hz.rules ?? DEFAULT_RULES,
+    totals: {
+      requiredMin, doneMin, leftMin, byStep, questions, daysLeft,
+      minPerDayNeeded: workDays > 0 ? Math.round(leftMin / workDays) : 0,
+      minPerDayAvailable: workDays > 0 ? Math.round(availMin / workDays) : 0,
+    },
     readiness: hz.metrics.readiness, readinessPlanToday: hz.metrics.readinessPlanToday,
     daily: [...rows.values()].sort((a, b) => a.date.localeCompare(b.date)),
     holidays: holidays.map((h) => ({

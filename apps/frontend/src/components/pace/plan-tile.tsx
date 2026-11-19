@@ -14,6 +14,7 @@ import {
   day,
   hasWorkIn,
   moduleHref,
+  planTotalsLine,
   pct,
   planWindow,
   sectionHref,
@@ -183,6 +184,7 @@ export function PlanTile({ p, className }: { p: Projection; className?: string }
   return (
     <Tile
       title="The plan"
+      hint={planTotalsLine(p) ?? undefined}
       className={className}
       controls={chips}
       expandedHint="Every section opens into its modules."

@@ -11,8 +11,8 @@ export function ratePercent(correct: number, answered: number): number | null {
 }
 
 /** Integer compare, so 4 of 5 is met exactly and never lost to float rounding. */
-export function rateMet(correct: number, answered: number): boolean | null {
-  return answered > 0 ? correct * 100 >= RATE_TARGET * answered : null;
+export function rateMet(correct: number, answered: number, target: number = RATE_TARGET): boolean | null {
+  return answered > 0 ? correct * 100 >= target * answered : null;
 }
 
 export type Stat = {
@@ -52,14 +52,14 @@ export function findModule(projection: Projection | undefined, readingId: string
   return undefined;
 }
 
-function rateStat(label: string, correct: number, answered: number, scope: string): Stat | null {
+function rateStat(label: string, correct: number, answered: number, scope: string, target: number): Stat | null {
   const p = ratePercent(correct, answered);
   if (p === null) return null;
-  const met = rateMet(correct, answered) as boolean;
+  const met = rateMet(correct, answered, target) as boolean;
   return {
     text: `${label} ${p}%`,
     met,
-    hint: `${scope}: ${correct} of ${answered} correct, ${p}%. ${met ? "Meets" : "Below"} the ${RATE_TARGET}% target.`,
+    hint: `${scope}: ${correct} of ${answered} correct, ${p}%. ${met ? "Meets" : "Below"} the ${target}% target.`,
   };
 }
 
@@ -77,6 +77,7 @@ export function questionStats(
   s2: StepPerformance | null | undefined,
   s4: StepPerformance | null | undefined,
   taskExtraQ: number | null,
+  target: number = RATE_TARGET,
 ): QuestionStats | null {
   if (!perf || perf.adequateQ === undefined) return null;
   const m = perf.adequateQ;
@@ -96,7 +97,10 @@ export function questionStats(
   if (totals) {
     const answered = totals.answered + totals.mockAnswered;
     const correct = totals.correct + totals.mockCorrect;
-    const need = (s2?.adequateQ ?? 0) + (s2?.passed ? (s4?.adequateQ ?? 0) : 0);
+    // Step 4's quota is owed only once step 4 is under way. Adding it the moment step 2
+    // passes marked a finished step 2 row as short while step 3 still sat between them.
+    const s4Live = step === 4 || (s4 ? s4.passed || s4.answered > 0 : false);
+    const need = (s2?.adequateQ ?? 0) + (s2?.passed && s4Live ? (s4?.adequateQ ?? 0) : 0);
     const mockNote = totals.mockAnswered > 0 ? ` includes ${q(totals.mockAnswered)} from topic mocks` : "";
     total = {
       text: `${answered} total`,
@@ -105,8 +109,8 @@ export function questionStats(
         `${q(answered)} answered across initial and review questions${mockNote ? `, and${mockNote}` : ""}. ` +
         (need > 0 ? `${need} are needed so far.` : ""),
     };
-    overall = rateStat("overall", correct, answered, `Overall${mockNote ? " (incl. topic mocks)" : ""}`);
+    overall = rateStat("overall", correct, answered, `Overall${mockNote ? " (incl. topic mocks)" : ""}`, target);
   }
-  const round = rateStat("this round", perf.correct, perf.answered, `Round ${perf.round}`);
+  const round = rateStat("this round", perf.correct, perf.answered, `Round ${perf.round}`, target);
   return { progress, total, overall, round };
 }

@@ -9,6 +9,8 @@
 // generates with the default and says which field it ignored, so a bad field
 // costs the candidate that field and nothing else.
 
+import { DEFAULT_RULES, type StepRules } from "./steps/rules";
+
 export type PlanMode = "curriculum-strict" | "curriculum-topic";
 
 export type ReviewPolicy =
@@ -35,6 +37,12 @@ export type Tuning = {
   reviewStartDate: string | null;
   /** Words a minute when reading worked solutions; sizes answer review. */
   answerReviewWordsPerMinute: number;
+  /** Step rules, see core/steps/rules.ts StepRules. */
+  step2Multiplier: number;
+  step4Multiplier: number;
+  accuracyTarget: number;
+  mockPassTarget: number;
+  exemptionMultiplier: number;
 };
 
 export type RejectedField = {
@@ -49,10 +57,20 @@ export const DEFAULT_TUNING: Tuning = {
   reviewPolicy: "decay-triggered",
   reviewStartDate: null,
   answerReviewWordsPerMinute: 200,
+  step2Multiplier: DEFAULT_RULES.step2Multiplier,
+  step4Multiplier: DEFAULT_RULES.step4Multiplier,
+  accuracyTarget: DEFAULT_RULES.accuracyTarget,
+  mockPassTarget: DEFAULT_RULES.mockPassTarget,
+  exemptionMultiplier: DEFAULT_RULES.exemptionMultiplier,
 };
 
 export const TUNING_RANGES: Record<string, { min: number; max: number }> = {
   answerReviewWordsPerMinute: { min: 100, max: 400 },
+  step2Multiplier: { min: 0.5, max: 6 },
+  step4Multiplier: { min: 0.5, max: 6 },
+  accuracyTarget: { min: 50, max: 100 },
+  mockPassTarget: { min: 50, max: 100 },
+  exemptionMultiplier: { min: 1.25, max: 5 },
 };
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -171,4 +189,12 @@ export function parseTuning(raw: unknown): {
   }
 
   return { tuning, rejected };
+}
+
+export function rulesOf(t: Tuning): StepRules {
+  return {
+    step2Multiplier: t.step2Multiplier, step4Multiplier: t.step4Multiplier,
+    accuracyTarget: t.accuracyTarget, mockPassTarget: t.mockPassTarget,
+    exemptionMultiplier: t.exemptionMultiplier,
+  };
 }

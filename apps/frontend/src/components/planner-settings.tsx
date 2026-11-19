@@ -46,6 +46,46 @@ const POLICIES: { value: ReviewPolicy; label: string; detail: string }[] = [
   },
 ];
 
+type RuleKey = "step2Multiplier" | "step4Multiplier" | "accuracyTarget" | "mockPassTarget" | "exemptionMultiplier";
+
+const RULE_FIELDS: { key: RuleKey; label: string; unit: string; step: number; detail: string }[] = [
+  {
+    key: "step2Multiplier",
+    label: "Step 2 question time",
+    unit: "x step 1",
+    step: 0.25,
+    detail: "How long step 2 questions should take, as a multiple of your step 1 reading time.",
+  },
+  {
+    key: "step4Multiplier",
+    label: "Step 4 question time",
+    unit: "x step 2",
+    step: 0.25,
+    detail: "How long step 4 questions should take, as a multiple of the step 2 time.",
+  },
+  {
+    key: "accuracyTarget",
+    label: "Accuracy to pass a step",
+    unit: "%",
+    step: 1,
+    detail: "The share of questions you must get right in steps 2 and 4 before the step counts as passed.",
+  },
+  {
+    key: "mockPassTarget",
+    label: "Mock pass mark per topic",
+    unit: "%",
+    step: 1,
+    detail: "A topic scoring below this in a mock exam is reopened for a retest.",
+  },
+  {
+    key: "exemptionMultiplier",
+    label: "Move on after",
+    unit: "x adequate",
+    step: 0.25,
+    detail: "If accuracy is still short after this many times the adequate time, the step moves on with a review owed.",
+  },
+];
+
 /** One two-to-four-way choice, as native radios with styled labels. */
 function Choice<T extends string>({
   name,
@@ -98,6 +138,7 @@ export function PlannerSettings({ plan, onSaved }: { plan: Plan; onSaved: () => 
   const [pending, setPending] = useState(false);
   const [startDate, setStartDate] = useState("");
   const [wpm, setWpm] = useState<string | null>(null);
+  const [ruleEdits, setRuleEdits] = useState<Partial<Record<RuleKey, string>>>({});
 
   // Shown as selected while a save is in flight, and cleared on failure so a
   // rejected change snaps back to what the server holds.
@@ -126,6 +167,7 @@ export function PlannerSettings({ plan, onSaved }: { plan: Plan; onSaved: () => 
       await api.patch(`plans/${plan.id}`, body);
       toast.success(confirmation);
       setWpm(null);
+      setRuleEdits({});
       await load();
       onSaved();
     } catch (err) {
@@ -163,6 +205,17 @@ export function PlannerSettings({ plan, onSaved }: { plan: Plan; onSaved: () => 
   const wpmNum = Number(wpmShown);
   const wpmValid = wpmShown !== "" && Number.isFinite(wpmNum) && wpmNum >= range.min && wpmNum <= range.max;
   const wpmDirty = wpm !== null && wpmValid && wpmNum !== tuning.answerReviewWordsPerMinute;
+
+  const ruleState = RULE_FIELDS.map((f) => {
+    const r = data.ranges[f.key] ?? { min: 0, max: 100 };
+    const shown = ruleEdits[f.key] ?? String(tuning[f.key]);
+    const num = Number(shown);
+    const valid = shown !== "" && Number.isFinite(num) && num >= r.min && num <= r.max;
+    return { ...f, range: r, shown, num, valid, edited: ruleEdits[f.key] !== undefined };
+  });
+  const rulesDirty = ruleState.some((f) => f.edited && f.num !== tuning[f.key]);
+  const rulesValid = ruleState.every((f) => !f.edited || f.valid);
+  const rulesAtDefaults = ruleState.every((f) => tuning[f.key] === data.defaults[f.key]);
 
   return (
     <section className={styles.section}>
@@ -251,6 +304,74 @@ export function PlannerSettings({ plan, onSaved }: { plan: Plan; onSaved: () => 
           <span className={styles.unit}>words a minute</span>
         </div>
       </div>
+
+      <fieldset className={styles.choiceSet}>
+        <legend className={styles.legend}>Step rules</legend>
+        {ruleState.map((f) => {
+          const id = `tuning-${f.key}`;
+          return (
+            <div key={f.key} className={styles.field}>
+              <div className={styles.fieldText}>
+                <label className={styles.fieldLabel} htmlFor={id}>
+                  {f.label}
+                </label>
+                <p className={styles.fieldDetail} id={`${id}-help`}>
+                  {f.detail} Allowed {f.range.min} to {f.range.max}.
+                </p>
+              </div>
+              <div className={styles.fieldControl}>
+                <input
+                  className={styles.number}
+                  id={id}
+                  type="number"
+                  inputMode="decimal"
+                  min={f.range.min}
+                  max={f.range.max}
+                  step={f.step}
+                  value={f.shown}
+                  disabled={pending}
+                  aria-invalid={f.edited && !f.valid}
+                  aria-describedby={`${id}-help`}
+                  onChange={(event) => setRuleEdits((prev) => ({ ...prev, [f.key]: event.target.value }))}
+                />
+                <span className={styles.unit}>{f.unit}</span>
+              </div>
+            </div>
+          );
+        })}
+        <div className={styles.actions}>
+          <button
+            className={styles.save}
+            type="button"
+            disabled={pending || !rulesDirty || !rulesValid}
+            onClick={() =>
+              patch(
+                {
+                  tuning: Object.fromEntries(
+                    ruleState.filter((f) => f.edited).map((f) => [f.key, f.num]),
+                  ),
+                },
+                "Step rules saved. The days ahead have been replanned.",
+              )
+            }
+          >
+            {pending ? "Saving" : "Save step rules"}
+          </button>
+          <button
+            className={styles.reset}
+            type="button"
+            disabled={pending || (rulesAtDefaults && Object.keys(ruleEdits).length === 0)}
+            onClick={() =>
+              patch(
+                { tuning: Object.fromEntries(RULE_FIELDS.map((f) => [f.key, data.defaults[f.key]])) },
+                "Step rules back to their defaults.",
+              )
+            }
+          >
+            Reset step rules
+          </button>
+        </div>
+      </fieldset>
 
       <div className={styles.actions}>
         <button

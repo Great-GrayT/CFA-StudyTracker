@@ -56,6 +56,17 @@ describe("GET /api/plans/:id/projection", () => {
     expect(planned.length).toBeGreaterThanOrEqual(14);
     expect(JSON.stringify(p)).not.toContain("NaN");
     expect(p.mocks.done).toBe(0);
+    expect(p.rules.accuracyTarget).toBe(80);
+    const t = p.totals;
+    expect(t.requiredMin).toBeGreaterThan(0);
+    expect(t.doneMin).toBe(0);
+    expect(t.leftMin).toBe(t.requiredMin);
+    expect(Object.values(t.byStep).reduce((a: number, x: any) => a + x.requiredMin, 0)).toBe(t.requiredMin);
+    expect(t.questions.answered).toBe(0);
+    expect(t.questions.required).toBe(p.sections.reduce((a: number, s: any) => a + s.questions.required, 0));
+    expect(t.daysLeft).toBeGreaterThan(0);
+    expect(t.minPerDayNeeded).toBeGreaterThan(0);
+    expect(t.minPerDayAvailable).toBeGreaterThanOrEqual(0);
   });
 
   test("another user's plan is a 404", async () => {

@@ -205,3 +205,28 @@ describe("mock retest", () => {
     expect(s.s3.done).toBe(true);
   });
 });
+
+describe("non-default rules", () => {
+  const withRules = (rules: ModuleCatalog["rules"]) => [{ ...mod(), rules }];
+  const s2tasks = [
+    task({ kind: "read", step: 1, minutes: 60, date: "2026-01-01" }),
+    task({ kind: "questions", step: 2, minutes: 120, answered: 30, correct: 21, date: "2026-01-02" }),
+  ];
+  it("accuracyTarget 70 passes step 2 at 70%, default does not", () => {
+    expect(deriveState(cat, s2tasks, [], []).get("r1")!.s2.passed).toBe(false);
+    const rules = { step2Multiplier: 2, step4Multiplier: 2, accuracyTarget: 70, mockPassTarget: 75, exemptionMultiplier: 2 };
+    expect(deriveState(withRules(rules), s2tasks, [], []).get("r1")!.s2.passed).toBe(true);
+  });
+  it("mockPassTarget 60 stops a 65% topic retest", () => {
+    const base = [
+      task({ kind: "read", step: 1, minutes: 60, date: "2026-01-01" }),
+      task({ kind: "questions", step: 2, minutes: 90, answered: 30, correct: 27, date: "2026-01-02" }),
+      task({ kind: "review", step: 3, minutes: 20, date: "2026-01-03" }),
+      task({ kind: "questions", step: 4, minutes: 180, answered: 60, correct: 54, date: "2026-01-04" }),
+    ];
+    const mock = [{ date: "2026-02-01", topicScores: [{ topicId: "t1", answered: 20, correct: 13 }] }];
+    expect(deriveState(cat, base, [], mock).get("r1")!.s4.passed).toBe(false);
+    const rules = { step2Multiplier: 2, step4Multiplier: 2, accuracyTarget: 80, mockPassTarget: 60, exemptionMultiplier: 2 };
+    expect(deriveState(withRules(rules), base, [], mock).get("r1")!.s4.passed).toBe(true);
+  });
+});

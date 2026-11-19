@@ -45,8 +45,8 @@ const ITEM =
 
 export function AppSidebar() {
   const pathname = usePathname();
-  const primary = NAV.slice(0, 4);
-  const settings = NAV[4];
+  const primary = NAV.slice(0, -1);
+  const settings = NAV[NAV.length - 1];
 
   return (
     <Sidebar collapsible="icon" aria-label="Main">

@@ -10,6 +10,7 @@ import {
   usePlan,
   usePlanPackages,
   usePrescription,
+  type SessionInput,
   type SessionKind,
   type TaskSubmission,
 } from "@/lib/hooks";
@@ -18,7 +19,8 @@ import type { PackageRole } from "@/lib/types";
 import { useIsMobile } from "@/hooks/ui/use-mobile";
 import { cn } from "@/lib/utils";
 import { minutesLabel } from "@/components/day-plan";
-import { questionsError, resolvePreset, taskQuestionCount } from "@/lib/record";
+import { effectiveAnswered, questionNumbersPayload, questionsError, resolvePreset, taskQuestionCount } from "@/lib/record";
+import { parseQuestionNumbers } from "@/lib/question-numbers";
 import { useOnline } from "@/hooks/use-online";
 import { useUndoRecord } from "./use-undo-record";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -109,6 +111,7 @@ export function RecordSheet({
   const [confidence, setConfidence] = useState(3);
   const [answered, setAnswered] = useState("");
   const [correct, setCorrect] = useState("");
+  const [numbersText, setNumbersText] = useState("");
   const [date, setDate] = useState(localToday);
   const [note, setNote] = useState("");
   const [attach, setAttach] = useState(true);
@@ -196,18 +199,21 @@ export function RecordSheet({
 
   const minutesNum = Number(minutes);
   const minutesValid = Number.isInteger(minutesNum) && minutesNum >= 1 && minutesNum <= 600;
-  const answeredNum = Number(answered) || 0;
+  const parsedNumbers = useMemo(() => parseQuestionNumbers(numbersText), [numbersText]);
+  const answeredEff = effectiveAnswered(answered, parsedNumbers.numbers.length);
+  const answeredNum = Number(answeredEff) || 0;
   const correctNum = Number(correct) || 0;
   const accuracy = asksQuestions && answeredNum > 0 ? (correctNum / answeredNum) * 100 : null;
   const correctTooHigh = asksQuestions && correctNum > answeredNum;
   // A planned question task needs its counts; an off-plan one may skip them.
   const questionsMsg =
-    asksQuestions && (knownCount !== null || answered !== "" || correct !== "") ? questionsError(answered, correct) : null;
+    asksQuestions && (knownCount !== null || answeredEff !== "" || correct !== "") ? questionsError(answeredEff, correct) : null;
   const reviewMinutesNum = Number(reviewMinutes);
   const reviewMinutesValid = !reviewed || reviewMinutes === "" || (Number.isInteger(reviewMinutesNum) && reviewMinutesNum >= 1 && reviewMinutesNum <= 600);
   const packageName = [...packageOptions.onPlan, ...packageOptions.rest].find((p) => p.id === packageId)?.name;
   const busy = createSession.isPending || submitTask.isPending;
-  const ready = !!readingId && minutesValid && !questionsMsg && reviewMinutesValid;
+  const numbersMsg = asksQuestions ? parsedNumbers.error : null;
+  const ready = !!readingId && minutesValid && !questionsMsg && !numbersMsg && reviewMinutesValid;
 
   function undo(taskId: string) {
     void undoRecord.undo(taskId);
@@ -217,6 +223,7 @@ export function RecordSheet({
     if (!readingId) return setError("Choose a section and module first.");
     if (!minutesValid) return setError("Enter whole minutes between 1 and 600.");
     if (questionsMsg) return setError(questionsMsg);
+    if (numbersMsg) return setError(numbersMsg);
     if (!reviewMinutesValid) return setError("Enter whole minutes for the answer review.");
     setError(null);
     const taskId = recordsTask ? matchedTask!.id : undefined;
@@ -228,7 +235,7 @@ export function RecordSheet({
           status: finished ? "done" : "partial",
           actualMinutes: minutesNum,
           confidence,
-          ...(asksQuestions ? { questionsAnswered: answeredNum, questionsCorrect: correctNum } : {}),
+          ...(asksQuestions ? { questionsAnswered: answeredNum, questionsCorrect: correctNum, ...questionNumbersPayload(parsedNumbers.numbers) } : {}),
           ...(asksQuestions ? { answerReviewDone: reviewed } : {}),
           ...(asksQuestions && reviewed && reviewMinutes !== "" ? { answerReviewMinutes: reviewMinutesNum } : {}),
           ...(note.trim() ? { note: note.trim() } : {}),
@@ -240,9 +247,9 @@ export function RecordSheet({
         confidence,
         date,
         ...(packageId ? { packageId } : {}),
-        ...(asksQuestions ? { questionsAnswered: answeredNum, questionsCorrect: correctNum } : {}),
+        ...(asksQuestions ? { questionsAnswered: answeredNum, questionsCorrect: correctNum, ...questionNumbersPayload(parsedNumbers.numbers) } : {}),
         ...(note.trim() ? { note: note.trim() } : {}),
-      });
+      } as SessionInput);
       // Off-plan records have no Undo: they are deleted from the journal instead.
       toast.success("Recorded", {
         description: taskId ? "Settled against your plan." : "Added off plan. Your plan is updated around it.",
@@ -252,6 +259,7 @@ export function RecordSheet({
       setMinutes("");
       setAnswered("");
       setCorrect("");
+      setNumbersText("");
       setReviewed(false);
       setReviewMinutes("");
       setNote("");
@@ -479,7 +487,32 @@ export function RecordSheet({
                 />
               </Field>
             </div>
-            {questionsMsg && (answered !== "" || correct !== "") ? (
+            <div className="space-y-1">
+              <Field label="Which questions (optional)" id="record-numbers">
+                <Input
+                  id="record-numbers"
+                  inputMode="text"
+                  autoComplete="off"
+                  placeholder="e.g. 1, 3-8, 12"
+                  className="tabular-nums"
+                  value={numbersText}
+                  aria-invalid={!!numbersMsg}
+                  aria-describedby="record-numbers-help"
+                  onChange={(e) => setNumbersText(e.target.value)}
+                />
+              </Field>
+              <p
+                id="record-numbers-help"
+                className={cn("text-[13px]", numbersMsg ? "text-alarm-ink" : "text-muted-foreground")}
+                aria-live="polite"
+              >
+                {numbersMsg ??
+                  (parsedNumbers.numbers.length > 0
+                    ? `${parsedNumbers.numbers.length} ${parsedNumbers.numbers.length === 1 ? "question" : "questions"}`
+                    : "Lets the Packages page show which questions are left.")}
+              </p>
+            </div>
+            {questionsMsg && (answeredEff !== "" || correct !== "") ? (
               <p className="text-alarm-ink text-[13px]" role="alert">
                 {questionsMsg}
               </p>

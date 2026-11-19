@@ -361,3 +361,46 @@ describe("editing and deleting a recorded task", () => {
     expect((await del(stranger, planId, tasks[0]!.id)).status).toBe(404);
   });
 });
+
+describe("question numbers on a record", () => {
+  beforeEach(async () => {
+    await resetDb();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(TODAY);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  test("records deduped sorted numbers, uses their count as answered, re-record replaces, undo clears", async () => {
+    const { planId, user, tasks, losIds } = await ownedTaskWithOutcomes();
+    const id = tasks[0]!.id;
+    const res = await patch(user, planId, id, { status: "done", confidence: 3, questionNumbers: [5, 1, 3, 3] });
+    expect(res.status).toBe(200);
+    let row = await db.planTask.findUniqueOrThrow({ where: { id } });
+    expect(row.questionNumbers).toEqual([1, 3, 5]);
+    const logs = await db.studyLogEntry.findMany({ where: { taskId: id, losId: { in: losIds } } });
+    expect(logs.reduce((s, l) => s + l.questionsAnswered, 0)).toBe(3);
+
+    await patch(user, planId, id, { status: "done", confidence: 3, questionNumbers: [2, 4] });
+    row = await db.planTask.findUniqueOrThrow({ where: { id } });
+    expect(row.questionNumbers).toEqual([2, 4]);
+
+    await patch(user, planId, id, { status: "pending" });
+    row = await db.planTask.findUniqueOrThrow({ where: { id } });
+    expect(row.questionNumbers).toEqual([]);
+  });
+
+  test("an explicit answered count wins over the numbers' count", async () => {
+    const { planId, user, tasks, losIds } = await ownedTaskWithOutcomes();
+    await patch(user, planId, tasks[0]!.id, { status: "done", confidence: 3, questionNumbers: [1, 2], questionsAnswered: 6, questionsCorrect: 4 });
+    const logs = await db.studyLogEntry.findMany({ where: { taskId: tasks[0]!.id, losId: { in: losIds } } });
+    expect(logs.reduce((s, l) => s + l.questionsAnswered, 0)).toBe(6);
+  });
+
+  test("rejects out-of-range, non-integer and oversized lists", async () => {
+    const { planId, user, tasks } = await ownedTasks();
+    const id = tasks[0]!.id;
+    for (const bad of [[0], [5001], [1.5], Array.from({ length: 2001 }, (_, i) => (i % 5000) + 1)]) {
+      expect((await patch(user, planId, id, { status: "done", confidence: 3, questionNumbers: bad })).status).toBe(400);
+    }
+  });
+});

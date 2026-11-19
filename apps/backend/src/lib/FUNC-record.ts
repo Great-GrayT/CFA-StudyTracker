@@ -14,6 +14,7 @@ export type RecordInput = {
   confidence?: number;
   questionsAnswered?: number;
   questionsCorrect?: number;
+  questionNumbers?: number[];
   answerReviewDone?: boolean;
   answerReviewMinutes?: number;
   note?: string;
@@ -33,12 +34,16 @@ export async function recordTask(
 ): Promise<{ id: string; status: string; actualMinutes: number | null }> {
   await tx.studyLogEntry.deleteMany({ where: { taskId: task.id } });
 
+  const numbers = [...new Set(input.questionNumbers ?? [])].sort((a, b) => a - b);
+  // Numbers imply how many were answered when the count is not given.
+  const questionsAnswered = input.questionsAnswered ?? (numbers.length > 0 ? numbers.length : undefined);
+
   const cap = (n: number) => Math.min(600, Math.max(0, n));
   const updated = await tx.planTask.update({
     where: { id: task.id },
     data:
       input.status === "pending"
-        ? { status: "pending", actualMinutes: null, answerReviewMinutes: null, answerReviewDone: false }
+        ? { status: "pending", actualMinutes: null, answerReviewMinutes: null, answerReviewDone: false, questionNumbers: [] }
         : {
             status: input.status,
             actualMinutes: cap(input.actualMinutes ?? task.estimatedMinutes),
@@ -47,6 +52,8 @@ export async function recordTask(
             answerReviewMinutes: input.status === "done" && input.answerReviewMinutes !== undefined
               ? cap(input.answerReviewMinutes) : null,
             answerReviewDone: input.answerReviewDone ?? false,
+            // Omitted means unchanged: an edit that never showed the field must not wipe saved numbers.
+            ...(input.questionNumbers !== undefined ? { questionNumbers: numbers } : {}),
           },
   });
   if (input.status === "pending") return updated;
@@ -56,7 +63,7 @@ export async function recordTask(
     select: { id: true },
     orderBy: [{ readingId: "asc" }, { order: "asc" }],
   });
-  const answered = spread(input.questionsAnswered ?? 0, los.length);
+  const answered = spread(questionsAnswered ?? 0, los.length);
   const correct = spread(input.questionsCorrect ?? 0, los.length);
   await tx.studyLogEntry.createMany({
     data: los.map((l, i) => ({

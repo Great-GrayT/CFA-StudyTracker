@@ -80,6 +80,16 @@ export function questionsError(answered: string, correct: string): string | null
   return null;
 }
 
+/** An empty answered field takes the count of the listed question numbers. */
+export function effectiveAnswered(answered: string, numberCount: number): string {
+  return answered.trim() === "" && numberCount > 0 ? String(numberCount) : answered;
+}
+
+/** Payload part for the optional question numbers; omitted when none were given. */
+export function questionNumbersPayload(numbers: number[]): { questionNumbers?: number[] } {
+  return numbers.length > 0 ? { questionNumbers: numbers } : {};
+}
+
 /** The step a task belongs to, or null for mocks and tasks written before the engine. */
 export function stepForTask(task: { step: number | null }): StepNo | null {
   return task.step && task.step >= 1 && task.step <= 4 ? (task.step as StepNo) : null;

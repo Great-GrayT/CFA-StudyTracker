@@ -224,6 +224,8 @@ export const priorWorkSchema = z.object({
  * because those minutes are the only measure of how much material it covered;
  * "done" defaults to the estimate; "pending" undoes a submission.
  */
+const questionNumbersSchema = z.array(z.number().int().min(1).max(5000)).max(2000);
+
 export const submitTaskSchema = z
   .object({
     status: z.enum(["done", "partial", "pending"]),
@@ -233,6 +235,7 @@ export const submitTaskSchema = z
     confidence: z.number().int().min(1).max(5).optional(),
     questionsAnswered: z.number().int().min(0).max(1000).optional(),
     questionsCorrect: z.number().int().min(0).max(1000).optional(),
+    questionNumbers: questionNumbersSchema.optional(),
     // Question tasks owe a review of the answers; saying it is done is what clears the debt.
     answerReviewDone: z.boolean().optional(),
     answerReviewMinutes: z.number().int().min(0).max(600).optional(),
@@ -410,6 +413,7 @@ export const createSessionSchema = z
     confidence: z.number().int().min(1).max(5),
     questionsAnswered: z.number().int().min(0).optional(),
     questionsCorrect: z.number().int().min(0).optional(),
+    questionNumbers: questionNumbersSchema.optional(),
     // A calendar day in the plan's own time zone; absent means today there.
     date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     note: z.string().max(2000).optional(),

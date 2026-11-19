@@ -1,4 +1,4 @@
-import { BookOpen, CalendarRange, LineChart, Settings, Sun, type LucideIcon } from "lucide-react";
+import { BookOpen, CalendarRange, LineChart, Package, Settings, Sun, type LucideIcon } from "lucide-react";
 import type { Curriculum } from "./types";
 
 // Shell rules kept out of components so they can be tested without a DOM tree.
@@ -7,6 +7,7 @@ export const NAV: { href: string; label: string; icon: LucideIcon }[] = [
   { href: "/today", label: "Today", icon: Sun },
   { href: "/syllabus", label: "Syllabus", icon: BookOpen },
   { href: "/progress", label: "Progress", icon: LineChart },
+  { href: "/packages", label: "Packages", icon: Package },
   { href: "/plan", label: "Plan", icon: CalendarRange },
   { href: "/settings", label: "Settings", icon: Settings },
 ];

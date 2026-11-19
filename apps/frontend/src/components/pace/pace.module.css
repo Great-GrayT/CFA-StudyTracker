@@ -341,3 +341,101 @@
     forced-color-adjust: none;
   }
 }
+
+/* Plan metrics */
+.mFig {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  gap: 10px 16px;
+  margin: 0 0 12px;
+}
+.mFig dt {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.mFig dd {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.mFig small {
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted-foreground);
+}
+.mShort {
+  color: var(--alarm-ink);
+}
+.mBar {
+  display: flex;
+  gap: 2px;
+  height: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.mBar li {
+  position: relative;
+  min-width: 2px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--c) 28%, transparent);
+}
+.mBar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--c);
+}
+.s5 { --c: var(--gate); }
+.mKey {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 6px 0 12px;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.mKey i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 5px;
+  border-radius: 2px;
+  background: var(--c);
+}
+.mTbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.mTbl caption {
+  padding-bottom: 4px;
+  text-align: left;
+  font-weight: 600;
+}
+.mTbl th, .mTbl td {
+  padding: 6px 8px 6px 0;
+  border-bottom: 1px solid var(--border);
+  text-align: right;
+  white-space: nowrap;
+}
+.mTbl th:first-child, .mTbl td:first-child {
+  text-align: left;
+  white-space: normal;
+}
+.mTbl thead th {
+  font-weight: 400;
+  color: var(--muted-foreground);
+}
+.mScroll {
+  overflow-x: auto;
+}
+.mLow {
+  color: var(--alarm-ink);
+  font-weight: 600;
+}

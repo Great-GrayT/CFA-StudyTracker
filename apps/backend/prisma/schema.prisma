@@ -327,6 +327,8 @@ model PlanTask {
   answerReviewMinutes Int?
   resourceIds       String[]      @default([])
   questionCount     Int?
+  // Question numbers (1-based, within the unit's question sets) the candidate said they did.
+  questionNumbers   Int[]         @default([])
   // Uncrashed minutes of work the task covers; history credit scales this by
   // the share of estimatedMinutes actually spent. Null on old tasks.
   workMinutes       Int?

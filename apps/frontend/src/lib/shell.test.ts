@@ -74,12 +74,13 @@ test("no plan sends app pages to onboarding, never loops", () => {
   expect(planGuardTarget("error", "/today")).toBeNull(); // offline must not bounce
 });
 
-test("palette lists every outcome and the five pages", () => {
+test("palette lists every outcome and the six pages", () => {
   const items = commandItems(fixtureCurriculum);
   expect(items.filter((i) => i.group === "Pages").map((i) => i.href)).toEqual([
     "/today",
     "/syllabus",
     "/progress",
+    "/packages",
     "/plan",
     "/settings",
   ]);

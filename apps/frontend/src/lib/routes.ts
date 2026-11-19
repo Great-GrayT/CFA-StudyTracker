@@ -4,6 +4,7 @@ export const APP_ROUTES: readonly string[] = [
   "/today",
   "/syllabus",
   "/progress",
+  "/packages",
   "/plan",
   "/settings",
   "/onboarding",

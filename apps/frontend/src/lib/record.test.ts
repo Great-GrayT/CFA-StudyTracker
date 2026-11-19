@@ -1,5 +1,5 @@
 import { test, expect } from "vitest";
-import { resolvePreset } from "./record";
+import { effectiveAnswered, questionNumbersPayload, resolvePreset } from "./record";
 
 const topics = [
   { id: "t1", readings: [{ id: "r1", los: [{ id: "l1" }] }, { id: "r2", los: [{ id: "l2" }] }] },
@@ -94,4 +94,16 @@ test("a declaration item carries confidence for reads and counts for questions",
     readingId: "r1", step: 2, answered: 30, correct: 27,
   });
   expect(declarationItem("r1", 2, { confidence: 0, answered: "", correct: "" })).toEqual({ readingId: "r1", step: 2 });
+});
+
+test("answered falls back to the listed question count only when empty", () => {
+  expect(effectiveAnswered("", 7)).toBe("7");
+  expect(effectiveAnswered(" ", 7)).toBe("7");
+  expect(effectiveAnswered("10", 7)).toBe("10");
+  expect(effectiveAnswered("", 0)).toBe("");
+});
+
+test("question numbers are sent only when given", () => {
+  expect(questionNumbersPayload([])).toEqual({});
+  expect(questionNumbersPayload([1, 2])).toEqual({ questionNumbers: [1, 2] });
 });

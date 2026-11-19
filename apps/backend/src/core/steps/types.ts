@@ -1,3 +1,4 @@
+import type { StepRules } from "./rules";
 // Row shapes mirror the Prisma models (Reading+Topic, PackageUnit, PackageResource)
 // with only the fields the engine reads, so core/steps stays free of db imports.
 export type StepNo = 1 | 2 | 3 | 4;
@@ -49,6 +50,7 @@ export type ModuleCatalog = {
   readingOrder: number;
   examWeight: number; // midpoint of the topic range, 0..1
   options: Record<StepNo, SourceOption[]>;
+  rules?: StepRules; // absent means DEFAULT_RULES
 };
 
 export type RoundState = {

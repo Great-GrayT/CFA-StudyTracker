@@ -74,3 +74,16 @@ describe("buildCatalog", () => {
     expect(c.map((m) => m.options[2][0].questions)).toEqual([21, 20]);
   });
 });
+
+describe("adequateMinutes with rules", () => {
+  it("k2 and k4 scale step 2 and step 4", () => {
+    const base = buildCatalog({ readings, units, resources, planPackageSlugs: ["mm-l2"], priority, lesHours: 200 })[0];
+    const s1 = step1Minutes(base);
+    expect(adequateMinutes(base, 2)).toBe(2 * s1);
+    expect(adequateMinutes(base, 4)).toBe(4 * s1);
+    const [m] = buildCatalog({ readings, units, resources, planPackageSlugs: ["mm-l2"], priority, lesHours: 200,
+      rules: { step2Multiplier: 3, step4Multiplier: 1.5, accuracyTarget: 80, mockPassTarget: 75, exemptionMultiplier: 2 } });
+    expect(adequateMinutes(m, 2)).toBeCloseTo(3 * s1);
+    expect(adequateMinutes(m, 4)).toBeCloseTo(4.5 * s1);
+  });
+});

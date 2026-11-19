@@ -1,5 +1,5 @@
 import { adequateMinutes, step1Minutes } from "./catalog";
-import { EPS, MIN_PER_QUESTION, topUpParts } from "./rules";
+import { DEFAULT_RULES, EPS, MIN_PER_QUESTION, topUpParts } from "./rules";
 import type { ModuleState } from "./state";
 import type { ModuleCatalog, SourceOption } from "./types";
 
@@ -98,6 +98,7 @@ function questionItems(m: ModuleCatalog, step: 2 | 4, r: QState, retest: string 
   used: Record<string, number>, prev: string[]): WorkItem[] {
   const opts = m.options[step];
   const adequate = adequateMinutes(m, step);
+  const rl = m.rules ?? DEFAULT_RULES;
   if (!opts.length || adequate <= 0) return [];
   const credited = r.minutes + r.pendingAnswerReview; // owed review gets planned separately
   let alloc: Alloc[];
@@ -107,9 +108,9 @@ function questionItems(m: ModuleCatalog, step: 2 | 4, r: QState, retest: string 
     if (step === 4 && retest) reason = "mock-retest";
   } else {
     const perT = rate(opts[0]!);
-    const { n80, nAdq } = topUpParts({ answered: r.answered, correct: r.correct, minutes: credited, adequate, perQ: perT });
-    // Past 2x adequate minutes the exemption applies, so plan only up to that point.
-    alloc = allocateQuestions(opts, used, n80, Math.max(0, adequate - credited), Math.max(0, 2 * adequate - credited));
+    const { n80, nAdq } = topUpParts({ answered: r.answered, correct: r.correct, minutes: credited, adequate, perQ: perT }, rl.accuracyTarget / 100);
+    // Past the exemption multiple of adequate minutes the exemption applies, so plan only up to that point.
+    alloc = allocateQuestions(opts, used, n80, Math.max(0, adequate - credited), Math.max(0, rl.exemptionMultiplier * adequate - credited));
     reason = n80 >= nAdq ? "top-up-80" : "top-up-adequacy";
   }
   if (alloc.length === 0) return [];

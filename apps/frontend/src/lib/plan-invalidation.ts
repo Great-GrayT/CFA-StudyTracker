@@ -36,5 +36,6 @@ export function invalidateAfterEdit(qc: QueryClient, planId: string): Promise<un
     qc.invalidateQueries({ queryKey: keys.progress(planId) }),
     qc.invalidateQueries({ queryKey: keys.mocks(planId) }),
     qc.invalidateQueries({ queryKey: keys.declarations(planId) }),
+    qc.invalidateQueries({ queryKey: keys.coverage(planId) }),
   ]);
 }

@@ -1,5 +1,5 @@
 import { adequateMinutes, step1Minutes } from "./catalog";
-import { EPS, MIN_PER_QUESTION, roundOutcome } from "./rules";
+import { DEFAULT_RULES, EPS, MIN_PER_QUESTION, roundOutcome } from "./rules";
 import type { ModuleCatalog, RoundState, StepNo } from "./types";
 
 export type { RoundState } from "./types";
@@ -62,7 +62,8 @@ function evaluate(w: Work, step: 2 | 4) {
   const r = step === 2 ? w.s2 : w.s4;
   if (r.passed) return;
   const adequate = adequateMinutes(w.m, step);
-  const out = roundOutcome(r, adequate);
+  const rl = w.m.rules ?? DEFAULT_RULES;
+  const out = roundOutcome(r, adequate, rl.accuracyTarget / 100, rl.exemptionMultiplier);
   if (out === "pass") {
     r.passed = true;
     if (step === 4) w.retest = null;
@@ -135,6 +136,8 @@ export function deriveState(
     || (a.decl && b.decl ? a.decl.step - b.decl.step || a.decl.readingId.localeCompare(b.decl.readingId) : 0)
     || (a.task && b.task ? a.task.id.localeCompare(b.task.id) : 0));
 
+  // Rules are per plan, so any module carries them.
+  const mockTarget = (cat[0]?.rules ?? DEFAULT_RULES).mockPassTarget / 100;
   for (const ev of events) {
     if (ev.kind === "decl") {
       applyDecl(ev.decl!);
@@ -142,7 +145,7 @@ export function deriveState(
     }
     if (ev.kind === "mock") {
       for (const sc of ev.mock!.topicScores) {
-        if (sc.answered <= 0 || sc.correct / sc.answered >= 0.75) continue;
+        if (sc.answered <= 0 || sc.correct / sc.answered >= mockTarget - EPS) continue;
         for (const w of works.values()) {
           if (w.m.topicId !== sc.topicId) continue;
           owe(w);

@@ -85,6 +85,11 @@ export type Tuning = {
   reviewPolicy: ReviewPolicy;
   reviewStartDate: string | null;
   answerReviewWordsPerMinute: number;
+  step2Multiplier: number;
+  step4Multiplier: number;
+  accuracyTarget: number;
+  mockPassTarget: number;
+  exemptionMultiplier: number;
 };
 
 /**
@@ -318,6 +323,8 @@ export type ProjectionSection = {
   topicId: string;
   name: string;
   examWeight: number;
+  /** Steps 2 and 4: questions the plan requires, answered and correct so far. Optional for older servers. */
+  questions?: { required: number; answered: number; correct: number };
   steps: {
     step: StepNo;
     plannedMin: number;
@@ -338,6 +345,24 @@ export type ProjectionSection = {
     mocks: Tally | null;
     extras: { tasks: number; minutes: number };
   };
+};
+export type StepRules = {
+  step2Multiplier: number;
+  step4Multiplier: number;
+  accuracyTarget: number;
+  mockPassTarget: number;
+  exemptionMultiplier: number;
+};
+/** Step 5 is mocks. */
+export type PlanTotals = {
+  requiredMin: number;
+  doneMin: number;
+  leftMin: number;
+  byStep: Record<"1" | "2" | "3" | "4" | "5", { requiredMin: number; doneMin: number }>;
+  questions: { required: number; answered: number; correct: number };
+  daysLeft: number;
+  minPerDayNeeded: number;
+  minPerDayAvailable: number;
 };
 export type FitTrim = { readingId: string | null; step: number; minutes: number; reason: string };
 export type ProjectionExtra = {
@@ -360,6 +385,8 @@ export type Projection = {
     belowPass: boolean;
     trims: FitTrim[];
   };
+  rules?: StepRules;
+  totals?: PlanTotals;
   sections: ProjectionSection[];
   readiness: number;
   readinessPlanToday: number;

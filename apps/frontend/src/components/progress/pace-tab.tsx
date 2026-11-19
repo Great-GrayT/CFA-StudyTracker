@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { FitBanner } from "@/components/plan/fit-banner";
 import { VerdictStrip } from "@/components/pace/verdict-strip";
+import { MetricsTile } from "@/components/pace/metrics-tile";
 import { PlanTile } from "@/components/pace/plan-tile";
 import { CoverageTile } from "@/components/pace/coverage-tile";
 import { TrackingTile } from "@/components/pace/tracking-tile";
@@ -56,6 +57,7 @@ export function PaceTab({ plan, ended, online }: { plan: Plan; ended: boolean; o
         </p>
       ) : null}
       <div className={s.bento}>
+        <MetricsTile p={p} className={s.wide} />
         <PlanTile p={p} className={s.plan} />
         <CoverageTile p={p} />
         <TrackingTile p={p} />
@@ -74,6 +76,7 @@ export function PaceTabSkeleton() {
         ))}
       </div>
       <div className={s.bento}>
+        <Skeleton className={`${s.wide} h-[220px] rounded-lg`} />
         <Skeleton className={`${s.plan} h-[420px] rounded-lg`} />
         <Skeleton className="h-[200px] rounded-lg" />
         <Skeleton className="h-[200px] rounded-lg" />

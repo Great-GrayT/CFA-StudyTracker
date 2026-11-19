@@ -2,7 +2,7 @@
 // and writes only the next horizon (14 days) as PlanTask rows. Step state is derived
 // from history on every call, so undo, edits and self-states can never drift.
 import { db } from "./db";
-import { parseTuning } from "../core/tuning";
+import { parseTuning, rulesOf } from "../core/tuning";
 import { OFF_PLAN } from "../core/task-credit";
 import { buildCatalog } from "../core/steps/catalog";
 import { addDays, diffDays } from "../core/steps/dates";
@@ -13,6 +13,7 @@ import {
   type DayCap, type FitReport, type Metrics, type MockSession, type ModuleWindow, type ScheduledTask,
 } from "../core/steps";
 import type { Declaration, HistoryTask, MockResult, ModuleState } from "../core/steps/state";
+import type { StepRules } from "../core/steps/rules";
 import type { ModuleCatalog } from "../core/steps/types";
 import type { WorkItem } from "../core/steps/work";
 
@@ -140,6 +141,8 @@ export type HorizonResult = {
   fit: FitReport; windows: ModuleWindow[]; metrics: Metrics; unplaced: WorkItem[]; load: number;
   relaxedPolicy: boolean;
   catalog: ModuleCatalog[];
+  /** Step rules in force for this plan. */
+  rules: StepRules;
   state: Map<string, ModuleState>;
   /** Every stated step the engine saw, stored and onboarding-derived, each with its date. */
   declarations: Declaration[];
@@ -234,7 +237,7 @@ async function planAndWrite(
       notesPageCount: u.notesPageCount, readingIds: u.readings.map((x) => x.readingId),
     })),
     resources: unitRows.flatMap((u) => u.resources),
-    planPackageSlugs: planSlugs, priority, lesHours: plan.lesReadingHours,
+    planPackageSlugs: planSlugs, priority, lesHours: plan.lesReadingHours, rules: rulesOf(tuning),
   });
 
   // ---- mocks ---------------------------------------------------------------
@@ -399,7 +402,7 @@ async function planAndWrite(
     planMode: tuning.planMode, reviewPolicy: tuning.reviewPolicy,
     rejectedTuning: parsed.rejected.map((r) => ({ field: r.field, reason: r.reason })),
     today, exam, tasks: result.tasks, fit: result.fit, windows: result.windows, metrics: result.metrics,
-    unplaced: result.unplaced, load: result.load, relaxedPolicy: result.relaxedPolicy, catalog, state: result.state, declarations,
+    unplaced: result.unplaced, load: result.load, relaxedPolicy: result.relaxedPolicy, catalog, rules: rulesOf(tuning), state: result.state, declarations,
   };
   if (opts.dryRun) return { created: 0, frozen: 0, kept: 0, deleted: 0, ...reported };
 

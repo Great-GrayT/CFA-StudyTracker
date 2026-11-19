@@ -66,6 +66,7 @@ export async function POST(req: Request): Promise<Response> {
     confidence: input.confidence,
     questionsAnswered: input.questionsAnswered,
     questionsCorrect: input.questionsCorrect,
+    questionNumbers: input.questionNumbers,
     note: input.note,
   };
 

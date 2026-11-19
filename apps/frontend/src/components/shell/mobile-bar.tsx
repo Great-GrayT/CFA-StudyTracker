@@ -16,7 +16,9 @@ const SLOT =
 export function MobileBar() {
   const pathname = usePathname();
   const record = useRecord();
-  const [today, syllabus, progress, plan] = NAV;
+  // Packages stays off the bar: a sixth slot would push targets under 44px.
+  const bySlot = (href: string) => NAV.find((n) => n.href === href)!;
+  const [today, syllabus, progress, plan] = ["/today", "/syllabus", "/progress", "/plan"].map(bySlot);
 
   const link = (item: (typeof NAV)[number]) => {
     const active = isActive(pathname, item.href);

@@ -3,7 +3,7 @@ import { db } from "../../src/lib/db";
 import { resetDb } from "../helpers/test-db";
 import { ensureLevel, setupPlanWithCatalogue, setupUserWithPlan } from "../helpers/fixtures";
 import { runSweep } from "../../src/lib/FUNC-sweep";
-import { localDateFor } from "../../src/core/slots";
+import { localDateFor, parseSchedule, planningDate } from "../../src/core/slots";
 import * as scheduleModule from "../../src/lib/FUNC-schedule";
 import * as coachModule from "../../src/lib/FUNC-coach";
 
@@ -28,7 +28,8 @@ test("the sweep rebuilds a plan whose horizon was built for an earlier day", asy
   await runSweep();
 
   const after = await db.studyPlan.findUniqueOrThrow({ where: { id: plan.id } });
-  expect(after.horizonGeneratedFor).toBe(localDateFor(new Date(), after.timeZone));
+  // After the debrief hour the study day is over and the sweep plans from tomorrow.
+  expect(after.horizonGeneratedFor).toBe(planningDate(new Date(), after.timeZone, parseSchedule(after.coachSchedule)));
 });
 
 test("the sweep does not rebuild twice in one local day", async () => {

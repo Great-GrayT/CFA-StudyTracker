@@ -143,6 +143,7 @@ function WorkRow({
         mod?.performance.s2,
         mod?.performance.s4,
         penaltyExtraQuestions(task),
+        projection.data?.rules?.accuracyTarget,
       )
     : null;
   const canDeclare = !recorded && !task.offPlan && step !== null && !!readingId;

@@ -30,6 +30,7 @@ export const keys = {
   curriculum: (levelId: string) => ["curriculum", levelId] as const,
   levels: ["levels"] as const,
   progress: (planId: string) => ["progress", planId] as const,
+  coverage: (planId: string) => ["coverage", planId] as const,
   logs: (planId: string) => ["logs", planId] as const,
   mocks: (planId: string) => ["mocks", planId] as const,
   packages: ["packages"] as const,
@@ -340,6 +341,7 @@ export function useInvalidateAfterLog(planId: string | undefined) {
     qc.invalidateQueries({ queryKey: ["campaign", planId] });
     qc.invalidateQueries({ queryKey: keys.projection(planId) });
     qc.invalidateQueries({ queryKey: keys.history(planId) });
+    qc.invalidateQueries({ queryKey: keys.coverage(planId) });
   };
 }
 
@@ -358,6 +360,7 @@ export type SessionInput = {
   note?: string;
   taskId?: string;
   finished?: boolean;
+  questionNumbers?: number[];
 };
 
 /** Records a session shaped like a plan cell: on plan it settles the cell, off plan it adds one. */
@@ -386,6 +389,7 @@ type RecordDetail = {
   answerReviewDone?: boolean;
   answerReviewMinutes?: number;
   note?: string;
+  questionNumbers?: number[];
 };
 /** Edits to an already recorded task: move it to another day or package. */
 type TaskMove = { date?: string; packageId?: string };
@@ -489,4 +493,16 @@ export function flattenCurriculum(curriculum: Curriculum | undefined): FlatLos[]
     }
   }
   return out;
+}
+
+/**
+ * Per-package coverage: videos watched, questions answered and which are left.
+ * No staleTime: a record changes it, and the Packages page is the one reader.
+ */
+export function useCoverage(planId: string | undefined): UseQueryResult<import("./coverage-types").Coverage> {
+  return useQuery({
+    queryKey: keys.coverage(planId ?? ""),
+    queryFn: () => api.get<import("./coverage-types").Coverage>(`plans/${encodeURIComponent(planId!)}/coverage`),
+    enabled: !!planId,
+  });
 }

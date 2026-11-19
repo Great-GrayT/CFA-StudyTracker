@@ -19,6 +19,7 @@ export const config = {
     "/today/:path*",
     "/syllabus/:path*",
     "/progress/:path*",
+    "/packages/:path*",
     "/plan/:path*",
     "/settings/:path*",
     "/onboarding/:path*",

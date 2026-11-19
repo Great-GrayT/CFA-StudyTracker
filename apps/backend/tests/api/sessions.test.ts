@@ -114,4 +114,15 @@ describe("POST /api/plans/:id/sessions", () => {
     const foreign = await db.reading.create({ data: { topicId: topic.id, name: "Foreign", order: 1 } });
     expect((await post(user, planId, base(foreign.id))).status).toBe(400);
   });
+
+  test("question numbers are stored on the off-plan cell; invalid ones are rejected", async () => {
+    const { planId, user, reading, losIds } = await setup();
+    const res = await post(user, planId, { ...base(reading.id), kind: "questions", questionNumbers: [3, 1, 3] });
+    expect(res.status).toBe(201);
+    const id = (await readJson(res)).task.id;
+    expect((await db.planTask.findUniqueOrThrow({ where: { id } })).questionNumbers).toEqual([1, 3]);
+    const logs = await db.studyLogEntry.findMany({ where: { taskId: id, losId: { in: losIds } } });
+    expect(logs.reduce((n, l) => n + l.questionsAnswered, 0)).toBe(2);
+    expect((await post(user, planId, { ...base(reading.id), questionNumbers: [0] })).status).toBe(400);
+  });
 });

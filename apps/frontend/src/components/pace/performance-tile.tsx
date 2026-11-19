@@ -18,8 +18,9 @@ import {
 import { Tile } from "./tile";
 import s from "./pace.module.css";
 
-const BAR_Q = 0.8;
-const BAR_MOCK = 0.75;
+// Bars follow the plan's own step rules, falling back to the engine defaults.
+const barQ = (p: Projection) => (p.rules?.accuracyTarget ?? 80) / 100;
+const barMock = (p: Projection) => (p.rules?.mockPassTarget ?? 75) / 100;
 const focus = "focus-visible:ring-ring rounded-sm outline-hidden focus-visible:ring-2";
 
 /** Clear of the bar is green, within 5 points amber, below is red. */
@@ -51,7 +52,7 @@ function Rows({ p }: { p: Projection }) {
   const idle = p.sections.length - active.length;
   const lowest = (sec: ProjectionSection) => {
     const a = accuracy(sec.performance.initial);
-    return a !== null && a < BAR_Q - 0.05;
+    return a !== null && a < barQ(p) - 0.05;
   };
   return (
     <div className={s.pr}>
@@ -65,10 +66,10 @@ function Rows({ p }: { p: Projection }) {
           <Link href={sectionHref(sec.topicId)} title={sec.name} className={cn(s.link, focus, "truncate max-md:py-3", lowest(sec) && "text-alarm-ink")}>
             {sec.name}
           </Link>
-          <Score t={sec.performance.initial} bar={BAR_Q} label={`${sec.name} initial`} empty="Not yet" />
-          <Score t={sec.performance.review} bar={BAR_Q} label={`${sec.name} review`} empty="Not yet" />
+          <Score t={sec.performance.initial} bar={barQ(p)} label={`${sec.name} initial`} empty="Not yet" />
+          <Score t={sec.performance.review} bar={barQ(p)} label={`${sec.name} review`} empty="Not yet" />
           <span className="max-[759px]:hidden">
-            <Score t={sec.performance.mocks} bar={BAR_MOCK} label={`${sec.name} mocks`} empty="Not yet" />
+            <Score t={sec.performance.mocks} bar={barMock(p)} label={`${sec.name} mocks`} empty="Not yet" />
           </span>
           {sec.performance.extras.tasks > 0 ? (
             <Link href="/today" className={cn(s.link, focus, "text-alarm-ink whitespace-nowrap")}>

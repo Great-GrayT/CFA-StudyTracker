@@ -3,8 +3,9 @@ import {
   planWindow, barGeometry, circlePos, axisTicks, formatReadiness, formatHours, stepFractions,
   weakestSection, owedMinutes, trackingBuckets, cumulative, sortModules, behindCount, hasAnyProgress,
   sectionWindows, day, DAY, moduleHref, accuracy, perfRows,
+  planTotalsLine, dailyNeed, stepSlices, topicMetrics,
 } from "./pace-view";
-import type { Projection, ProjectionSection, ProjectionWindow } from "./types";
+import type { PlanTotals, Projection, ProjectionSection, ProjectionWindow } from "./types";
 
 const TODAY = "2026-11-16";
 const EXAM = "2027-05-20";
@@ -238,5 +239,48 @@ describe("perfRows", () => {
     expect(rows[0]!.extras[1]!.text).toBe("+20 min");
     expect(rows[1]!.extras).toEqual([]);
     expect(rows[2]!.extras.map((e) => e.taskId)).toEqual(["t3"]);
+  });
+});
+
+describe("plan metrics", () => {
+  const step = (k: string, requiredMin: number, doneMin: number) => [k, { requiredMin, doneMin }] as const;
+  const totals: PlanTotals = {
+    requiredMin: 1000, doneMin: 250, leftMin: 750,
+    byStep: Object.fromEntries([step("1", 400, 200), step("2", 300, 50), step("3", 100, 0), step("4", 100, 0), step("5", 100, 0)]) as PlanTotals["byStep"],
+    questions: { required: 1840, answered: 100, correct: 70 },
+    daysLeft: 100, minPerDayNeeded: 90, minPerDayAvailable: 60,
+  };
+  const sec = (q?: { required: number; answered: number; correct: number }) =>
+    ({
+      topicId: "t", name: "Ethics", examWeight: 15, questions: q,
+      steps: [1, 2, 3, 4].map((n) => ({ step: n, plannedMin: 60, donePassedMin: 30, spentUnpassedMin: 10, planTodayMin: 0 })),
+      modules: [], performance: { initial: null, review: null, mocks: null, extras: { tasks: 0, minutes: 0 } },
+    }) as unknown as ProjectionSection;
+  const proj = (over: Partial<Projection>) => ({ mocks: { done: 1, planned: 5, firstDate: null }, sections: [], ...over }) as unknown as Projection;
+
+  it("summarises totals in one line", () => {
+    expect(planTotalsLine(proj({ totals }))).toBe("16.7 h planned, 1,840 questions, 6 mocks");
+    expect(planTotalsLine(proj({}))).toBeNull();
+  });
+  it("flags a shortfall only when need exceeds availability", () => {
+    expect(dailyNeed(totals).short).toBe(true);
+    expect(dailyNeed({ ...totals, minPerDayNeeded: 60 }).short).toBe(false);
+  });
+  it("slices the bar by required share with done share per slice", () => {
+    const sl = stepSlices(totals);
+    expect(sl.map((x) => x.width)).toEqual([40, 30, 10, 10, 10]);
+    expect(sl[0]!.done).toBe(0.5);
+    expect(sl[4]!.label).toBe("Mocks");
+    expect(stepSlices({ ...totals, requiredMin: 0, byStep: { ...totals.byStep, "1": { requiredMin: 0, doneMin: 0 } } })[0]!.done).toBe(0);
+  });
+  it("marks a topic below target by integer compare, default 80", () => {
+    const [a] = topicMetrics(proj({ sections: [sec({ required: 50, answered: 10, correct: 8 })] }));
+    expect(a!.below).toBe(false);
+    expect(a!.plannedMin).toBe(240);
+    expect(a!.doneMin).toBe(160);
+    expect(topicMetrics(proj({ sections: [sec({ required: 50, answered: 10, correct: 8 })], rules: { accuracyTarget: 85 } as Projection["rules"] }))[0]!.below).toBe(true);
+    const [none] = topicMetrics(proj({ sections: [sec(undefined)] }));
+    expect(none!.accuracy).toBeNull();
+    expect(none!.below).toBe(false);
   });
 });

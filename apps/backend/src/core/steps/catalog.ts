@@ -1,7 +1,7 @@
 import type {
   ModuleCatalog, ReadingRow, ResourceRow, SourceOption, StepNo, UnitRow,
 } from "./types";
-import { ANSWER_WPM, MIN_PER_QUESTION, NOTES_MIN_PER_PAGE } from "./rules";
+import { ANSWER_WPM, DEFAULT_RULES, MIN_PER_QUESTION, NOTES_MIN_PER_PAGE, type StepRules } from "./rules";
 
 export const LES_SLUG = "cfa-les";
 const READ_KINDS = new Set(["lecture", "eocq", "seminar"]);
@@ -29,8 +29,9 @@ function newAgg(packageId: string): Agg {
 export function buildCatalog(input: {
   readings: ReadingRow[]; units: UnitRow[]; resources: ResourceRow[];
   planPackageSlugs: string[]; priority: Record<1 | 2 | 3 | 4 | 5, string[]>; lesHours: number;
+  rules?: StepRules;
 }): ModuleCatalog[] {
-  const { readings, units, resources, planPackageSlugs, priority, lesHours } = input;
+  const { readings, units, resources, planPackageSlugs, priority, lesHours, rules } = input;
   const onPlan = new Set(planPackageSlugs);
   const rMap = new Map(readings.map((r) => [r.id, r]));
   const byUnit = new Map<string, ResourceRow[]>();
@@ -154,6 +155,7 @@ export function buildCatalog(input: {
     out.push({
       readingId: rd.id, topicId: rd.topicId, topicOrder: rd.topicOrder, readingOrder: rd.order,
       examWeight: (rd.examWeightMin + rd.examWeightMax) / 200, options,
+      ...(rules ? { rules } : {}),
     });
   }
   return out;
@@ -165,5 +167,6 @@ export function step1Minutes(m: ModuleCatalog): number {
 
 // Baselines use uncrashed step 1 minutes (spec Builder answer 6).
 export function adequateMinutes(m: ModuleCatalog, step: 2 | 4): number {
-  return (step === 2 ? 2 : 4) * step1Minutes(m);
+  const r = m.rules ?? DEFAULT_RULES;
+  return (step === 2 ? r.step2Multiplier : r.step2Multiplier * r.step4Multiplier) * step1Minutes(m);
 }

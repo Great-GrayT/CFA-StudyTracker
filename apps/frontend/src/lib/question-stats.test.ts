@@ -47,15 +47,23 @@ describe("questionStats", () => {
     expect(questionStats(2, perf({ extraPendingQ: 3 }), totals, perf(), null, 1)!.progress.text).toBe("10 / 15 + 1");
   });
 
-  test("total adds topic mocks and compares with m2, plus m4 once step 2 passed", () => {
+  test("total adds topic mocks and compares with m2, plus m4 once step 4 is under way", () => {
     const s2 = perf({ adequateQ: 20, passed: false });
     expect(questionStats(2, s2, totals, s2, perf(), null)!.total).toMatchObject({ text: "40 total", met: true });
     const short = { ...totals, answered: 5, mockAnswered: 5 };
     expect(questionStats(2, s2, short, s2, null, null)!.total!.met).toBe(false);
     const passed = perf({ adequateQ: 20, passed: true });
-    // needs 20 + 15 = 35; 40 answered is enough, 30 is not.
+    // needs 20 + 15 = 35 once step 4 has answers; 40 answered is enough, 30 is not.
     expect(questionStats(2, passed, totals, passed, perf(), null)!.total!.met).toBe(true);
     expect(questionStats(2, passed, { ...totals, mockAnswered: 0 }, passed, perf(), null)!.total!.met).toBe(false);
+    expect(questionStats(4, perf({ answered: 0 }), { ...totals, mockAnswered: 0 }, passed, perf({ answered: 0 }), null)!.total!.met).toBe(false);
+  });
+
+  test("a passed step 2 is not marked short by an unstarted step 4", () => {
+    const passed = perf({ adequateQ: 12, answered: 14, correct: 13, passed: true });
+    const s4 = perf({ adequateQ: 31, answered: 0, correct: 0, minutes: 0 });
+    const t = { answered: 14, correct: 13, mockAnswered: 0, mockCorrect: 0 };
+    expect(questionStats(2, passed, t, passed, s4, null)!.total).toMatchObject({ text: "14 total", met: true });
   });
 
   test("overall and round rates are judged against 80%", () => {
