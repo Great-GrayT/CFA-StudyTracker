@@ -57,6 +57,8 @@ export type PrescribedTask = {
   extraReason: string | null;
   answerReviewDone: boolean;
   mockRef: string | null;
+  /** How much faster than normal the plan asks for this task (1.5 = 1.5x), null at normal pace. */
+  pace: number | null;
 };
 
 export type PrescribedDay = {
@@ -414,6 +416,7 @@ export async function getPrescription(
       extraReason: task.extraReason,
       answerReviewDone: task.answerReviewDone,
       mockRef: task.mockRef,
+      pace: paceOf(task, offPlan),
     };
 
     const list = byDate.get(dateStr) ?? [];
@@ -478,4 +481,14 @@ export async function getPrescription(
     });
   }
   return days;
+}
+
+/**
+ * Full-pace minutes over planned minutes: the engine's crash factor for this task.
+ * Off-plan cells are the candidate's own record, and tiny drift is rounding, not a speed-up.
+ */
+export function paceOf(task: { workMinutes: number | null; estimatedMinutes: number }, offPlan: boolean): number | null {
+  if (offPlan || !task.workMinutes || task.estimatedMinutes <= 0) return null;
+  const r = Math.round((task.workMinutes / task.estimatedMinutes) * 10) / 10;
+  return r >= 1.1 ? r : null;
 }

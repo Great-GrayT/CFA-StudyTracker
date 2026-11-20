@@ -1,5 +1,5 @@
 import { test, expect } from "vitest";
-import { examPhase, studyNextRows, minutesShort, kindLabel, daysLeft, sortCells, postponedLabel, zoneSuffix } from "./today";
+import { examPhase, studyNextRows, minutesShort, kindLabel, daysLeft, sortCells, postponedLabel, zoneSuffix, paceHint } from "./today";
 import type { Progress, StudyNextItem } from "./types";
 
 const NOW = Date.parse("2026-11-15T12:00:00Z");
@@ -88,4 +88,13 @@ test("the debrief time names the plan's zone only when the device is elsewhere",
   expect(zoneSuffix("Europe/London", "Europe/London", now)).toBe("");
   expect(zoneSuffix("America/New_York", "Europe/London", now)).toBe(" EST");
   expect(zoneSuffix("UTC", "Asia/Tokyo", now)).toBe(" UTC");
+});
+
+test("paceHint names the speed-up per kind and stays quiet at normal pace", () => {
+  expect(paceHint("content-video", 1.5)!.short).toBe("Watch at 1.5x");
+  expect(paceHint("review", 1.5)!.short).toBe("Read at 1.5x");
+  expect(paceHint("questions", 1.3)!.short).toBe("2.3 min a question");
+  expect(paceHint("answer-review", 1.3)!.long).toMatch(/^Review the worked answers faster/);
+  expect(paceHint("questions", 1)).toBeNull();
+  expect(paceHint("questions", null)).toBeNull();
 });

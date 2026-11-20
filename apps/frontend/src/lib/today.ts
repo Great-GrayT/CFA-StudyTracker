@@ -95,3 +95,24 @@ export function zoneSuffix(planZone: string, deviceZone: string, nowMs = Date.no
     .find((p) => p.type === "timeZoneName")?.value;
   return name ? ` ${name}` : "";
 }
+
+const VIDEO_KINDS = new Set(["content-video", "seminar", "eocq", "read"]);
+const BASE_MIN_PER_QUESTION = 3;
+
+/**
+ * What the plan's speed-up means for this task, in the candidate's terms, or null at
+ * normal pace. The engine shortens reading and video by the pace and questions by less.
+ */
+export function paceHint(kind: string, pace: number | null | undefined): { short: string; long: string } | null {
+  if (!pace || pace < 1.1) return null;
+  const x = `${pace}x`;
+  const why = "The plan speeds this up so everything fits your hours.";
+  if (VIDEO_KINDS.has(kind)) return { short: `Watch at ${x}`, long: `Watch or read this at ${x} speed. ${why}` };
+  if (kind === "content-notes" || kind === "review") return { short: `Read at ${x}`, long: `Read at ${x} pace: skim what you already know. ${why}` };
+  if (kind === "questions") {
+    const per = Math.round((BASE_MIN_PER_QUESTION / pace) * 10) / 10;
+    return { short: `${per} min a question`, long: `Answer faster: about ${per} min a question instead of ${BASE_MIN_PER_QUESTION}. ${why}` };
+  }
+  if (kind === "answer-review") return { short: `Review at ${x}`, long: `Review the worked answers faster, at ${x}. ${why}` };
+  return { short: `${x} pace`, long: `This runs at ${x} your normal pace. ${why}` };
+}

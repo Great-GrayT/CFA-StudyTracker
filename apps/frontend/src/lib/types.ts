@@ -267,6 +267,8 @@ export type PrescribedTask = {
   extraReason: string | null;
   answerReviewDone: boolean;
   mockRef: string | null;
+  /** How much faster than normal the plan asks for this task (1.5 = 1.5x); null or absent at normal pace. */
+  pace?: number | null;
 };
 
 export type PrescribedDay = {

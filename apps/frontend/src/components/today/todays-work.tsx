@@ -20,7 +20,7 @@ import { QuestionStatsBlock } from "./question-stats";
 import { useRecord } from "@/components/record/record-provider";
 import { useUndoRecord } from "@/components/record/use-undo-record";
 import { cn } from "@/lib/utils";
-import { kindLabel, minutesShort, postponedLabel, sortCells } from "@/lib/today";
+import { kindLabel, minutesShort, paceHint, postponedLabel, sortCells } from "@/lib/today";
 import type { PrescribedDay, PrescribedMaterial, PrescribedTask } from "@/lib/types";
 import { RegionError } from "@/components/states/region-states";
 import { TruncatedText } from "@/components/states/truncated-text";
@@ -126,6 +126,7 @@ function WorkRow({
   const record = useRecord();
   const { undo, pending } = useUndoRecord(planId);
   const done = isDone(task);
+  const speed = paceHint(task.kind, task.pace);
   const partial = task.status === "partial";
   const recorded = done || partial;
   const moduleName = [task.topicName, task.moduleTitle].filter(Boolean).join(", ") || "Unassigned work";
@@ -173,8 +174,18 @@ function WorkRow({
         <TruncatedText text={moduleName} className={cn("text-[14px]", recorded && "text-muted-foreground")} />
       </span>
 
-      {task.postponedFrom || task.offPlan ? (
+      {task.postponedFrom || task.offPlan || (speed && !done) ? (
         <span className="flex shrink-0 gap-1.5 max-md:order-last max-md:basis-full max-md:pl-6">
+          {speed && !done ? (
+            <Badge
+              variant="outline"
+              title={speed.long}
+              aria-label={speed.long}
+              className="rounded-sm border-[var(--gate)] px-1.5 text-[12px] font-medium text-[var(--gate-ink)]"
+            >
+              {speed.short}
+            </Badge>
+          ) : null}
           {task.postponedFrom ? (
             <Badge variant="outline" className="rounded-sm px-1.5 text-[12px] font-medium">
               {postponedLabel(task.postponedFrom)}
