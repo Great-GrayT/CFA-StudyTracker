@@ -5,7 +5,7 @@ import {
   sectionWindows, day, DAY, moduleHref, accuracy, perfRows,
   planTotalsLine, dailyNeed, stepSlices, topicMetrics,
 } from "./pace-view";
-import { calendarStrip, formatWeight, hourFigures } from "./pace-view";
+import { calendarStrip, dayInfo, formatWeight, hourFigures, planVsSchedule } from "./pace-view";
 import type { PlanTotals, Projection, ProjectionSection, ProjectionWindow } from "./types";
 
 const TODAY = "2026-11-16";
@@ -355,5 +355,58 @@ describe("calendarStrip", () => {
     expect(c.win.start).toBe(Date.parse("2026-11-19T00:00:00Z"));
     expect(c.holidays[0]!.label).toBe("24 Dec (cancelled)");
     expect(c.caption).not.toContain("Holidays");
+  });
+});
+
+describe("dayInfo", () => {
+  const byStep = { "1": 120, "2": 0, "3": 60, "4": 0, "5": 0 };
+  it("splits planned hours by non-zero step and lists events", () => {
+    const p = base({
+      daily: [{ date: "2026-12-25", plannedMin: 180, doneMin: 0, byStep }, row("2026-11-20", 60, 30)],
+      calendar: { start: "2026-11-01", mocks: [{ date: "2026-12-25", done: false, title: "Mock 1" }] },
+    });
+    const d = dayInfo(p, "2026-12-25");
+    expect(d.label).toBe("Fri 25 Dec");
+    expect(d.steps.map((x) => x.key)).toEqual(["1", "3"]);
+    expect(d.doneMin).toBeNull();
+    expect(d.events.map((e) => e.text)).toEqual(["Holiday 24 Dec to 2 Jan", "Mock planned: Mock 1"]);
+    expect(d.text).toContain("3 h planned");
+  });
+  it("marks today with done hours, the gate and the exam day", () => {
+    const p = base();
+    expect(dayInfo(p, "2026-11-20").events[0]!.kind).toBe("today");
+    expect(dayInfo(p, "2026-11-20").doneMin).toBe(0);
+    expect(dayInfo(p, "2027-04-18").events.map((e) => e.text)).toEqual(["Mocks start"]);
+    expect(dayInfo(p, "2027-05-18").events.map((e) => e.text)).toEqual(["Exam day"]);
+    expect(dayInfo(p, "2027-05-18").text).toContain("Nothing planned");
+  });
+});
+
+describe("planVsSchedule", () => {
+  const t = (req: number[]) => ({
+    ...totals,
+    byStep: Object.fromEntries(req.map((r, i) => [String(i + 1), { requiredMin: r, doneMin: 0 }])),
+  });
+  const d = (n: number[]) => ({ date: "2026-11-20", plannedMin: 0, doneMin: 0, byStep: Object.fromEntries(n.map((x, i) => [String(i + 1), x])) });
+  it("reports cut hours per step and 'Kept whole' otherwise", () => {
+    const r = planVsSchedule(base({ totals: t([600, 300, 0, 600, 0]), daily: [d([600, 300, 0, 200, 0])], calendar: undefined }))!;
+    expect(r.rows.map((x) => x.key)).toEqual(["1", "2", "4"]);
+    expect(r.rows[0]!.text).toBe("Kept whole");
+    expect(r.rows[2]!.text).toBe("10 h planned, 3.3 h scheduled, 6.7 h cut");
+    expect(r.rows[2]!.kept).toBeCloseTo(1 / 3);
+    expect(r.note).toBeNull();
+  });
+  it("counts mocks as two sessions and groups trim reasons", () => {
+    const mocks = Array.from({ length: 14 }, (_, i) => ({ date: `2027-05-${String(i + 1).padStart(2, "0")}`, done: false, title: null }));
+    const trims = [1, 2, 3].map(() => ({ readingId: null, step: 5, minutes: 120, reason: "mock-window-full" }));
+    const fit = { crash: 1, cancelledHolidayIds: [], feasible: false, belowPass: true, trims };
+    const r = planVsSchedule(base({ totals: t([60, 0, 0, 0, 600]), daily: [d([60, 0, 0, 0, 420])], calendar: { start: "2026-11-01", mocks }, fit }))!;
+    const m = r.rows.find((x) => x.key === "5")!;
+    expect(m.text).toBe("10 mocks, 7 scheduled, 3 cut (mock window full)");
+    expect(m.kept).toBeCloseTo(0.7);
+    expect(r.note).toMatch(/^Your hours cannot hold/);
+  });
+  it("is null without totals", () => {
+    expect(planVsSchedule(base({ totals: undefined }))).toBeNull();
   });
 });

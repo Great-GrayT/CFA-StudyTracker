@@ -490,7 +490,9 @@ export type CalendarStrip = {
   exam: number;
   gate: number | null;
   mocks: { pct: number; done: boolean; title: string; count: number }[];
-  load: { left: number; width: number; opacity: number; done: boolean }[];
+  load: { date: string; left: number; width: number; opacity: number; done: boolean }[];
+  /** Calendar days in the window, plan start to exam day inclusive. */
+  days: number;
   caption: string;
 };
 
@@ -522,7 +524,7 @@ export function calendarStrip(p: Projection): CalendarStrip {
     const g = box(x.date, x.date);
     if (!g || (x.plannedMin <= 0 && x.doneMin <= 0)) return [];
     const done = x.doneMin > 0 && x.date <= today;
-    return [{ ...g, opacity: Math.max(0.15, x.plannedMin / max), done }];
+    return [{ date: x.date.slice(0, 10), ...g, opacity: Math.max(0.15, x.plannedMin / max), done }];
   });
   // Mocks a few days apart would overlap into a smear, so near ones share one counted marker.
   const mocks: CalendarStrip["mocks"] = [];
@@ -553,6 +555,109 @@ export function calendarStrip(p: Projection): CalendarStrip {
     today: day(today) >= win.start && day(today) < win.end ? pct(day(today) + DAY / 2, win) : null,
     exam: pct(day(p.exam) + DAY / 2, win),
     gate: gateMs >= win.start && gateMs < win.end ? pct(gateMs, win) : null,
-    mocks, load, caption: parts.join(" "),
+    mocks, load, days: Math.round((win.end - win.start) / DAY), caption: parts.join(" "),
+  };
+}
+
+// ---- Day cursor -----------------------------------------------------------
+
+const dowFmt = new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", weekday: "short", day: "numeric", month: "short" });
+const STEP_KEYS = ["1", "2", "3", "4", "5"] as const;
+
+export type DayInfo = {
+  date: string;
+  label: string;
+  plannedMin: number;
+  /** Null for a future day, where nothing can be done yet. */
+  doneMin: number | null;
+  steps: { key: (typeof STEP_KEYS)[number]; label: string; min: number }[];
+  events: { kind: "today" | "exam" | "gate" | "holiday" | "mock"; text: string }[];
+  /** Concise sentence for a screen reader. */
+  text: string;
+};
+
+/** Everything the strip's hover card shows for one day. */
+export function dayInfo(p: Projection, isoDate: string): DayInfo {
+  const date = isoDate.slice(0, 10);
+  const today = p.asOf.slice(0, 10);
+  const row = p.daily.find((d) => d.date.slice(0, 10) === date);
+  const steps = STEP_KEYS.flatMap((key) => {
+    const min = row?.byStep[key] ?? 0;
+    return min > 0 ? [{ key, label: SLICE_LABEL[key], min }] : [];
+  });
+  const events: DayInfo["events"] = [];
+  if (date === today) events.push({ kind: "today", text: "Today" });
+  if (date === p.exam.slice(0, 10)) events.push({ kind: "exam", text: "Exam day" });
+  if (date === p.gate.slice(0, 10)) events.push({ kind: "gate", text: "Mocks start" });
+  for (const h of p.holidays) {
+    if (date >= h.start.slice(0, 10) && date <= h.end.slice(0, 10)) {
+      events.push({ kind: "holiday", text: `Holiday ${range(h.start, h.end)}${h.cancelled ? " (cancelled)" : ""}` });
+    }
+  }
+  for (const m of p.calendar?.mocks ?? []) {
+    if (m.date.slice(0, 10) === date) {
+      events.push({ kind: "mock", text: `${m.done ? "Mock taken" : "Mock planned"}${m.title ? `: ${m.title}` : ""}` });
+    }
+  }
+  const plannedMin = row?.plannedMin ?? 0;
+  const doneMin = date <= today ? (row?.doneMin ?? 0) : null;
+  const label = dowFmt.format(new Date(day(date))).replace(",", "");
+  const bits = [
+    plannedMin > 0 ? `${formatHours(plannedMin)} planned${steps.length ? `: ${steps.map((x) => `${x.label} ${formatHours(x.min)}`).join(", ")}` : ""}` : "Nothing planned",
+    ...(doneMin !== null ? [`${formatHours(doneMin)} done`] : []),
+    ...events.map((e) => e.text),
+  ];
+  return { date, label, plannedMin, doneMin, steps, events, text: `${label}. ${bits.join(". ")}.` };
+}
+
+// ---- Original plan vs schedule --------------------------------------------
+
+export type PlanRow = {
+  key: (typeof STEP_KEYS)[number];
+  label: string;
+  /** Share of the row's bar that is scheduled, 0..1. */
+  kept: number;
+  whole: boolean;
+  text: string;
+};
+
+const oneDp = (x: number) => (Number.isInteger(x) ? String(x) : x.toFixed(1));
+const lowerFirst = (t: string) => t.charAt(0).toLowerCase() + t.slice(1);
+
+/** One row per step: the original requirement, what the schedule holds (done work included), and the cut. Null without totals. */
+export function planVsSchedule(p: Projection): { rows: PlanRow[]; note: string | null } | null {
+  const t = p.totals;
+  if (!t) return null;
+  const rows = STEP_KEYS.flatMap((key): PlanRow[] => {
+    const original = t.byStep[key].requiredMin;
+    const scheduled = p.daily.reduce((a, d) => a + (d.byStep[key] ?? 0), 0);
+    const label = SLICE_LABEL[key];
+    const cut = Math.max(0, original - scheduled);
+    if (key === "5" && p.calendar) {
+      // One full mock is two sessions on the calendar.
+      const trims = p.fit.trims.filter((x) => x.step === 5);
+      const sched = p.calendar.mocks.length / 2;
+      const orig = sched + trims.length;
+      if (orig <= 0) return [];
+      const why = new Map<string, number>();
+      for (const x of trims) why.set(x.reason, (why.get(x.reason) ?? 0) + 1);
+      const reasons = [...why].map(([r, c]) => (why.size > 1 ? `${c} ${lowerFirst(reasonText(r))}` : lowerFirst(reasonText(r)))).join(", ");
+      return [{
+        key, label, kept: sched / orig, whole: trims.length === 0,
+        text: trims.length === 0 ? "Kept whole" : `${oneDp(orig)} mocks, ${oneDp(sched)} scheduled, ${trims.length} cut (${reasons})`,
+      }];
+    }
+    if (original <= 0) return [];
+    const whole = cut < 0.5;
+    return [{
+      key, label, kept: clamp01(scheduled / original), whole,
+      text: whole ? "Kept whole" : `${formatHours(original)} planned, ${formatHours(scheduled)} scheduled, ${formatHours(cut)} cut`,
+    }];
+  });
+  return {
+    rows,
+    note: p.fit.belowPass
+      ? "Your hours cannot hold the full plan, so review questions and mocks are cut first; reading and first questions stay whole."
+      : null,
   };
 }

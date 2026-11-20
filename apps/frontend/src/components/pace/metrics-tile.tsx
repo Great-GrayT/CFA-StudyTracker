@@ -1,9 +1,10 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import { useId } from "react";
 import { cn } from "@/lib/utils";
 import type { PlanTotals, Projection } from "@/lib/types";
-import { accuracyTarget, calendarStrip, formatHours, formatPercent, formatWeight, hourFigures, shortDate, stepSlices, topicMetrics } from "@/lib/pace-view";
+import { accuracyTarget, formatHours, formatPercent, formatWeight, hourFigures, planVsSchedule, topicMetrics } from "@/lib/pace-view";
+import { CalendarStrip } from "./calendar-strip";
 import { Tile } from "./tile";
 import s from "./pace.module.css";
 
@@ -84,84 +85,28 @@ function Figures({ p, t, target }: { p: Projection; t: PlanTotals; target: numbe
   );
 }
 
-const anchor = (x: number): CSSProperties => (x > 70 ? { right: `${100 - x}%`, textAlign: "right" } : { left: `${x}%` });
-
-/** Plan start to exam: holidays, today, the mock gate, mocks, and the planned load per day. */
-function CalendarStrip({ p }: { p: Projection }) {
-  const c = calendarStrip(p);
+/** What the plan originally asked for per step against what the schedule holds; hatched is cut. */
+function PlanVsSchedule({ p }: { p: Projection }) {
+  const id = useId();
+  const v = planVsSchedule(p);
+  if (!v) return null;
   return (
-    <figure className={s.cal}>
-      <div className={s.calPlot} role="img" aria-label={`Plan calendar. ${c.caption}`}>
-        {c.today !== null ? (
-          <span className={cn(s.calLab, s.calLabNow)} style={{ top: 0, ...anchor(c.today) }} aria-hidden>
-            <b>Today</b>
-          </span>
-        ) : null}
-        <span className={s.calLab} style={{ top: 0, right: `${100 - c.exam}%`, textAlign: "right" }} aria-hidden>
-          <b>Exam</b> {shortDate(p.exam)}
-        </span>
-        {c.gate !== null ? (
-          <span className={s.calLab} style={{ top: 16, right: `${100 - c.gate}%`, textAlign: "right" }} aria-hidden>
-            Mocks from {shortDate(p.gate)}
-          </span>
-        ) : null}
-        <div className={s.calTrack} />
-        {c.holidays.map((h) => (
-          <div
-            key={h.id}
-            className={cn(s.hol, h.cancelled && s.calHolX)}
-            style={{ left: `${h.left}%`, width: `${h.width}%`, top: "var(--lab)", bottom: "auto", height: 28 }}
-            title={`Holiday ${h.label}`}
-          />
-        ))}
-        {c.gate !== null ? <i className={cn(s.calLine, s.gateLine)} style={{ left: `${c.gate}%` }} title={`Mocks from ${shortDate(p.gate)}`} /> : null}
-        {c.today !== null ? <i className={cn(s.calLine, s.now)} style={{ left: `${c.today}%` }} title={`Today ${shortDate(p.asOf)}`} /> : null}
-        <i className={cn(s.calLine, s.calExam)} style={{ left: `${c.exam}%` }} title={`Exam ${shortDate(p.exam)}`} />
-        {c.mocks.map((m, i) => (
-          <i key={i} className={cn(s.calDot, m.done && s.calDotDone, m.count > 1 && s.calDotMany)} style={{ left: `${m.pct}%` }} title={m.title}>
-            {m.count > 1 ? m.count : null}
-          </i>
-        ))}
-        <div className={s.calLoad} aria-hidden>
-          {c.load.map((d, i) => (
-            <i key={i} style={{ left: `${d.left}%`, width: `${d.width}%`, opacity: d.done ? 1 : d.opacity }} />
-          ))}
-        </div>
-        <div className={s.calMonths} aria-hidden>
-          {c.months.map((m) => (
-            <span key={m.pct} style={{ left: `${m.pct}%` }}>{m.label}</span>
-          ))}
-        </div>
-      </div>
-      <figcaption className={s.calCap}>
-        {c.caption} Hatched is a holiday, a ring is a planned mock session (a number counts several), a filled dot one taken, solid blue is a day studied.
-      </figcaption>
-    </figure>
-  );
-}
-
-function StepBar({ t }: { t: PlanTotals }) {
-  const slices = stepSlices(t).filter((x) => x.requiredMin > 0);
-  const summary = slices.map((x) => `${x.label} ${formatHours(x.doneMin)} of ${formatHours(x.requiredMin)}`).join(", ");
-  return (
-    <>
-      <ul className={s.mBar} role="img" aria-label={`Required hours by step. ${summary}.`}>
-        {slices.map((x) => (
-          <li key={x.key} className={STEP_CLASS[x.key]} style={{ flexBasis: `${x.width}%` }}>
-            <i style={{ width: `${x.done * 100}%` }} />
+    <section className={s.pv} aria-labelledby={id}>
+      <h3 id={id}>Original plan vs your schedule</h3>
+      <ul>
+        {v.rows.map((r) => (
+          <li key={r.key} className={STEP_CLASS[r.key]}>
+            <span className={s.pvName}>{r.label}</span>
+            <span className={cn(s.pvBar, r.whole && s.pvWhole)} aria-hidden>
+              <i style={{ width: `${r.kept * 100}%` }} />
+            </span>
+            <span className={cn(s.pvTxt, !r.whole && s.pvCut)}>{r.text}</span>
           </li>
         ))}
       </ul>
-      <ul className={s.mKey} aria-hidden>
-        {slices.map((x) => (
-          <li key={x.key} className={STEP_CLASS[x.key]}>
-            <i />
-            {x.label} {formatHours(x.requiredMin)}
-          </li>
-        ))}
-        <li>Solid is done, faded is left</li>
-      </ul>
-    </>
+      {v.note ? <p className={s.pvNote}>{v.note}</p> : null}
+      <p className={s.pvKey}>Solid is scheduled, hatched is cut. Full width is the original requirement.</p>
+    </section>
   );
 }
 
@@ -226,15 +171,15 @@ export function MetricsTile({ p, className }: { p: Projection; className?: strin
       expanded={
         <div className="min-h-0 flex-1 overflow-auto">
           <CalendarStrip p={p} />
+          <PlanVsSchedule p={p} />
           <Figures p={p} t={t} target={target} />
-          <StepBar t={t} />
           <TopicTable p={p} />
         </div>
       }
     >
       <CalendarStrip p={p} />
+      <PlanVsSchedule p={p} />
       <Figures p={p} t={t} target={target} />
-      <StepBar t={t} />
       <TopicTable p={p} limit={COMPACT_ROWS} />
     </Tile>
   );

@@ -445,9 +445,17 @@
   margin: 0 0 14px;
 }
 .calPlot {
-  --lab: 0px;
+  --lab: 18px;
   position: relative;
   height: calc(var(--lab) + 62px);
+  /* Reserve room so the exam day and its label are not on the tile edge. */
+  margin-right: 14px;
+  border-radius: 4px;
+  touch-action: pan-y;
+}
+.calPlot:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 4px;
 }
 @media (min-width: 768px) {
   .calPlot {
@@ -467,6 +475,9 @@
   .calLab {
     display: block;
   }
+}
+.calLabExam {
+  display: block;
 }
 .calLab b {
   font-weight: 600;
@@ -500,6 +511,22 @@
 }
 .calExam {
   border-left: 2px solid var(--foreground);
+}
+.calExamDay {
+  position: absolute;
+  top: var(--lab);
+  height: 28px;
+  background: color-mix(in srgb, var(--text) 16%, transparent);
+}
+.calFlag {
+  position: absolute;
+  top: calc(var(--lab) + 2px);
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  background: var(--text);
+  box-shadow: 0 0 0 2px var(--ground);
+  transform: rotate(45deg);
 }
 .calDot {
   position: absolute;
@@ -539,6 +566,125 @@
   bottom: 0;
   min-width: 1px;
   background: var(--claimed);
+  transition: opacity 120ms ease;
+}
+.calLoad i.calLoadExam {
+  background: var(--text);
+}
+/* Day cursor: a column across track and load row, moved by transform only. */
+.calCol {
+  position: absolute;
+  left: 0;
+  top: var(--lab);
+  height: 44px;
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+  box-shadow: 0 0 0 1px var(--rule-strong);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+.calColOn {
+  opacity: 1;
+}
+.calGlide {
+  transition: opacity 140ms cubic-bezier(0.23, 1, 0.32, 1), transform 100ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+.calCard {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  z-index: 5;
+  width: max-content;
+  max-width: min(15rem, calc(100vw - 48px));
+  pointer-events: none;
+  visibility: hidden;
+  transition: visibility 0s linear 140ms;
+}
+.calCard[data-side="below"] {
+  bottom: auto;
+  top: calc(100% + 6px);
+}
+@media (max-width: 767px) {
+  .calCard,
+  .calCard[data-side="above"] {
+    bottom: auto;
+    top: calc(100% + 6px);
+  }
+}
+.calCardOn {
+  visibility: visible;
+  transition-delay: 0s;
+}
+.calCardIn {
+  padding: 8px 10px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 6px;
+  background: var(--raised);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.18);
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 140ms cubic-bezier(0.23, 1, 0.32, 1), transform 140ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+.calCard[data-side="below"] .calCardIn {
+  transform: translateY(-4px);
+}
+@media (max-width: 767px) {
+  .calCardIn {
+    transform: translateY(-4px);
+  }
+}
+.calCardOn .calCardIn {
+  opacity: 1;
+  transform: none;
+}
+.calCardIn b {
+  font-weight: 600;
+}
+.calCardIn p {
+  margin: 2px 0 0;
+}
+.calCardIn ul {
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.calCardIn li i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 2px;
+  background: var(--c);
+}
+.calEv {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--rule);
+}
+.calEv li[data-kind="today"] {
+  color: var(--alarm-ink);
+  font-weight: 600;
+}
+.calEv li[data-kind="exam"] {
+  font-weight: 700;
+}
+@media (hover: hover) and (pointer: fine) {
+  .calLoad i:hover {
+    opacity: 1 !important;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .calCol,
+  .calGlide,
+  .calCardIn,
+  .calCard,
+  .calLoad i {
+    transition: none;
+  }
 }
 .calMonths {
   position: absolute;
@@ -554,6 +700,68 @@
   transform: translateX(-50%);
 }
 .calCap {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+/* Original plan vs schedule. */
+.pv {
+  margin: 0 0 14px;
+}
+.pv h3 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.pv ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pv li {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr);
+  gap: 2px 8px;
+  align-items: center;
+  font-size: 12px;
+}
+.pvName {
+  grid-row: 1;
+  color: var(--text);
+}
+.pvBar {
+  grid-row: 1;
+  grid-column: 2;
+  position: relative;
+  height: 12px;
+  border-radius: 3px;
+  overflow: hidden;
+  border: 1px solid var(--c);
+  background: repeating-linear-gradient(135deg, var(--c) 0 1.5px, transparent 1.5px 5px);
+}
+.pvBar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--c);
+}
+.pvTxt {
+  grid-row: 2;
+  grid-column: 2;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.pvCut {
+  color: var(--text);
+}
+.pvNote {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--text);
+}
+.pvKey {
   margin: 4px 0 0;
   font-size: 12px;
   color: var(--muted-foreground);
