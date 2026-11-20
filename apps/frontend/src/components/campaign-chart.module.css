@@ -102,31 +102,22 @@
 }
 
 .segFpReading {
-  background: var(--stage-fp-reading);
+  background: var(--step-1);
 }
 .segFpQuestions {
-  background: var(--stage-fp-questions);
+  background: var(--step-2);
 }
 .segRvReading {
-  background: var(--stage-rv-reading);
+  background: var(--step-3);
 }
 .segRvQuestions {
-  background: var(--stage-rv-questions);
+  background: var(--step-4);
 }
-
-/* Mocks are events, not a stage, so they are a cap on the bar rather than a
-   fifth colour: five fills could not clear the colour checks in the dark
-   theme's narrow lightness band, and a mock is genuinely a different kind of
-   thing from an hour of reading. */
-.mockCap {
-  display: block;
-  width: 100%;
-  height: 4px;
-  background: repeating-linear-gradient(
-    45deg,
-    var(--text) 0 2px,
-    transparent 2px 4px
-  );
+/* Hatched as well as amber, so mocks never rely on colour alone. */
+.segMocks {
+  background:
+    repeating-linear-gradient(45deg, color-mix(in srgb, var(--raised) 45%, transparent) 0 2px, transparent 2px 5px),
+    var(--gate);
 }
 
 /* Today and the exam, the only two fixed points worth drawing. */

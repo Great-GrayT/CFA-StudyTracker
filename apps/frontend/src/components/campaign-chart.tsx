@@ -19,18 +19,13 @@ import styles from "./campaign-chart.module.css";
  * soon as a unit's mastery decays, so the phases genuinely overlap.
  */
 
-const SEG_CLASS: Record<Exclude<CampaignStage, "mocks">, string> = {
+// Same step colours as the Pace page, so a stage reads the same everywhere.
+const SEG_CLASS: Record<CampaignStage, string> = {
   firstPassReading: styles.segFpReading,
   firstPassQuestions: styles.segFpQuestions,
   reviewReading: styles.segRvReading,
   reviewQuestions: styles.segRvQuestions,
-};
-
-const SWATCH_VAR: Record<Exclude<CampaignStage, "mocks">, string> = {
-  firstPassReading: "var(--stage-fp-reading)",
-  firstPassQuestions: "var(--stage-fp-questions)",
-  reviewReading: "var(--stage-rv-reading)",
-  reviewQuestions: "var(--stage-rv-questions)",
+  mocks: styles.segMocks,
 };
 
 function hours(minutes: number): string {
@@ -136,18 +131,19 @@ export function CampaignChart({ campaign }: { campaign: Campaign | undefined }) 
               onClick={() => setActive(i)}
               aria-label={`${shortDate(p.start)} to ${shortDate(p.end)}, ${hours(periodTotal(p))}`}
             >
-              {STAGES.filter((s) => s.key !== "mocks").map((s) => {
+              {/* Mocks are sized like any stage: the final weeks are mostly mocks, and a
+                  fixed cap hid them. */}
+              {STAGES.map((s) => {
                 const m = p.minutes[s.key] ?? 0;
                 if (m <= 0) return null;
                 return (
                   <span
                     key={s.key}
-                    className={`${styles.seg} ${SEG_CLASS[s.key as Exclude<CampaignStage, "mocks">]}`}
+                    className={`${styles.seg} ${SEG_CLASS[s.key]}`}
                     style={{ height: `${(m / ceiling) * 100}%` }}
                   />
                 );
               })}
-              {(p.minutes.mocks ?? 0) > 0 ? <span className={styles.mockCap} /> : null}
             </button>
           ))}
         </div>
@@ -183,15 +179,7 @@ export function CampaignChart({ campaign }: { campaign: Campaign | undefined }) 
             return (
               <div key={s.key} className={styles.readoutRow}>
                 <dt>
-                  <span
-                    className={styles.swatch}
-                    style={
-                      s.key === "mocks"
-                        ? { background: "var(--text)" }
-                        : { background: SWATCH_VAR[s.key as Exclude<CampaignStage, "mocks">] }
-                    }
-                    aria-hidden="true"
-                  />
+                  <span className={`${styles.swatch} ${SEG_CLASS[s.key]}`} aria-hidden="true" />
                   {s.phase}: {s.label}
                 </dt>
                 <dd className="tnum">{hours(m)}</dd>
@@ -207,8 +195,8 @@ export function CampaignChart({ campaign }: { campaign: Campaign | undefined }) 
           height is nominal. */}
       {hasMocks ? (
         <p className={styles.caption}>
-          Mock exams are counted at a nominal 3 hours each; the app does not record how
-          long one actually took.
+          Planned mocks use their session and review times. A mock you logged counts as
+          3 hours, because the app does not record how long it took.
         </p>
       ) : null}
 
@@ -219,15 +207,7 @@ export function CampaignChart({ campaign }: { campaign: Campaign | undefined }) 
             <dt className={styles.legendPhase}>{phase}</dt>
             {STAGES.filter((s) => s.phase === phase).map((s) => (
               <dd key={s.key} className={styles.legendGroup}>
-                <span
-                  className={s.key === "mocks" ? styles.mockCap : styles.swatch}
-                  style={
-                    s.key === "mocks"
-                      ? { width: 14, height: 8 }
-                      : { background: SWATCH_VAR[s.key as Exclude<CampaignStage, "mocks">] }
-                  }
-                  aria-hidden="true"
-                />
+                <span className={`${styles.swatch} ${SEG_CLASS[s.key]}`} aria-hidden="true" />
                 {s.label}
               </dd>
             ))}

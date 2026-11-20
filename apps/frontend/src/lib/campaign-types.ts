@@ -63,7 +63,7 @@ export type Campaign = {
 export const STAGES: ReadonlyArray<{ key: CampaignStage; label: string; phase: string }> = [
   { key: "firstPassReading", label: "Reading", phase: "First pass" },
   { key: "firstPassQuestions", label: "Questions", phase: "First pass" },
-  { key: "reviewReading", label: "Review video", phase: "Review" },
+  { key: "reviewReading", label: "Review reading", phase: "Review" },
   { key: "reviewQuestions", label: "Questions", phase: "Review" },
   { key: "mocks", label: "Mock exams", phase: "Mocks" },
 ];
