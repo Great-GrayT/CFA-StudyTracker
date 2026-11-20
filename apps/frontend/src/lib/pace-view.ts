@@ -545,7 +545,7 @@ export function calendarStrip(p: Projection): CalendarStrip {
   ];
   const planned = (p.calendar?.mocks ?? []).filter((m) => !m.done).map((m) => m.date).sort();
   if (planned.length) {
-    parts.push(`${planned.length} ${planned.length === 1 ? "mock" : "mocks"} planned, ${planned.length === 1 ? shortDate(planned[0]!) : `${shortDate(planned[0]!)} to ${shortDate(planned[planned.length - 1]!)}`}.`);
+    parts.push(`${planned.length} ${planned.length === 1 ? "mock session" : "mock sessions"} planned, ${planned.length === 1 ? shortDate(planned[0]!) : `${shortDate(planned[0]!)} to ${shortDate(planned[planned.length - 1]!)}`}.`);
   }
   if (live.length) parts.push(`Holidays: ${live.map((h) => range(h.start, h.end)).join(", ")}.`);
   return {

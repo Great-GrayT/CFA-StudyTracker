@@ -134,7 +134,7 @@ function CalendarStrip({ p }: { p: Projection }) {
         </div>
       </div>
       <figcaption className={s.calCap}>
-        {c.caption} Hatched is a holiday, a ring is a planned mock, a filled dot a mock taken, solid blue is a day studied.
+        {c.caption} Hatched is a holiday, a ring is a planned mock session (a number counts several), a filled dot one taken, solid blue is a day studied.
       </figcaption>
     </figure>
   );
