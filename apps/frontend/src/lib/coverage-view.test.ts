@@ -1,5 +1,5 @@
-import { expect, test } from "vitest";
-import { accuracyPct, fraction, hoursLabel, pctLabel, packageLabel, questionChips } from "./coverage-view";
+import { describe, expect, it, test } from "vitest";
+import { accuracyPct, fraction, hoursLabel, pctLabel, packageLabel, questionChips, videoLabel } from "./coverage-view";
 
 test("fraction clamps and survives empty totals", () => {
   expect(fraction(3, 12)).toBe(0.25);
@@ -31,4 +31,12 @@ test("chips mark answered numbers", () => {
     { n: 3, answered: true },
     { n: 4, answered: false },
   ]);
+});
+
+describe("videoLabel", () => {
+  it("turns a catalogue ref into words and keeps real titles", () => {
+    expect(videoLabel("qm/lm1/eocq/1")).toBe("End of chapter questions 1");
+    expect(videoLabel("qm/lm1/lecture/2")).toBe("Lecture 2");
+    expect(videoLabel("Multiple regression intro")).toBe("Multiple regression intro");
+  });
 });

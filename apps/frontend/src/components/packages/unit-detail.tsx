@@ -1,6 +1,6 @@
 import { Check, CircleDashed, CircleDot } from "lucide-react";
 import type { CoverageUnit, VideoStatus } from "@/lib/coverage-types";
-import { accuracyPct, MAX_CHIPS, pctLabel, questionChips } from "@/lib/coverage-view";
+import { accuracyPct, MAX_CHIPS, pctLabel, questionChips, videoLabel } from "@/lib/coverage-view";
 import { formatQuestionNumbers } from "@/lib/question-numbers";
 import { cn } from "@/lib/utils";
 
@@ -62,7 +62,7 @@ export function UnitDetail({ unit }: { unit: CoverageUnit }) {
           {unit.providerLabel ? `${unit.providerLabel} ` : ""}
           {unit.title}
         </h4>
-        {unit.readingNames.length > 0 ? (
+        {unit.readingNames.length > 0 && unit.readingNames.join(", ") !== unit.title ? (
           <p className="text-muted-foreground text-[12.5px]">{unit.readingNames.join(", ")}</p>
         ) : null}
       </div>
@@ -77,7 +77,7 @@ export function UnitDetail({ unit }: { unit: CoverageUnit }) {
                 <li key={v.resourceId} className="flex min-h-9 items-center gap-2 py-1 text-[13px]">
                   <st.Icon aria-hidden="true" className={cn("size-4 shrink-0", st.cls)} />
                   <span className="min-w-0 flex-1 truncate" title={v.title}>
-                    {v.title}
+                    {videoLabel(v.title)}
                   </span>
                   <span className="text-muted-foreground shrink-0 tabular-nums">{minutes(v.seconds)}</span>
                   <span className={cn("w-28 shrink-0 text-right", st.cls)}>{st.label}</span>

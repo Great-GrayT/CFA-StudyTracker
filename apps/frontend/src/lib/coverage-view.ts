@@ -31,3 +31,16 @@ export function questionChips(total: number, numbered: number[]): { n: number; a
   const done = new Set(numbered);
   return Array.from({ length: total }, (_, i) => ({ n: i + 1, answered: done.has(i + 1) }));
 }
+
+const KIND_NAMES: Record<string, string> = {
+  lecture: "Lecture", eocq: "End of chapter questions", seminar: "Seminar", review: "Review",
+};
+
+/** Untitled videos carry their catalogue ref (qm/lm1/eocq/1); show it as "End of chapter questions 1". */
+export function videoLabel(title: string): string {
+  const parts = title.split("/");
+  if (parts.length < 2) return title;
+  const [kind, n] = parts.slice(-2) as [string, string];
+  const name = KIND_NAMES[kind];
+  return name ? `${name} ${n}` : title;
+}
