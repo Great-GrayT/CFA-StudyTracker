@@ -439,3 +439,108 @@ export function topicMetrics(p: Projection): TopicMetric[] {
     };
   });
 }
+
+/** examWeight is a 0..1 fraction: 0.125 reads "12.5%", 0.08 reads "8%". */
+export function formatWeight(w: number): string {
+  const v = Math.round(clamp01(w) * 1000) / 10;
+  return `${Number.isInteger(v) ? v : v.toFixed(1)}%`;
+}
+
+export type HourFigures = {
+  required: number; scheduled: number; done: number; left: number; unscheduled: number;
+  workDays: number; available: number;
+  /** Minutes per work day to finish what is scheduled, and to finish everything. */
+  perDaySchedule: number; perDayAll: number;
+  shortSchedule: boolean; shortAll: boolean;
+  /** Why work is outside the schedule; null when none is. */
+  reason: string | null;
+};
+
+/** Scheduled is the sum of daily rows, the same total Tracking shows as its "to exam" denominator. */
+export function hourFigures(p: Projection): HourFigures | null {
+  const t = p.totals;
+  if (!t) return null;
+  const scheduled = p.daily.reduce((a, d) => a + d.plannedMin, 0);
+  const left = Math.max(0, scheduled - t.doneMin);
+  const unscheduled = Math.max(0, t.requiredMin - t.doneMin - left);
+  const wd = t.workDays ?? 0;
+  const perDaySchedule = wd > 0 ? left / wd : 0;
+  const perDayAll = wd > 0 ? Math.max(0, t.requiredMin - t.doneMin) / wd : 0;
+  return {
+    required: t.requiredMin, scheduled, done: t.doneMin, left, unscheduled, workDays: wd,
+    available: t.minPerDayAvailable, perDaySchedule, perDayAll,
+    shortSchedule: perDaySchedule > t.minPerDayAvailable, shortAll: perDayAll > t.minPerDayAvailable,
+    reason: unscheduled <= 0 ? null : p.fit.belowPass
+      ? "Below-pass plan: step 4 and mocks are trimmed to fit your hours"
+      : "Does not fit your available hours",
+  };
+}
+
+// ---- Calendar strip -------------------------------------------------------
+
+const fullFmt = new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", day: "numeric", month: "short", year: "numeric" });
+const fullDate = (isoDate: string) => fullFmt.format(new Date(day(isoDate)));
+const range = (a: string, b: string) => (a.slice(0, 10) === b.slice(0, 10) ? shortDate(a) : `${shortDate(a)} to ${shortDate(b)}`);
+
+export type CalendarStrip = {
+  win: Win;
+  months: { pct: number; label: string }[];
+  holidays: { id: string; left: number; width: number; cancelled: boolean; label: string }[];
+  today: number | null;
+  exam: number;
+  gate: number | null;
+  mocks: { pct: number; done: boolean; title: string }[];
+  load: { left: number; width: number; opacity: number; done: boolean }[];
+  caption: string;
+};
+
+/** Geometry and text for the plan calendar, from plan start (or first planned day) to the exam day. */
+export function calendarStrip(p: Projection): CalendarStrip {
+  const today = p.asOf.slice(0, 10);
+  const startIso = p.calendar?.start ?? p.daily[0]?.date ?? today;
+  const first = Math.min(day(startIso), day(today));
+  const win: Win = { start: first, end: Math.max(day(p.exam) + DAY, first + 2 * DAY) };
+  const box = (a: string, b: string) => {
+    const l = Math.max(0, pct(day(a), win));
+    const r = Math.min(100, pct(day(b) + DAY, win));
+    return r > l ? { left: l, width: r - l } : null;
+  };
+  const months: CalendarStrip["months"] = [];
+  const d = new Date(win.start);
+  d.setUTCDate(1);
+  for (d.setUTCMonth(d.getUTCMonth() + 1); d.getTime() < win.end; d.setUTCMonth(d.getUTCMonth() + 1)) {
+    months.push({ pct: pct(d.getTime(), win), label: monthFmt.format(d) });
+  }
+  const holidays = p.holidays.flatMap((h) => {
+    const g = box(h.start, h.end);
+    const text = range(h.start, h.end);
+    return g ? [{ id: h.id, ...g, cancelled: h.cancelled, label: h.cancelled ? `${text} (cancelled)` : text }] : [];
+  });
+  const gateMs = day(p.gate);
+  const max = Math.max(1, ...p.daily.map((x) => x.plannedMin));
+  const load = p.daily.flatMap((x) => {
+    const g = box(x.date, x.date);
+    if (!g || (x.plannedMin <= 0 && x.doneMin <= 0)) return [];
+    const done = x.doneMin > 0 && x.date <= today;
+    return [{ ...g, opacity: Math.max(0.15, x.plannedMin / max), done }];
+  });
+  const mocks = (p.calendar?.mocks ?? []).map((m) => ({
+    pct: Math.min(100, Math.max(0, pct(day(m.date) + DAY / 2, win))),
+    done: m.done,
+    title: `${m.done ? "Mock taken" : "Mock planned"} ${shortDate(m.date)}${m.title ? `, ${m.title}` : ""}`,
+  }));
+  const daysAway = Math.max(0, Math.round((day(p.exam) - day(today)) / DAY));
+  const live = p.holidays.filter((h) => !h.cancelled);
+  const parts = [
+    `Today ${shortDate(today)}. Exam ${fullDate(p.exam)}, ${daysAway} ${daysAway === 1 ? "day" : "days"} away.`,
+    `Mocks from ${shortDate(p.gate)}.`,
+  ];
+  if (live.length) parts.push(`Holidays: ${live.map((h) => range(h.start, h.end)).join(", ")}.`);
+  return {
+    win, months, holidays,
+    today: day(today) >= win.start && day(today) < win.end ? pct(day(today) + DAY / 2, win) : null,
+    exam: pct(day(p.exam) + DAY / 2, win),
+    gate: gateMs >= win.start && gateMs < win.end ? pct(gateMs, win) : null,
+    mocks, load, caption: parts.join(" "),
+  };
+}

@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { accuracyPct, fraction, hoursLabel, pctLabel, questionChips } from "./coverage-view";
+import { accuracyPct, fraction, hoursLabel, pctLabel, packageLabel, questionChips } from "./coverage-view";
 
 test("fraction clamps and survives empty totals", () => {
   expect(fraction(3, 12)).toBe(0.25);
@@ -16,6 +16,12 @@ test("accuracy is null before any answer", () => {
 test("hours label", () => {
   expect(hoursLabel(16200)).toBe("4.5 h");
   expect(hoursLabel(115200)).toBe("32 h");
+});
+
+test("package label does not repeat the year", () => {
+  expect(packageLabel("Mark Meldrum CFA Level II 2026", "2026")).toBe("Mark Meldrum CFA Level II 2026");
+  expect(packageLabel("Kaplan", "2026")).toBe("Kaplan 2026");
+  expect(packageLabel("Kaplan", "")).toBe("Kaplan");
 });
 
 test("chips mark answered numbers", () => {

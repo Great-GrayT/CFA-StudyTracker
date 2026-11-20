@@ -18,6 +18,14 @@ export function hoursLabel(seconds: number): string {
   return `${h < 10 ? Math.round(h * 10) / 10 : Math.round(h)} h`;
 }
 
+/** Name with the year appended only when the name does not already carry it. */
+export function packageLabel(name: string, year: string): string {
+  return year && !name.includes(year) ? `${name} ${year}` : name;
+}
+
+/** Above this many questions a chip grid is noise; the text summary stands in. */
+export const MAX_CHIPS = 300;
+
 /** Numbers 1..total split into answered and left, given the numbered set. */
 export function questionChips(total: number, numbered: number[]): { n: number; answered: boolean }[] {
   const done = new Set(numbered);

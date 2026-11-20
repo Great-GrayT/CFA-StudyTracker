@@ -5,6 +5,7 @@ import {
   sectionWindows, day, DAY, moduleHref, accuracy, perfRows,
   planTotalsLine, dailyNeed, stepSlices, topicMetrics,
 } from "./pace-view";
+import { calendarStrip, formatWeight, hourFigures } from "./pace-view";
 import type { PlanTotals, Projection, ProjectionSection, ProjectionWindow } from "./types";
 
 const TODAY = "2026-11-16";
@@ -282,5 +283,70 @@ describe("plan metrics", () => {
     const [none] = topicMetrics(proj({ sections: [sec(undefined)] }));
     expect(none!.accuracy).toBeNull();
     expect(none!.below).toBe(false);
+  });
+});
+
+describe("formatWeight", () => {
+  it("shows a 0..1 fraction as a percent, decimal only when needed", () => {
+    expect(formatWeight(0.125)).toBe("12.5%");
+    expect(formatWeight(0.08)).toBe("8%");
+    expect(formatWeight(0)).toBe("0%");
+  });
+});
+
+const row = (date: string, plannedMin: number, doneMin = 0) => ({
+  date, plannedMin, doneMin, byStep: { "1": 0, "2": 0, "3": 0, "4": 0, "5": 0 },
+});
+const totals = { requiredMin: 944 * 60, doneMin: 9 * 60, leftMin: 425 * 60, minPerDayAvailable: 120, workDays: 100, daysLeft: 150 };
+const base = (over: Record<string, unknown> = {}) => ({
+  asOf: "2026-11-20", exam: "2027-05-18", gate: "2027-04-18",
+  fit: { crash: 1, cancelledHolidayIds: [], feasible: true, belowPass: false, trims: [] },
+  totals, daily: [row("2026-11-19", 60, 60), row("2026-11-20", 600), row("2026-11-21", 300)],
+  holidays: [{ id: "h", start: "2026-12-24", end: "2027-01-02", cancelled: false }],
+  mocks: { done: 0, planned: 0, firstDate: null },
+  calendar: { start: "2026-11-01", mocks: [{ date: "2027-04-20", done: false, title: "Mock 1" }] },
+  ...over,
+}) as unknown as Projection;
+
+describe("hourFigures", () => {
+  it("splits required into done, on schedule and not in schedule", () => {
+    const f = hourFigures(base())!;
+    expect(f.scheduled).toBe(960);
+    expect(f.left).toBe(960 - 540);
+    expect(f.unscheduled).toBe(944 * 60 - 540 - f.left);
+    expect(f.perDaySchedule).toBeCloseTo(f.left / 100);
+    expect(f.reason).toBe("Does not fit your available hours");
+  });
+  it("names the below-pass trim and shows no reason when everything is scheduled", () => {
+    const fit = { crash: 1, cancelledHolidayIds: [], feasible: false, belowPass: true, trims: [] };
+    expect(hourFigures(base({ fit }))!.reason).toMatch(/^Below-pass plan/);
+    expect(hourFigures(base({ totals: { ...totals, requiredMin: 960 } }))!.reason).toBeNull();
+  });
+  it("flags a day over the available hours and never divides by zero", () => {
+    expect(hourFigures(base())!.shortAll).toBe(true);
+    const z = hourFigures(base({ totals: { ...totals, workDays: undefined } }))!;
+    expect(z.perDayAll).toBe(0);
+  });
+});
+
+describe("calendarStrip", () => {
+  it("places today, exam, gate, holidays and mocks along the plan span", () => {
+    const c = calendarStrip(base());
+    expect(c.today).toBeGreaterThan(0);
+    expect(c.today!).toBeLessThan(c.gate!);
+    expect(c.gate!).toBeLessThan(c.exam);
+    expect(c.exam).toBeLessThanOrEqual(100);
+    expect(c.holidays).toHaveLength(1);
+    expect(c.mocks[0]!.pct).toBeGreaterThan(c.gate!);
+    expect(c.months[0]!.label).toBe("Dec");
+    expect(c.caption).toBe(
+      "Today 20 Nov. Exam 18 May 2027, 179 days away. Mocks from 18 Apr. Holidays: 24 Dec to 2 Jan.",
+    );
+  });
+  it("falls back to the first daily date and marks cancelled holidays", () => {
+    const c = calendarStrip(base({ calendar: undefined, holidays: [{ id: "h", start: "2026-12-24", end: "2026-12-24", cancelled: true }] }));
+    expect(c.win.start).toBe(Date.parse("2026-11-19T00:00:00Z"));
+    expect(c.holidays[0]!.label).toBe("24 Dec (cancelled)");
+    expect(c.caption).not.toContain("Holidays");
   });
 });

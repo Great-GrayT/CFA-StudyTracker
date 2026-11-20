@@ -1,11 +1,12 @@
 // Contract of GET /api/plans/:id/coverage (spec 2026-11-19, section C).
-export type VideoTotals = { count: number; watched: number; seconds: number; watchedSeconds: number };
+export type VideoTotals = { count: number; watched: number; partial: number; seconds: number; watchedSeconds: number };
 export type QuestionTotals = { total: number; answered: number; correct: number; numbered: number };
 export type VideoStatus = "watched" | "partial" | "not-started";
 
 export type CoverageUnit = {
   unitId: string;
   ref: string;
+  providerLabel: string | null;
   title: string;
   readingIds: string[];
   readingNames: string[];

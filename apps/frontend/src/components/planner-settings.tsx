@@ -339,56 +339,40 @@ export function PlannerSettings({ plan, onSaved }: { plan: Plan; onSaved: () => 
             </div>
           );
         })}
-        <div className={styles.actions}>
-          <button
-            className={styles.save}
-            type="button"
-            disabled={pending || !rulesDirty || !rulesValid}
-            onClick={() =>
-              patch(
-                {
-                  tuning: Object.fromEntries(
-                    ruleState.filter((f) => f.edited).map((f) => [f.key, f.num]),
-                  ),
-                },
-                "Step rules saved. The days ahead have been replanned.",
-              )
-            }
-          >
-            {pending ? "Saving" : "Save step rules"}
-          </button>
-          <button
-            className={styles.reset}
-            type="button"
-            disabled={pending || (rulesAtDefaults && Object.keys(ruleEdits).length === 0)}
-            onClick={() =>
-              patch(
-                { tuning: Object.fromEntries(RULE_FIELDS.map((f) => [f.key, data.defaults[f.key]])) },
-                "Step rules back to their defaults.",
-              )
-            }
-          >
-            Reset step rules
-          </button>
-        </div>
       </fieldset>
 
+      {/* One save for every number on this form, so no edit is left behind by the wrong button. */}
       <div className={styles.actions}>
         <button
           className={styles.save}
           type="button"
-          disabled={pending || !wpmDirty}
-          onClick={() => patch({ tuning: { answerReviewWordsPerMinute: wpmNum } }, "Planner settings saved.")}
+          disabled={pending || !(wpmDirty || rulesDirty) || (wpm !== null && !wpmValid) || !rulesValid}
+          onClick={() =>
+            patch(
+              {
+                tuning: {
+                  ...(wpmDirty ? { answerReviewWordsPerMinute: wpmNum } : {}),
+                  ...Object.fromEntries(ruleState.filter((f) => f.edited).map((f) => [f.key, f.num])),
+                },
+              },
+              rulesDirty ? "Planner settings saved. The days ahead have been replanned." : "Planner settings saved.",
+            )
+          }
         >
           {pending ? "Saving" : "Save changes"}
         </button>
         <button
           className={styles.reset}
           type="button"
-          disabled={pending}
+          disabled={pending || (rulesAtDefaults && tuning.answerReviewWordsPerMinute === data.defaults.answerReviewWordsPerMinute && wpm === null && Object.keys(ruleEdits).length === 0)}
           onClick={() =>
             patch(
-              { tuning: { answerReviewWordsPerMinute: data.defaults.answerReviewWordsPerMinute } },
+              {
+                tuning: {
+                  answerReviewWordsPerMinute: data.defaults.answerReviewWordsPerMinute,
+                  ...Object.fromEntries(RULE_FIELDS.map((f) => [f.key, data.defaults[f.key]])),
+                },
+              },
               "Planner settings back to their defaults.",
             )
           }

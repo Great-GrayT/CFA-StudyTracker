@@ -1,6 +1,6 @@
 import { Check, CircleDashed, CircleDot } from "lucide-react";
 import type { CoverageUnit, VideoStatus } from "@/lib/coverage-types";
-import { accuracyPct, pctLabel, questionChips } from "@/lib/coverage-view";
+import { accuracyPct, MAX_CHIPS, pctLabel, questionChips } from "@/lib/coverage-view";
 import { formatQuestionNumbers } from "@/lib/question-numbers";
 import { cn } from "@/lib/utils";
 
@@ -16,15 +16,16 @@ function minutes(seconds: number) {
 
 function QuestionGrid({ q }: { q: CoverageUnit["questions"] }) {
   if (q.total === 0) return <p className="text-muted-foreground text-[13px]">This unit has no question set.</p>;
-  const chips = questionChips(q.total, q.numbered);
+  const showChips = q.numbered.length > 0 && q.total <= MAX_CHIPS;
+  const chips = showChips ? questionChips(q.total, q.numbered) : [];
   const summary =
     q.left === null
-      ? `${q.answered} of ${q.total} answered. Some answers were recorded without question numbers, so the exact remaining numbers are unknown.`
-      : `${q.answered} of ${q.total} answered. ${q.left.length === 0 ? "None left." : `Left: ${formatQuestionNumbers(q.left)}.`}`;
+      ? `Some answers were recorded without question numbers, so the exact remaining numbers are unknown.`
+      : `${q.left.length === 0 ? "None left." : `Left: ${formatQuestionNumbers(q.left)}.`}`;
   return (
     <div className="space-y-2">
       <p className="text-[13px]">{summary}</p>
-      {q.numbered.length > 0 ? (
+      {showChips ? (
         <>
           <ul
             aria-label="Question numbers"
@@ -58,7 +59,7 @@ export function UnitDetail({ unit }: { unit: CoverageUnit }) {
     <section className="border-border space-y-4 border-t py-4 first:border-t-0" aria-labelledby={`u-${unit.unitId}`}>
       <div>
         <h4 id={`u-${unit.unitId}`} className="text-[14px] font-semibold">
-          {unit.ref ? `${unit.ref} ` : ""}
+          {unit.providerLabel ? `${unit.providerLabel} ` : ""}
           {unit.title}
         </h4>
         {unit.readingNames.length > 0 ? (
@@ -87,10 +88,18 @@ export function UnitDetail({ unit }: { unit: CoverageUnit }) {
         </div>
       ) : null}
 
-      <div>
-        <h5 className="mb-1 text-[13px] font-medium">Questions</h5>
-        <QuestionGrid q={unit.questions} />
-      </div>
+      {unit.questions.total > 0 ? (
+        <div>
+          <h5 className="mb-1 text-[13px] font-medium">Questions</h5>
+          <p className="text-muted-foreground mb-1 text-[12.5px]">
+            {unit.questions.answered} of {unit.questions.total} answered
+            {unit.questions.answered > 0
+              ? `, ${pctLabel(accuracyPct(unit.questions.correct, unit.questions.answered))} correct`
+              : ""}
+          </p>
+          <QuestionGrid q={unit.questions} />
+        </div>
+      ) : null}
 
       {hasLos ? (
         <div className="overflow-x-auto">

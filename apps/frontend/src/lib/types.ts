@@ -363,6 +363,7 @@ export type PlanTotals = {
   daysLeft: number;
   minPerDayNeeded: number;
   minPerDayAvailable: number;
+  workDays?: number;
 };
 export type FitTrim = { readingId: string | null; step: number; minutes: number; reason: string };
 export type ProjectionExtra = {
@@ -387,6 +388,7 @@ export type Projection = {
   };
   rules?: StepRules;
   totals?: PlanTotals;
+  calendar?: { start: string; mocks: { date: string; done: boolean; title: string | null }[] };
   sections: ProjectionSection[];
   readiness: number;
   readinessPlanToday: number;

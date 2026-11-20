@@ -9,6 +9,7 @@ import { RegionError, regionState } from "@/components/states/region-states";
 import { PackageView } from "@/components/packages/package-view";
 import { useCoverage, usePlan } from "@/lib/hooks";
 import { ApiError } from "@/lib/api";
+import { packageLabel } from "@/lib/coverage-view";
 import { useOnline } from "@/hooks/use-online";
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -81,19 +82,19 @@ export default function PackagesPage() {
   }
 
   const current = packages.find((p) => p.packageId === picked) ?? packages[0];
-  const label = (p: (typeof packages)[number]) => (p.year ? `${p.name} ${p.year}` : p.name);
+  const label = (p: (typeof packages)[number]) => packageLabel(p.name, p.year);
   return (
     <Shell>
       <Title />
       <p className="text-muted-foreground mt-1 text-[14px]">What you have watched and answered, and how well.</p>
       <Tabs value={current.packageId} onValueChange={setPicked} className="mt-4 gap-0">
         {packages.length > 1 ? (
-          <TabsList className="border-border h-auto w-full justify-start gap-6 overflow-x-auto rounded-none border-b bg-transparent p-0">
+          <TabsList className="border-border h-auto w-full justify-start gap-6 overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden rounded-none border-b bg-transparent p-0">
             {packages.map((p) => (
               <TabsTrigger
                 key={p.packageId}
                 value={p.packageId}
-                className="data-[state=active]:border-primary -mb-px h-10 flex-none rounded-none border-b-2 border-transparent px-0 text-[14px] max-md:h-11"
+                className="data-[state=active]:border-primary -mb-px h-10 flex-none rounded-none border-b-2 whitespace-nowrap border-transparent px-0 text-[14px] max-md:h-11"
               >
                 {label(p)}
               </TabsTrigger>

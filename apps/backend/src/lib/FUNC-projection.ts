@@ -37,7 +37,11 @@ export type Projection = {
     byStep: Record<StepKey, { requiredMin: number; doneMin: number }>;
     questions: { required: number; answered: number; correct: number };
     daysLeft: number; minPerDayNeeded: number; minPerDayAvailable: number;
+    /** Days from today to the exam that are not holidays; the divisor of both per-day figures. */
+    workDays: number;
   };
+  /** Timeline inputs: plan start and each mock (done or planned) by date. */
+  calendar: { start: string; mocks: Array<{ date: string; done: boolean; title: string | null }> };
   sections: Array<{
     topicId: string; name: string; examWeight: number;
     questions: { required: number; answered: number; correct: number };
@@ -195,7 +199,7 @@ export async function buildProjection(planId: string, today: string): Promise<Pr
         los: { select: { readingId: true } }, task: { select: { step: true, kind: true } },
       },
     }),
-    db.mockExam.findMany({ where: { planId }, select: { topicScores: true } }),
+    db.mockExam.findMany({ where: { planId }, select: { topicScores: true, date: true, sessionRef: true, note: true } }),
     db.stepDeclaration.findMany({ where: { planId, step: { in: [2, 4] } } }),
   ]);
   const readingName = new Map(readings.map((r) => [r.id, r.name]));
@@ -425,7 +429,7 @@ export async function buildProjection(planId: string, today: string): Promise<Pr
   // The engine's own remaining work, so penalty extras and unplaced work count as left.
   const leftMin = Math.round(hz.metrics.requiredMinutes);
   // Same day arithmetic as the scheduler's caps: weekday hours, none on a holiday that still stands.
-  const plan = await db.studyPlan.findUnique({ where: { id: planId }, select: { weeklyAvailability: true } });
+  const plan = await db.studyPlan.findUnique({ where: { id: planId }, select: { weeklyAvailability: true, startDate: true } });
   const avail = (plan?.weeklyAvailability ?? {}) as Record<string, number>;
   const WEEKDAY = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
   const live = holidays.filter((h) => !hz.fit.cancelledHolidayIds.includes(h.id));
@@ -452,6 +456,16 @@ export async function buildProjection(planId: string, today: string): Promise<Pr
       requiredMin, doneMin, leftMin, byStep, questions, daysLeft,
       minPerDayNeeded: workDays > 0 ? Math.round(leftMin / workDays) : 0,
       minPerDayAvailable: workDays > 0 ? Math.round(availMin / workDays) : 0,
+      workDays,
+    },
+    calendar: {
+      start: plan ? iso(plan.startDate) : asOf,
+      mocks: [
+        ...mockExams.map((m) => ({ date: iso(m.date), done: true, title: m.sessionRef ?? m.note ?? null })),
+        // One dot per planned mock day; a mock split over days keeps its first.
+        ...[...new Map([...mockTasks].sort((a, b) => a.date.localeCompare(b.date)).map((t) => [t.date, t])).values()]
+          .map((t) => ({ date: t.date, done: false, title: t.item.label || null })),
+      ].sort((a, b) => a.date.localeCompare(b.date)),
     },
     readiness: hz.metrics.readiness, readinessPlanToday: hz.metrics.readinessPlanToday,
     daily: [...rows.values()].sort((a, b) => a.date.localeCompare(b.date)),

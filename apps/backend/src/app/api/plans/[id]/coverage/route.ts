@@ -8,7 +8,7 @@ function planIdFromUrl(req: Request): string {
 
 const VIDEO_KINDS = new Set(["lecture", "eocq", "seminar", "review"]);
 
-type VideoAgg = { count: number; watched: number; seconds: number; watchedSeconds: number };
+type VideoAgg = { count: number; watched: number; partial: number; seconds: number; watchedSeconds: number };
 type QAgg = { total: number; answered: number; correct: number; numbered: number };
 type VideoStatus = "watched" | "partial" | "not-started";
 
@@ -19,7 +19,7 @@ export type Coverage = {
     topics: Array<{
       topicId: string; name: string; order: number; videos: VideoAgg; questions: QAgg;
       units: Array<{
-        unitId: string; ref: string; title: string; readingIds: string[]; readingNames: string[];
+        unitId: string; ref: string; providerLabel: string | null; title: string; readingIds: string[]; readingNames: string[];
         videos: Array<{ resourceId: string; title: string; seconds: number; status: VideoStatus }>;
         questions: { total: number; answered: number; correct: number; numbered: number[]; unnumbered: number; left: number[] | null };
         los: Array<{ losId: string | null; label: string; text: string; questionCount: number | null; answered: number; correct: number }>;
@@ -28,11 +28,11 @@ export type Coverage = {
   }>;
 };
 
-const emptyVideos = (): VideoAgg => ({ count: 0, watched: 0, seconds: 0, watchedSeconds: 0 });
+const emptyVideos = (): VideoAgg => ({ count: 0, watched: 0, partial: 0, seconds: 0, watchedSeconds: 0 });
 const emptyQ = (): QAgg => ({ total: 0, answered: 0, correct: 0, numbered: 0 });
 
 function addVideos(into: VideoAgg, v: VideoAgg) {
-  into.count += v.count; into.watched += v.watched; into.seconds += v.seconds; into.watchedSeconds += v.watchedSeconds;
+  into.count += v.count; into.watched += v.watched; into.partial += v.partial; into.seconds += v.seconds; into.watchedSeconds += v.watchedSeconds;
 }
 function addQ(into: QAgg, q: QAgg) {
   into.total += q.total; into.answered += q.answered; into.correct += q.correct; into.numbered += q.numbered;
@@ -65,7 +65,7 @@ export async function GET(req: Request): Promise<Response> {
         units: {
           orderBy: { order: "asc" },
           include: {
-            readings: { include: { reading: { include: { topic: true } } } },
+            readings: { include: { reading: { include: { topic: true, los: { orderBy: { order: "asc" }, select: { id: true, text: true } } } } } },
             los: { include: { los: { select: { text: true } } } },
             resources: { orderBy: { ref: "asc" } },
           },
@@ -75,7 +75,7 @@ export async function GET(req: Request): Promise<Response> {
     db.planTask.findMany({
       where: { planId, status: { in: ["done", "partial"] } },
       select: {
-        id: true, status: true, kind: true, packageId: true, readingIds: true, resourceIds: true, questionNumbers: true,
+        id: true, status: true, kind: true, packageId: true, estimatedMinutes: true, actualMinutes: true, workMinutes: true, readingIds: true, resourceIds: true, questionNumbers: true,
         logs: { select: { losId: true, questionsAnswered: true, questionsCorrect: true, los: { select: { readingId: true } } } },
       },
     }),
@@ -115,6 +115,9 @@ export async function GET(req: Request): Promise<Response> {
     const unitsTouched = new Map<string, number>();
     for (const t of tasks) unitsTouched.set(t.id, edition.units.filter((u) => touches(t, u)).length);
 
+    const videoSecs = (t: (typeof tasks)[number], unit: (typeof edition.units)[number]) =>
+      unit.resources.reduce((s, r) => s + (VIDEO_KINDS.has(r.kind) && t.resourceIds.includes(r.id) ? r.durationSeconds ?? 0 : 0), 0);
+
     const topics = new Map<string, Coverage["packages"][number]["topics"][number]>();
     for (const unit of edition.units) {
       // A unit spanning topics files under its first reading's topic.
@@ -126,15 +129,29 @@ export async function GET(req: Request): Promise<Response> {
       const topic = readings[0]!.topic;
       const selfDeclared = [...readingIds].some((id) => declaredHere.has(id));
 
-      const videos = unit.resources
-        .filter((r) => VIDEO_KINDS.has(r.kind) && (r.durationSeconds ?? 0) > 0)
-        .map((r) => {
-          const done = tasks.some((t) => t.status === "done" && t.resourceIds.includes(r.id));
-          const part = tasks.some((t) => t.status === "partial" && t.resourceIds.includes(r.id));
-          const status: VideoStatus = done || selfDeclared ? "watched" : part ? "partial" : "not-started";
-          return { resourceId: r.id, title: r.title ?? r.ref, seconds: r.durationSeconds!, status };
-        });
-
+      const videoRes = unit.resources.filter((r) => VIDEO_KINDS.has(r.kind) && (r.durationSeconds ?? 0) > 0);
+      // A task's minutes are credited to the unit's videos in ref order. Read tasks list every
+      // video of a module, so a task spanning units splits by each unit's share of listed video time.
+      let creditSec = 0;
+      for (const t of tasks) {
+        const mine = videoSecs(t, unit);
+        if (mine === 0) continue;
+        const total = edition.units.reduce((s, u) => s + videoSecs(t, u), 0);
+        const est = Math.max(1, t.estimatedMinutes);
+        const spent = t.actualMinutes ?? (t.status === "done" ? t.estimatedMinutes : 0);
+        const credited = Math.min(est, spent) * ((t.workMinutes ?? t.estimatedMinutes) / est);
+        creditSec += credited * 60 * (mine / total);
+      }
+      let cum = 0;
+      let partialSec = 0;
+      const videos = videoRes.map((r) => {
+        const sec = r.durationSeconds!;
+        let status: VideoStatus = "not-started";
+        if (selfDeclared || cum + sec <= creditSec + 1e-6) status = "watched";
+        else if (creditSec > cum) { status = "partial"; partialSec += creditSec - cum; }
+        cum += sec;
+        return { resourceId: r.id, title: r.title ?? r.ref, seconds: sec, status };
+      });
       const sets = unit.resources.filter((r) => r.kind === "question_set");
       const total = sets.reduce((s, r) => s + (r.questionCount ?? 0), 0);
       const numbered = new Set<number>();
@@ -168,7 +185,9 @@ export async function GET(req: Request): Promise<Response> {
       for (const v of videos) {
         vAgg.count += 1; vAgg.seconds += v.seconds;
         if (v.status === "watched") { vAgg.watched += 1; vAgg.watchedSeconds += v.seconds; }
+        else if (v.status === "partial") vAgg.partial += 1;
       }
+      vAgg.watchedSeconds += Math.round(partialSec);
       const qAgg: QAgg = { total, answered, correct: Math.min(correct, answered), numbered: numberedList.length };
 
       let entry = topics.get(topic.id);
@@ -181,24 +200,38 @@ export async function GET(req: Request): Promise<Response> {
       entry.units.push({
         unitId: unit.id,
         ref: unit.ref,
+        providerLabel: unit.providerLabel,
         title: unit.title ?? unit.providerLabel ?? unit.ref,
         readingIds: readings.map((r) => r.id),
         readingNames: readings.map((r) => r.name),
         videos,
         questions: { total, answered, correct: qAgg.correct, numbered: numberedList, unnumbered, left },
-        los: unit.los
-          .filter((l) => !l.retired)
-          .map((l) => {
-            const got = l.losId ? losAnswered.get(l.losId) : undefined;
+        los: unit.los.filter((l) => !l.retired).length > 0
+          ? unit.los
+            .filter((l) => !l.retired)
+            .map((l) => {
+              const got = l.losId ? losAnswered.get(l.losId) : undefined;
+              return {
+                losId: l.losId,
+                label: l.sourceLabel,
+                text: l.los?.text ?? "",
+                questionCount: l.questionCount,
+                answered: got?.answered ?? 0,
+                correct: got?.correct ?? 0,
+              };
+            })
+          // No package mapping: fall back to the curriculum outcomes of the unit's readings.
+          : readings.flatMap((r) => r.los.map((l, i) => {
+            const got = losAnswered.get(l.id);
             return {
-              losId: l.losId,
-              label: l.sourceLabel,
-              text: l.los?.text ?? "",
-              questionCount: l.questionCount,
+              losId: l.id,
+              label: readings.length > 1 ? `${r.name} LOS ${i + 1}` : `LOS ${i + 1}`,
+              text: l.text,
+              questionCount: null,
               answered: got?.answered ?? 0,
               correct: got?.correct ?? 0,
             };
-          }),
+          })),
       });
     }
 

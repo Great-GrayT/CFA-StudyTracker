@@ -60,7 +60,7 @@ describe("GET /api/plans/:id/coverage", () => {
     expect(body.packages).toHaveLength(1);
     const p = body.packages[0];
     expect(p.year).toBe("2026");
-    expect(p.videos).toEqual({ count: 2, watched: 0, seconds: 900, watchedSeconds: 0 });
+    expect(p.videos).toEqual({ count: 2, watched: 0, partial: 0, seconds: 900, watchedSeconds: 0 });
     expect(p.questions).toEqual({ total: 10, answered: 0, correct: 0, numbered: 0 });
     expect(p.topics).toHaveLength(1);
     expect(p.topics[0].name).toBe("Ethics");
@@ -71,15 +71,33 @@ describe("GET /api/plans/:id/coverage", () => {
     expect(u.videos.every((v: { status: string }) => v.status === "not-started")).toBe(true);
   });
 
-  test("video status from done and partial tasks", async () => {
+  test("video credit is minute-based: partial work fills videos in ref order", async () => {
     const s = await setup();
-    await task(s.plan.id, { kind: "content-video", status: "done", resourceIds: [s.lec.id] });
-    await task(s.plan.id, { kind: "eocq", status: "partial", resourceIds: [s.lec2.id] });
+    await task(s.plan.id, { kind: "content-video", status: "partial", actualMinutes: 12, resourceIds: [s.lec.id, s.lec2.id] });
     const p = (await readJson(await get(s.user, s.plan.id))).packages[0];
     const vids = p.topics[0].units[0].videos;
     expect(vids.map((v: { status: string }) => v.status)).toEqual(["watched", "partial"]);
     expect(p.videos.watched).toBe(1);
+    expect(p.videos.partial).toBe(1);
+    expect(p.videos.watchedSeconds).toBe(720);
+  });
+
+  test("a done task credits its full minutes, scaled by uncrashed work", async () => {
+    const s = await setup();
+    await task(s.plan.id, { kind: "content-video", status: "done", workMinutes: 10, resourceIds: [s.lec.id, s.lec2.id] });
+    const p = (await readJson(await get(s.user, s.plan.id))).packages[0];
     expect(p.videos.watchedSeconds).toBe(600);
+    expect(p.videos.watched).toBe(1);
+  });
+
+  test("LOS table falls back to curriculum outcomes without package rows", async () => {
+    const s = await setup();
+    await db.packageUnitLos.deleteMany({ where: { unitId: s.unit.id } });
+    const t = await task(s.plan.id, { status: "done", resourceIds: [s.qs.id] });
+    await db.studyLogEntry.create({ data: { userId: s.user.id, planId: s.plan.id, losId: s.los1.id, taskId: t.id, confidence: 3, questionsAnswered: 4, questionsCorrect: 3 } });
+    const u = (await readJson(await get(s.user, s.plan.id))).packages[0].topics[0].units[0];
+    expect(u.los.map((l: { label: string }) => l.label)).toEqual(["R1 LOS 1", "R1 LOS 2"]);
+    expect(u.los[0]).toMatchObject({ answered: 4, correct: 3 });
   });
 
   test("self-declared watched credits the unit's videos for this package only", async () => {

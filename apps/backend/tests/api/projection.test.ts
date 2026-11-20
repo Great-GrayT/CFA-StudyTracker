@@ -67,6 +67,12 @@ describe("GET /api/plans/:id/projection", () => {
     expect(t.daysLeft).toBeGreaterThan(0);
     expect(t.minPerDayNeeded).toBeGreaterThan(0);
     expect(t.minPerDayAvailable).toBeGreaterThanOrEqual(0);
+    expect(t.workDays).toBeGreaterThan(0);
+    expect(t.workDays).toBeLessThanOrEqual(t.daysLeft);
+    expect(p.calendar.start).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(p.calendar.start <= p.asOf).toBe(true);
+    expect(p.calendar.mocks.filter((m: any) => m.done)).toHaveLength(p.mocks.done);
+    expect(p.calendar.mocks.every((m: any) => /^\d{4}-\d{2}-\d{2}$/.test(m.date))).toBe(true);
   });
 
   test("another user's plan is a 404", async () => {

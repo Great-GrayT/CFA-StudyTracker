@@ -1,8 +1,9 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import { cn } from "@/lib/utils";
 import type { PlanTotals, Projection } from "@/lib/types";
-import { accuracyTarget, dailyNeed, formatHours, formatPercent, stepSlices, topicMetrics } from "@/lib/pace-view";
+import { accuracyTarget, calendarStrip, formatHours, formatPercent, formatWeight, hourFigures, shortDate, stepSlices, topicMetrics } from "@/lib/pace-view";
 import { Tile } from "./tile";
 import s from "./pace.module.css";
 
@@ -10,36 +11,62 @@ const COMPACT_ROWS = 5;
 const STEP_CLASS = { "1": s.s1, "2": s.s2, "3": s.s3, "4": s.s4, "5": s.s5 } as const;
 const n = (x: number) => x.toLocaleString("en-US");
 
-function Figures({ t, target }: { t: PlanTotals; target: number }) {
-  const need = dailyNeed(t);
+function Figures({ p, t, target }: { p: Projection; t: PlanTotals; target: number }) {
+  const f = hourFigures(p);
   const q = t.questions;
   const acc = q.answered > 0 ? q.correct / q.answered : null;
   const low = acc !== null && q.correct * 100 < target * q.answered;
+  const perDay = (h: number, over: boolean) => (
+    <>
+      {formatHours(h)}
+      <small>
+        {over
+          ? `Over the ${formatHours(f!.available)} a day you have: ${formatHours(h - f!.available)} short`
+          : `Within the ${formatHours(f!.available)} a day you have`}
+      </small>
+    </>
+  );
   return (
     <dl className={s.mFig}>
-      <div>
-        <dt>Hours required</dt>
-        <dd>{formatHours(t.requiredMin)}</dd>
-      </div>
-      <div>
-        <dt>Hours done</dt>
-        <dd>{formatHours(t.doneMin)}</dd>
-      </div>
-      <div>
-        <dt>Hours left</dt>
-        <dd>{formatHours(t.leftMin)}<small>{t.daysLeft} days to the exam</small></dd>
-      </div>
-      <div>
-        <dt>Hours per day, needed</dt>
-        <dd className={cn(need.short && s.mShort)}>
-          {formatHours(need.needed)}
-          <small>
-            {need.short
-              ? `Over the ${formatHours(need.available)} a day you have: ${formatHours(need.needed - need.available)} short`
-              : `Within the ${formatHours(need.available)} a day you have`}
-          </small>
-        </dd>
-      </div>
+      {f ? (
+        <>
+          <div>
+            <dt>Required, full rules</dt>
+            <dd>{formatHours(f.required)}</dd>
+          </div>
+          <div>
+            <dt>Scheduled to the exam</dt>
+            <dd>{formatHours(f.scheduled)}<small>{t.daysLeft} days to the exam</small></dd>
+          </div>
+          <div>
+            <dt>Done</dt>
+            <dd>{formatHours(f.done)}</dd>
+          </div>
+          <div>
+            <dt>Left on schedule</dt>
+            <dd>{formatHours(f.left)}</dd>
+          </div>
+          <div>
+            <dt>Not in schedule</dt>
+            <dd className={cn(f.unscheduled > 0 && s.mShort)}>
+              {formatHours(f.unscheduled)}
+              {f.reason ? <small>{f.reason}</small> : null}
+            </dd>
+          </div>
+          {f.workDays > 0 ? (
+            <>
+              <div>
+                <dt>Hours per day, on schedule</dt>
+                <dd className={cn(f.shortSchedule && s.mShort)}>{perDay(f.perDaySchedule, f.shortSchedule)}</dd>
+              </div>
+              <div>
+                <dt>Hours per day, to finish everything</dt>
+                <dd className={cn(f.shortAll && s.mShort)}>{perDay(f.perDayAll, f.shortAll)}</dd>
+              </div>
+            </>
+          ) : null}
+        </>
+      ) : null}
       <div>
         <dt>Questions answered</dt>
         <dd>{n(q.answered)} of {n(q.required)}</dd>
@@ -54,6 +81,60 @@ function Figures({ t, target }: { t: PlanTotals; target: number }) {
         </dd>
       </div>
     </dl>
+  );
+}
+
+const anchor = (x: number): CSSProperties => (x > 70 ? { right: `${100 - x}%`, textAlign: "right" } : { left: `${x}%` });
+
+/** Plan start to exam: holidays, today, the mock gate, mocks, and the planned load per day. */
+function CalendarStrip({ p }: { p: Projection }) {
+  const c = calendarStrip(p);
+  return (
+    <figure className={s.cal}>
+      <div className={s.calPlot} role="img" aria-label={`Plan calendar. ${c.caption}`}>
+        {c.today !== null ? (
+          <span className={cn(s.calLab, s.calLabNow)} style={{ top: 0, ...anchor(c.today) }} aria-hidden>
+            <b>Today</b>
+          </span>
+        ) : null}
+        <span className={s.calLab} style={{ top: 0, right: `${100 - c.exam}%`, textAlign: "right" }} aria-hidden>
+          <b>Exam</b> {shortDate(p.exam)}
+        </span>
+        {c.gate !== null ? (
+          <span className={s.calLab} style={{ top: 16, right: `${100 - c.gate}%`, textAlign: "right" }} aria-hidden>
+            Mocks from {shortDate(p.gate)}
+          </span>
+        ) : null}
+        <div className={s.calTrack} />
+        {c.holidays.map((h) => (
+          <div
+            key={h.id}
+            className={cn(s.hol, h.cancelled && s.calHolX)}
+            style={{ left: `${h.left}%`, width: `${h.width}%`, top: "var(--lab)", bottom: "auto", height: 28 }}
+            title={`Holiday ${h.label}`}
+          />
+        ))}
+        {c.gate !== null ? <i className={cn(s.calLine, s.gateLine)} style={{ left: `${c.gate}%` }} title={`Mocks from ${shortDate(p.gate)}`} /> : null}
+        {c.today !== null ? <i className={cn(s.calLine, s.now)} style={{ left: `${c.today}%` }} title={`Today ${shortDate(p.asOf)}`} /> : null}
+        <i className={cn(s.calLine, s.calExam)} style={{ left: `${c.exam}%` }} title={`Exam ${shortDate(p.exam)}`} />
+        {c.mocks.map((m, i) => (
+          <i key={i} className={cn(s.calDot, m.done && s.calDotDone)} style={{ left: `${m.pct}%` }} title={m.title} />
+        ))}
+        <div className={s.calLoad} aria-hidden>
+          {c.load.map((d, i) => (
+            <i key={i} style={{ left: `${d.left}%`, width: `${d.width}%`, opacity: d.done ? 1 : d.opacity }} />
+          ))}
+        </div>
+        <div className={s.calMonths} aria-hidden>
+          {c.months.map((m) => (
+            <span key={m.pct} style={{ left: `${m.pct}%` }}>{m.label}</span>
+          ))}
+        </div>
+      </div>
+      <figcaption className={s.calCap}>
+        {c.caption} Hatched is a holiday, a ring is a planned mock, a filled dot a mock taken, solid blue is a day studied.
+      </figcaption>
+    </figure>
   );
 }
 
@@ -107,7 +188,7 @@ function TopicTable({ p, limit }: { p: Projection; limit?: number }) {
           {rows.map((r) => (
             <tr key={r.topicId}>
               <th scope="row" className="font-normal">{r.name}</th>
-              <td>{r.examWeight}%</td>
+              <td>{formatWeight(r.examWeight)}</td>
               <td>{formatHours(r.plannedMin)}</td>
               <td>{formatHours(r.doneMin)}</td>
               <td>{n(r.required)}</td>
@@ -142,13 +223,15 @@ export function MetricsTile({ p, className }: { p: Projection; className?: strin
       expandedHint="Every topic with its hours and questions."
       expanded={
         <div className="min-h-0 flex-1 overflow-auto">
-          <Figures t={t} target={target} />
+          <CalendarStrip p={p} />
+          <Figures p={p} t={t} target={target} />
           <StepBar t={t} />
           <TopicTable p={p} />
         </div>
       }
     >
-      <Figures t={t} target={target} />
+      <CalendarStrip p={p} />
+      <Figures p={p} t={t} target={target} />
       <StepBar t={t} />
       <TopicTable p={p} limit={COMPACT_ROWS} />
     </Tile>
