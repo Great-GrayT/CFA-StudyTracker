@@ -25,6 +25,7 @@ export function CalendarStrip({ p }: { p: Projection }) {
 
   const info = dayInfo(p, iso(c.win.start + cur * DAY));
   const examIso = p.exam.slice(0, 10);
+  const todayIso = p.asOf.slice(0, 10);
   const todayIdx = Math.round((Date.parse(p.asOf.slice(0, 10)) - c.win.start) / DAY);
   const examIdx = n - 1;
 
@@ -151,7 +152,12 @@ export function CalendarStrip({ p }: { p: Projection }) {
             <i
               key={d.date}
               className={cn(d.date === examIso && s.calLoadExam)}
-              style={{ left: `${d.left}%`, width: `${d.width}%`, opacity: on && d.date === info.date ? 1 : d.done ? 1 : d.opacity }}
+              style={{
+                left: `${d.left}%`, width: `${d.width}%`, height: `${d.height * 100}%`,
+                background: d.date === examIso ? undefined : d.fill,
+                // Past days without study fade; studied and future days stay full colour.
+                opacity: on && d.date === info.date ? 1 : d.date < todayIso && !d.done ? 0.35 : 1,
+              }}
             />
           ))}
         </div>
@@ -198,7 +204,7 @@ export function CalendarStrip({ p }: { p: Projection }) {
         {live}
       </div>
       <figcaption className={s.calCap}>
-        {c.caption} Hatched is a holiday, a ring is a planned mock session (a number counts several), a filled dot one taken, the diamond is the exam day, solid blue is a day studied.
+        {c.caption} Hatched is a holiday, a ring is a planned mock session (a number counts several), a filled dot one taken, the diamond is the exam day. Each day column is its planned hours in step colours: teal read, blue questions, purple review, pink review questions, amber mocks; faded is a past day with no study.
       </figcaption>
     </figure>
   );

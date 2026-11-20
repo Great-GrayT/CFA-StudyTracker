@@ -557,12 +557,12 @@
   position: absolute;
   left: 0;
   right: 0;
-  top: calc(var(--lab) + 34px);
-  height: 10px;
+  top: calc(var(--lab) + 30px);
+  height: 14px;
 }
+/* Day columns grow from the baseline: height is the day's hours, colour its steps. */
 .calLoad i {
   position: absolute;
-  top: 0;
   bottom: 0;
   min-width: 1px;
   background: var(--claimed);

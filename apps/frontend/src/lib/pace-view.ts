@@ -490,11 +490,28 @@ export type CalendarStrip = {
   exam: number;
   gate: number | null;
   mocks: { pct: number; done: boolean; title: string; count: number }[];
-  load: { date: string; left: number; width: number; opacity: number; done: boolean }[];
+  load: { date: string; left: number; width: number; opacity: number; done: boolean; height: number; fill: string }[];
   /** Calendar days in the window, plan start to exam day inclusive. */
   days: number;
   caption: string;
 };
+
+const STEP_VAR: Record<string, string> = { "1": "--step-1", "2": "--step-2", "3": "--step-3", "4": "--step-4", "5": "--gate" };
+
+/** A day's hours as a bottom-up stack of step colours, so the strip reads which step owns each day. */
+export function stepFill(byStep: Record<string, number>): string {
+  const keys = ["1", "2", "3", "4", "5"].filter((k) => (byStep[k] ?? 0) > 0);
+  const total = keys.reduce((a, k) => a + byStep[k]!, 0);
+  if (total <= 0) return "var(--claimed)";
+  if (keys.length === 1) return `var(${STEP_VAR[keys[0]!]})`;
+  let at = 0;
+  const stops = keys.map((k) => {
+    const from = at;
+    at += (byStep[k]! / total) * 100;
+    return `var(${STEP_VAR[k]}) ${from.toFixed(1)}% ${at.toFixed(1)}%`;
+  });
+  return `linear-gradient(to top, ${stops.join(", ")})`;
+}
 
 /** Geometry and text for the plan calendar, from plan start (or first planned day) to the exam day. */
 export function calendarStrip(p: Projection): CalendarStrip {
@@ -524,7 +541,10 @@ export function calendarStrip(p: Projection): CalendarStrip {
     const g = box(x.date, x.date);
     if (!g || (x.plannedMin <= 0 && x.doneMin <= 0)) return [];
     const done = x.doneMin > 0 && x.date <= today;
-    return [{ date: x.date.slice(0, 10), ...g, opacity: Math.max(0.15, x.plannedMin / max), done }];
+    return [{
+      date: x.date.slice(0, 10), ...g, opacity: Math.max(0.15, x.plannedMin / max), done,
+      height: Math.max(0.2, Math.min(1, Math.max(x.plannedMin, x.doneMin) / max)), fill: stepFill(x.byStep),
+    }];
   });
   // Mocks a few days apart would overlap into a smear, so near ones share one counted marker.
   const mocks: CalendarStrip["mocks"] = [];
@@ -632,7 +652,6 @@ export function planVsSchedule(p: Projection): { rows: PlanRow[]; note: string |
     const original = t.byStep[key].requiredMin;
     const scheduled = p.daily.reduce((a, d) => a + (d.byStep[key] ?? 0), 0);
     const label = SLICE_LABEL[key];
-    const cut = Math.max(0, original - scheduled);
     if (key === "5" && p.calendar) {
       // One full mock is two sessions on the calendar.
       const trims = p.fit.trims.filter((x) => x.step === 5);
@@ -648,16 +667,23 @@ export function planVsSchedule(p: Projection): { rows: PlanRow[]; note: string |
       }];
     }
     if (original <= 0) return [];
-    const whole = cut < 0.5;
+    // Only step 4 is ever trimmed (fit.trims, in full-pace minutes). Any other gap between
+    // required and scheduled hours is the faster pace squeezing the same work into less time.
+    const trimmed = key === "4" ? p.fit.trims.filter((x) => x.step === 4).reduce((a, x) => a + x.minutes, 0) : 0;
+    const realCut = Math.min(original, trimmed);
+    const whole = realCut < 0.5;
+    const paced = p.fit.crash > 1.001 ? ` in ${formatHours(scheduled)} at ${oneDp(p.fit.crash)}x pace` : "";
     return [{
-      key, label, kept: clamp01(scheduled / original), whole,
-      text: whole ? "Kept whole" : `${formatHours(original)} planned, ${formatHours(scheduled)} scheduled, ${formatHours(cut)} cut`,
+      key, label, kept: clamp01((original - realCut) / original), whole,
+      text: whole
+        ? `${formatHours(original)} kept whole${paced}`
+        : `${formatHours(original)} planned, ${formatHours(realCut)} cut, the rest${paced || " scheduled"}`,
     }];
   });
   return {
     rows,
     note: p.fit.belowPass
-      ? "Your hours cannot hold the full plan, so review questions and mocks are cut first; reading and first questions stay whole."
-      : null,
+      ? `Your hours cannot hold the full plan.${p.fit.crash > 1.001 ? ` Study runs at ${oneDp(p.fit.crash)}x your normal pace, so work takes less clock time.` : ""} Only review questions and mocks are cut; reading, first questions and review reading stay whole.`
+      : p.fit.crash > 1.001 ? `Study runs at ${oneDp(p.fit.crash)}x your normal pace to fit your hours.` : null,
   };
 }

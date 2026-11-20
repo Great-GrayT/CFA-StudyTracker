@@ -388,13 +388,16 @@ describe("planVsSchedule", () => {
     byStep: Object.fromEntries(req.map((r, i) => [String(i + 1), { requiredMin: r, doneMin: 0 }])),
   });
   const d = (n: number[]) => ({ date: "2026-11-20", plannedMin: 0, doneMin: 0, byStep: Object.fromEntries(n.map((x, i) => [String(i + 1), x])) });
-  it("reports cut hours per step and 'Kept whole' otherwise", () => {
-    const r = planVsSchedule(base({ totals: t([600, 300, 0, 600, 0]), daily: [d([600, 300, 0, 200, 0])], calendar: undefined }))!;
+  it("cuts only step 4, by its trims; other gaps are pace, not cuts", () => {
+    const fit = { crash: 1.5, cancelledHolidayIds: [], feasible: false, belowPass: true,
+      trims: [{ readingId: "r", step: 4, minutes: 400, reason: "step 4 base" }] };
+    const r = planVsSchedule(base({ totals: t([600, 300, 0, 600, 0]), daily: [d([400, 200, 0, 133, 0])], calendar: undefined, fit }))!;
     expect(r.rows.map((x) => x.key)).toEqual(["1", "2", "4"]);
-    expect(r.rows[0]!.text).toBe("Kept whole");
-    expect(r.rows[2]!.text).toBe("10 h planned, 3.3 h scheduled, 6.7 h cut");
+    expect(r.rows[0]!.text).toBe("10 h kept whole in 6.7 h at 1.5x pace");
+    expect(r.rows[0]!.whole).toBe(true);
+    expect(r.rows[2]!.text).toBe("10 h planned, 6.7 h cut, the rest in 2.2 h at 1.5x pace");
     expect(r.rows[2]!.kept).toBeCloseTo(1 / 3);
-    expect(r.note).toBeNull();
+    expect(r.note).toMatch(/1\.5x your normal pace/);
   });
   it("counts mocks as two sessions and groups trim reasons", () => {
     const mocks = Array.from({ length: 14 }, (_, i) => ({ date: `2027-05-${String(i + 1).padStart(2, "0")}`, done: false, title: null }));

@@ -94,7 +94,8 @@ export function useCampaign(
     enabled: !!planId,
     staleTime: 30 * 60 * 1000,
     refetchOnWindowFocus: false,
-    refetchOnMount: false,
+    // Refetch on mount once stale: the cache outlives reloads in IndexedDB, and with
+    // refetchOnMount off the chart showed a days-old plan until the next record.
   });
 }
 

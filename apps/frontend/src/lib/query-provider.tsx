@@ -61,6 +61,8 @@ export function QueryProvider({ children }: { children: ReactNode }) {
       persistOptions={{
         persister: idbPersister as never,
         maxAge: 1000 * 60 * 60 * 24 * 7,
+        // A deploy can change what the server computes, so a new build drops the saved cache.
+        buster: process.env.NEXT_PUBLIC_BUILD_ID ?? "dev",
       }}
     >
       {children}
