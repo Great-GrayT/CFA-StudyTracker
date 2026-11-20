@@ -118,7 +118,9 @@ function CalendarStrip({ p }: { p: Projection }) {
         {c.today !== null ? <i className={cn(s.calLine, s.now)} style={{ left: `${c.today}%` }} title={`Today ${shortDate(p.asOf)}`} /> : null}
         <i className={cn(s.calLine, s.calExam)} style={{ left: `${c.exam}%` }} title={`Exam ${shortDate(p.exam)}`} />
         {c.mocks.map((m, i) => (
-          <i key={i} className={cn(s.calDot, m.done && s.calDotDone)} style={{ left: `${m.pct}%` }} title={m.title} />
+          <i key={i} className={cn(s.calDot, m.done && s.calDotDone, m.count > 1 && s.calDotMany)} style={{ left: `${m.pct}%` }} title={m.title}>
+            {m.count > 1 ? m.count : null}
+          </i>
         ))}
         <div className={s.calLoad} aria-hidden>
           {c.load.map((d, i) => (

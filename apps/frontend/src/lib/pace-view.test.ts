@@ -340,8 +340,15 @@ describe("calendarStrip", () => {
     expect(c.mocks[0]!.pct).toBeGreaterThan(c.gate!);
     expect(c.months[0]!.label).toBe("Dec");
     expect(c.caption).toBe(
-      "Today 20 Nov. Exam 18 May 2027, 179 days away. Mocks from 18 Apr. Holidays: 24 Dec to 2 Jan.",
+      "Today 20 Nov. Exam 18 May 2027, 179 days away. Mocks from 18 Apr. 1 mock planned, 20 Apr. Holidays: 24 Dec to 2 Jan.",
     );
+  });
+  it("merges mocks days apart into one counted marker", () => {
+    const mocks = ["2027-05-11", "2027-05-12", "2027-05-13"].map((date) => ({ date, done: false, title: null }));
+    const c = calendarStrip(base({ calendar: { start: "2026-11-01", mocks } }));
+    expect(c.mocks).toHaveLength(1);
+    expect(c.mocks[0]!.count).toBe(3);
+    expect(c.caption).toContain("3 mocks planned, 11 May to 13 May.");
   });
   it("falls back to the first daily date and marks cancelled holidays", () => {
     const c = calendarStrip(base({ calendar: undefined, holidays: [{ id: "h", start: "2026-12-24", end: "2026-12-24", cancelled: true }] }));

@@ -489,7 +489,7 @@ export type CalendarStrip = {
   today: number | null;
   exam: number;
   gate: number | null;
-  mocks: { pct: number; done: boolean; title: string }[];
+  mocks: { pct: number; done: boolean; title: string; count: number }[];
   load: { left: number; width: number; opacity: number; done: boolean }[];
   caption: string;
 };
@@ -524,17 +524,29 @@ export function calendarStrip(p: Projection): CalendarStrip {
     const done = x.doneMin > 0 && x.date <= today;
     return [{ ...g, opacity: Math.max(0.15, x.plannedMin / max), done }];
   });
-  const mocks = (p.calendar?.mocks ?? []).map((m) => ({
-    pct: Math.min(100, Math.max(0, pct(day(m.date) + DAY / 2, win))),
-    done: m.done,
-    title: `${m.done ? "Mock taken" : "Mock planned"} ${shortDate(m.date)}${m.title ? `, ${m.title}` : ""}`,
-  }));
+  // Mocks a few days apart would overlap into a smear, so near ones share one counted marker.
+  const mocks: CalendarStrip["mocks"] = [];
+  for (const m of [...(p.calendar?.mocks ?? [])].sort((a, b) => a.date.localeCompare(b.date))) {
+    const at = Math.min(100, Math.max(0, pct(day(m.date) + DAY / 2, win)));
+    const title = `${m.done ? "Mock taken" : "Mock planned"} ${shortDate(m.date)}${m.title ? `, ${m.title}` : ""}`;
+    const last = mocks[mocks.length - 1];
+    if (last && at - last.pct < 2) {
+      last.pct = (last.pct * last.count + at) / (last.count + 1);
+      last.count += 1;
+      last.done = last.done && m.done;
+      last.title += `. ${title}`;
+    } else mocks.push({ pct: at, done: m.done, title, count: 1 });
+  }
   const daysAway = Math.max(0, Math.round((day(p.exam) - day(today)) / DAY));
   const live = p.holidays.filter((h) => !h.cancelled);
   const parts = [
     `Today ${shortDate(today)}. Exam ${fullDate(p.exam)}, ${daysAway} ${daysAway === 1 ? "day" : "days"} away.`,
     `Mocks from ${shortDate(p.gate)}.`,
   ];
+  const planned = (p.calendar?.mocks ?? []).filter((m) => !m.done).map((m) => m.date).sort();
+  if (planned.length) {
+    parts.push(`${planned.length} ${planned.length === 1 ? "mock" : "mocks"} planned, ${planned.length === 1 ? shortDate(planned[0]!) : `${shortDate(planned[0]!)} to ${shortDate(planned[planned.length - 1]!)}`}.`);
+  }
   if (live.length) parts.push(`Holidays: ${live.map((h) => range(h.start, h.end)).join(", ")}.`);
   return {
     win, months, holidays,

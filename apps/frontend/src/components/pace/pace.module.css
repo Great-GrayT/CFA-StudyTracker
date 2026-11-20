@@ -489,11 +489,14 @@
   outline-offset: -1px;
   opacity: 0.8;
 }
+/* Lines run up into the label band so each label sits on its marker. No width here:
+   .now draws with background and needs its own 2px. */
 .calLine {
   position: absolute;
-  top: calc(var(--lab) - 4px);
-  height: 32px;
-  width: 0;
+  top: 14px;
+  bottom: auto;
+  height: calc(var(--lab) + 18px);
+  margin-left: -1px;
 }
 .calExam {
   border-left: 2px solid var(--foreground);
@@ -507,6 +510,18 @@
   border-radius: 50%;
   border: 1.5px solid var(--gate);
   background: var(--ground);
+}
+.calDotMany {
+  width: 16px;
+  height: 16px;
+  margin-left: -8px;
+  top: calc(var(--lab) + 5px);
+  font-size: 9.5px;
+  font-style: normal;
+  font-weight: 600;
+  line-height: 13px;
+  text-align: center;
+  color: var(--foreground);
 }
 .calDotDone {
   background: var(--gate);
