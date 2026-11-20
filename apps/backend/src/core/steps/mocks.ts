@@ -5,6 +5,8 @@ import type { WorkItem } from "./work";
 export const MOCK_SESSION_MIN = 132;
 export const MOCK_REVIEW_MIN = 66;
 export const MIN_PIECE = 15;
+// A paper is never split: a day may run this far over its cap to hold a whole session.
+export const MOCK_OVERFLOW_MAX = 45;
 // Weeks before the exam -> minimum full mocks.
 const WEEK_MOCKS: Record<number, number> = { 4: 1, 3: 2, 2: 3, 1: 4 };
 const ORDER = [4, 3, 2, 1];
@@ -31,15 +33,31 @@ export function mockNeeds(today: string, exam: string, sessions: MockSession[], 
     const done = sessions.filter((s) => s.done && s.doneOn && s.doneOn >= start && s.doneOn <= end).length;
     weeks.push({ before: b, start, end, need: Math.max(0, 2 * WEEK_MOCKS[b] - done) });
   }
-  // Trim cuts whole mocks (2 sessions), earliest week first.
-  let cut = 2 * trimMocks;
-  for (const w of weeks) { const c = Math.min(w.need, cut); w.need -= c; cut -= c; }
+  // Trim cuts whole mocks (2 sessions) from the busiest week, latest first on ties,
+  // so the cuts level the weeks out instead of emptying the early ones.
+  for (let t = 0; t < trimMocks; t++) {
+    let pick: Week | null = null;
+    for (const w of weeks) if (w.need > 0 && (!pick || w.need >= pick.need)) pick = w;
+    if (!pick) break;
+    pick.need -= Math.min(2, pick.need);
+  }
   return weeks;
 }
 
 export function mockDemandMinutes(today: string, exam: string, sessions: MockSession[], trimMocks = 0): number {
   return mockNeeds(today, exam, sessions, trimMocks).reduce((a, w) => a + w.need, 0)
     * (MOCK_SESSION_MIN + MOCK_REVIEW_MIN);
+}
+
+// Fewest mocks to trim so every remaining one places whole in the window's caps.
+// Placement-based, so it matches what schedule() will actually do.
+export function windowMockTrim(p: {
+  today: string; exam: string; caps: Array<{ date: string; minutes: number }>; sessions: MockSession[];
+}): number {
+  const ok = (t: number) => !placeMocks({ ...p, elig: new Map(), trim: t }).unplaced.length;
+  let lo = 0, hi = trimmableMocks(p.today, p.exam, p.sessions);
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (ok(mid)) hi = mid; else lo = mid + 1; }
+  return lo;
 }
 
 export function trimmableMocks(today: string, exam: string, sessions: MockSession[]): number {
@@ -95,47 +113,56 @@ export function placeMocks(p: {
   const taken = new Set<string>();
   const supply = p.sessions.filter((s) => !s.done);
 
-  const place = (item: WorkItem, days: string[], minDate: string, prefer?: string): string | null => {
-    let left = item.minutes;
-    const cands = days.filter((d) => d >= minDate && (rem.get(d) ?? 0) > EPS);
-    let last: string | null = null;
-    const put = (d: string, m: number) => {
-      rem.set(d, (rem.get(d) ?? 0) - m);
-      plan.used.set(d, (plan.used.get(d) ?? 0) + m);
-      plan.placements.push({ date: d, item, minutes: m });
-      left -= m; last = d;
-    };
-    const fits = cands.filter((d) => rem.get(d)! >= left - EPS);
-    if (fits.length) {
-      // Prefer the same day as the session, else the roomiest day.
-      const pick = prefer && fits.includes(prefer) ? prefer
-        : fits.reduce((a, b) => (rem.get(b)! > rem.get(a)! + EPS ? b : a));
-      put(pick, left);
-      return pick;
+  const all = [...rem.keys()].sort();
+  const weeks = mockNeeds(p.today, p.exam, p.sessions, p.trim ?? 0);
+  const weekDays = weeks.map((w) => all.filter((d) => d >= w.start && d <= w.end));
+
+  // Whole-paper day: own week first, then the nearest earlier weeks, then later ones.
+  // A day needs room for the paper less the allowed overflow; roomiest wins, earliest on ties.
+  const pickDay = (minutes: number, from: string, wi: number): string | null => {
+    const order = [wi, ...Array.from({ length: wi }, (_, k) => wi - 1 - k),
+      ...Array.from({ length: weeks.length - wi - 1 }, (_, k) => wi + 1 + k)];
+    for (const x of order) {
+      const c = weekDays[x].filter((d) => d >= from && rem.get(d)! >= minutes - MOCK_OVERFLOW_MAX - EPS);
+      if (c.length) return c.reduce((a, b) => (rem.get(b)! > rem.get(a)! + EPS ? b : a));
     }
+    return null;
+  };
+  const put = (d: string, item: WorkItem, m: number) => {
+    rem.set(d, Math.max(0, (rem.get(d) ?? 0) - m)); // overflow leaves no room, never negative
+    plan.used.set(d, (plan.used.get(d) ?? 0) + m);
+    plan.placements.push({ date: d, item, minutes: m });
+  };
+  const placeSession = (item: WorkItem, from: string, wi: number): string | null => {
+    const d = pickDay(item.minutes, from, wi);
+    if (d) put(d, item, item.minutes); else plan.unplaced.push(item);
+    return d;
+  };
+  // Review: first day from the session's own day with room for it whole, else split.
+  const placeReview = (item: WorkItem, minDate: string): boolean => {
+    let left = item.minutes;
+    const cands = all.filter((d) => d >= minDate && (rem.get(d) ?? 0) > EPS);
+    const fit = cands.find((d) => rem.get(d)! >= left - EPS);
+    if (fit) { put(fit, item, left); return true; }
     for (const d of cands) {
       let take = Math.min(rem.get(d)!, left);
       if (take < left - EPS) {
         if (left - take < MIN_PIECE - EPS) take = left - MIN_PIECE;
         if (take < MIN_PIECE - EPS) continue;
       }
-      put(d, take);
-      if (left <= EPS) break;
+      put(d, item, take);
+      left -= take;
+      if (left <= EPS) return true;
     }
-    if (left > EPS) plan.unplaced.push({ ...item, minutes: left });
-    return left <= EPS ? last : null;
+    plan.unplaced.push({ ...item, minutes: left });
+    return false;
   };
 
   let gi = 0;
-  for (const w of mockNeeds(p.today, p.exam, p.sessions, p.trim ?? 0)) {
-    const days: string[] = [];
-    for (let i = 0; i < 7; i++) { const d = addDays(w.start, i); if (rem.has(d)) days.push(d); }
-    // A session needs room for itself and its review from its eligible day on.
-    const hasDays = (from: string) =>
-      days.filter((d) => d >= from).reduce((a, d) => a + (rem.get(d) ?? 0), 0) >= MOCK_SESSION_MIN + MOCK_REVIEW_MIN;
+  weeks.forEach((w, wi) => {
     for (let i = 0; i < w.need; i++) {
       const s = supply.find((x) => !taken.has(x.ref) && p.elig.get(x.ref) !== null
-        && hasDays(p.elig.get(x.ref) ?? ""));
+        && pickDay(MOCK_SESSION_MIN, p.elig.get(x.ref) ?? "", wi) !== null);
       if (s) taken.add(s.ref);
       const key = s ? s.ref : `generic:${w.before}:${gi++}`;
       const label = s ? s.title : "Mock (any provider)";
@@ -143,11 +170,11 @@ export function placeMocks(p: {
       const from = s ? (p.elig.get(s.ref) ?? "") : (p.genericFrom === undefined ? "" : p.genericFrom);
       const rev = mkItem(`mock:${key}:review`, "mock-review", MOCK_REVIEW_MIN, s ?? null,
         `${label} answer review`, [sess.id]);
-      const fin = from === null ? null : place(sess, days, from);
+      const fin = from === null ? null : placeSession(sess, from, wi);
       if (from === null) plan.unplaced.push(sess);
       if (fin === null) plan.unplaced.push(rev);
-      else place(rev, days, fin, fin);
+      else placeReview(rev, fin);
     }
-  }
+  });
   return plan;
 }

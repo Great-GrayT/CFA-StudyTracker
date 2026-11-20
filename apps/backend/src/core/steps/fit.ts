@@ -1,4 +1,4 @@
-import { trimmableMocks, MOCK_REVIEW_MIN, MOCK_SESSION_MIN, type MockSession } from "./mocks";
+import { trimmableMocks, windowMockTrim, MOCK_REVIEW_MIN, MOCK_SESSION_MIN, type MockSession } from "./mocks";
 import {
   estimateLoad, schedule, type DayCap, type ReviewPolicy, type ScheduleResult, type StepOrder,
 } from "./schedule";
@@ -105,13 +105,15 @@ export function fitPlan(i: FitInput): FitResult {
   const baseUnits = toUnits(s4.filter((w) => w.extraReason === null)).sort(byWeight);
   extras.forEach((u) => { u.reason = "step 4 extra"; });
   baseUnits.forEach((u) => { u.reason = "step 4 base, lowest exam weight first"; });
-  const mockUnits: Unit[] = Array.from({ length: trimmableMocks(i.today, i.exam, i.mockSessions) },
-    () => ({ kind: "mock", reason: "mock count, earliest week first" }));
+  // Mocks the window cannot hold whole go first: no step 4 trim can make them place.
+  const pre = windowMockTrim({ today: i.today, exam: i.exam, caps: effCaps(cancelled), sessions: i.mockSessions });
+  const mockUnits: Unit[] = Array.from({ length: trimmableMocks(i.today, i.exam, i.mockSessions) - pre },
+    () => ({ kind: "mock", reason: "mock count, busiest week first" }));
   const units = [...extras, ...baseUnits, ...mockUnits];
 
   const apply = (n: number) => {
     const gone = new Set<string>();
-    let mocks = 0;
+    let mocks = pre;
     for (const u of units.slice(0, n)) { if (u.kind === "mock") mocks++; else u.ids.forEach((id) => gone.add(id)); }
     return { work: i.work.filter((w) => !gone.has(w.id)), mocks };
   };
@@ -124,9 +126,12 @@ export function fitPlan(i: FitInput): FitResult {
   }
   const a = apply(lo);
   const res = tryN(lo) ?? run(kMax, cancelled, a.work, a.mocks, true)!;
-  const trims = units.slice(0, lo).map((u): FitReport["trims"][number] => u.kind === "mock"
-    ? { readingId: null, step: 5, minutes: 2 * (MOCK_SESSION_MIN + MOCK_REVIEW_MIN), reason: u.reason }
-    : { readingId: u.readingId, step: 4, minutes: u.minutes, reason: u.reason });
+  const mockCost = 2 * (MOCK_SESSION_MIN + MOCK_REVIEW_MIN);
+  const preTrims = Array.from({ length: pre }, (): FitReport["trims"][number] =>
+    ({ readingId: null, step: 5, minutes: mockCost, reason: "mock window full" }));
+  const trims = preTrims.concat(units.slice(0, lo).map((u): FitReport["trims"][number] => u.kind === "mock"
+    ? { readingId: null, step: 5, minutes: mockCost, reason: u.reason }
+    : { readingId: u.readingId, step: 4, minutes: u.minutes, reason: u.reason }));
   return {
     result: res, work: a.work,
     fit: report({ crash: kMax, cancelled, feasible: false, belowPass: true, trims }),

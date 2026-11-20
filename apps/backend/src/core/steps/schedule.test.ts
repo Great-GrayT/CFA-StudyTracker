@@ -178,6 +178,16 @@ describe("schedule", () => {
       }));
       expect(mockTasks(r).length).toBeGreaterThan(0);
     });
+
+    it("at 120 min a day a mock session sits whole on one day (132 min, over by <= 45)", () => {
+      const r = schedule(mbase({ exam, caps: caps("2026-01-01", 59, 120), mockSessions: sessions(20), modules, mockTrim: 4 }));
+      const sess = r.tasks.filter((t) => t.item.kind === "mock");
+      expect(sess.length).toBeGreaterThan(0);
+      for (const t of sess) expect(t.minutes).toBe(132);
+      // The overflow day takes nothing else.
+      for (const t of sess) expect(r.tasks.filter((x) => x.date === t.date).length).toBe(1);
+      expect(new Set(sess.map((t) => weekOf(t.date))).size).toBeGreaterThanOrEqual(3);
+    });
   });
 });
 

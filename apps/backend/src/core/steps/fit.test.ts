@@ -72,7 +72,7 @@ describe("fitPlan", () => {
       expect(r.work.map((x) => x.id)).not.toContain("low:q:ar");
       expect(r.result.unplaced).toEqual([]);
     });
-    it("trims mocks last, earliest week first", () => {
+    it("trims mocks last, busiest week first", () => {
       const r = fitPlan(input({
         caps: caps(TODAY, 100, 140), weights: w, belowPassAccepted: true,
         work: [item({ id: "S1", readingId: "r1", step: 1, minutes: 7000 })],
@@ -80,6 +80,48 @@ describe("fitPlan", () => {
       expect(r.fit.trims.length).toBeGreaterThan(0);
       expect(r.fit.trims.every((t) => t.step === 5 && t.readingId === null)).toBe(true);
       expect(r.work.map((x) => x.id)).toContain("S1");
+    });
+  });
+
+  describe("mock window as the bottleneck", () => {
+    const EX = "2027-05-18", TD = "2026-11-20";
+    const wk = (d: string) => Math.floor((Date.parse(`${EX}T00:00:00Z`) - Date.parse(`${d}T00:00:00Z`)) / 864e5 / 7);
+    const scenario = () => {
+      const work = [
+        item({ id: "S1", readingId: "r1", step: 1, minutes: 9000 }),
+        item({ id: "S3", readingId: "r1", step: 3, kind: "review", minutes: 3000, after: ["S1"] }),
+        ...Array.from({ length: 20 }, (_, k) => item({
+          id: `q${k}`, readingId: "r1", step: 4, kind: "questions", minutes: 600, after: ["S3"],
+        })),
+      ];
+      return fitPlan({
+        today: TD, exam: EX, caps: caps(TD, 179, 120), work, modules: [], mockSessions: [],
+        reviewPolicy: "fixed-date", reviewStartDate: null, order: "curriculum-topic",
+        belowPassAccepted: true, weights: new Map(),
+      });
+    };
+    it("trims mocks to the window first, fills every window week, never splits a paper", () => {
+      const r = scenario();
+      expect(r.fit.belowPass).toBe(true);
+      expect(r.result.unplaced).toEqual([]);
+      const mockTrims = r.fit.trims.filter((t) => t.step === 5);
+      expect(mockTrims.length).toBeGreaterThan(0);
+      expect(mockTrims[0].reason).toBe("mock window full");
+      // Step 4 survives: the window, not step 4, was the bottleneck.
+      const s4 = r.result.tasks.filter((t) => t.item.step === 4).reduce((a, t) => a + t.minutes, 0);
+      expect(s4).toBeGreaterThan(0);
+      expect(r.fit.trims.filter((t) => t.step === 4).length).toBeLessThan(20);
+      const mocks = r.result.tasks.filter((t) => t.item.kind === "mock");
+      for (const m of mocks) expect(m.minutes).toBe(132);
+      expect(new Set(mocks.map((m) => wk(m.date))).size).toBeGreaterThanOrEqual(3);
+      const gate = "2027-04-18";
+      const byWeek = new Map<number, Set<string>>();
+      for (const t of r.result.tasks) {
+        if (t.date <= gate) continue;
+        const s = byWeek.get(wk(t.date)) ?? new Set<string>();
+        s.add(t.date); byWeek.set(wk(t.date), s);
+      }
+      for (const w of [0, 1, 2, 3]) expect(byWeek.get(w)?.size ?? 0).toBeGreaterThanOrEqual(5);
     });
   });
 });
