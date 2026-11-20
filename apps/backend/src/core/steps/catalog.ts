@@ -121,18 +121,28 @@ export function buildCatalog(input: {
     }
     const s1 = options[1][0]?.minutes ?? 0;
 
-    for (const slug of slugsFor(3)) {
-      const a = aggs.get(`${slug}|${rd.id}`);
-      if (!a) continue;
-      let minutes = a.pages * NOTES_MIN_PER_PAGE + a.reviewSec / 60;
+    // Review reading is floored at a share of step 1: short review videos alone
+    // would make the pre-question refresh trivially small.
+    const share = (rules ?? DEFAULT_RULES).reviewShare / 100;
+    const slugs3 = slugsFor(3).filter((slug) => aggs.has(`${slug}|${rd.id}`));
+    slugs3.forEach((slug, i) => {
+      const a = aggs.get(`${slug}|${rd.id}`)!;
+      const own = a.pages * NOTES_MIN_PER_PAGE + a.reviewSec / 60;
+      let minutes = own;
       // Text-only sources (LES) review at half their own step 1 rate.
       if (minutes <= 0) minutes = 0.5 * readMin(slug, a);
-      if (s1 > 0) minutes = Math.min(minutes, 0.5 * s1);
+      const ids = new Set(a.noteIds);
+      // A lead with no review or notes ids would leave the task without material: borrow the next package's.
+      if (!ids.size) for (const nxt of slugs3.slice(i + 1)) {
+        for (const r of aggs.get(`${nxt}|${rd.id}`)!.noteIds) ids.add(r);
+        if (ids.size) break;
+      }
+      if (s1 > 0) minutes = Math.min(Math.max(minutes, share * s1), Math.max(0.5, share) * s1);
       if (minutes > 0) {
-        options[3].push({ packageSlug: slug, packageId: a.packageId, resourceIds: [...a.noteIds],
+        options[3].push({ packageSlug: slug, packageId: a.packageId, resourceIds: [...ids],
           kind: "read", minutes, label: `${slug} review` });
       }
-    }
+    });
 
     for (const step of [2, 4] as const) {
       for (const slug of slugsFor(step)) {

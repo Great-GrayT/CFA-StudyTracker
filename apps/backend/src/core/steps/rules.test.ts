@@ -30,7 +30,7 @@ describe("non-default rules", () => {
   const r = (answered: number, correct: number, minutes: number) =>
     ({ round: 1, answered, correct, minutes, usedByPackage: {} });
   it("defaults are 2/2/80/75/2", () => {
-    expect(DEFAULT_RULES).toEqual({ step2Multiplier: 2, step4Multiplier: 2, accuracyTarget: 80, mockPassTarget: 75, exemptionMultiplier: 2 });
+    expect(DEFAULT_RULES).toEqual({ step2Multiplier: 2, step4Multiplier: 2, accuracyTarget: 80, mockPassTarget: 75, exemptionMultiplier: 2, reviewShare: 35 });
   });
   it("70% target passes 7/10 where 80% does not", () => {
     expect(accuracyMet(10, 7)).toBe(false);

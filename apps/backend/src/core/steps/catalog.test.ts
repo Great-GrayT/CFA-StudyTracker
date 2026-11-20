@@ -82,8 +82,38 @@ describe("adequateMinutes with rules", () => {
     expect(adequateMinutes(base, 2)).toBe(2 * s1);
     expect(adequateMinutes(base, 4)).toBe(4 * s1);
     const [m] = buildCatalog({ readings, units, resources, planPackageSlugs: ["mm-l2"], priority, lesHours: 200,
-      rules: { step2Multiplier: 3, step4Multiplier: 1.5, accuracyTarget: 80, mockPassTarget: 75, exemptionMultiplier: 2 } });
+      rules: { step2Multiplier: 3, step4Multiplier: 1.5, accuracyTarget: 80, mockPassTarget: 75, exemptionMultiplier: 2, reviewShare: 35 } });
     expect(adequateMinutes(m, 2)).toBeCloseTo(3 * s1);
     expect(adequateMinutes(m, 4)).toBeCloseTo(4.5 * s1);
+  });
+});
+
+describe("step 3 review share", () => {
+  // s1 = 90 min (mm-l2 lecture + eocq); mm review video varies per case.
+  const run = (rev: number | null, share?: number, extraUnits: UnitRow[] = [], extraRes: ResourceRow[] = []) => {
+    const rs = [res("m-lec", "mu1", "lecture", { durationSeconds: 3600 }), res("m-eoc", "mu1", "eocq", { durationSeconds: 1800 }),
+      ...(rev == null ? [] : [res("m-rev", "mu1", "review", { durationSeconds: rev })]), ...extraRes];
+    const rules = share == null ? undefined
+      : { step2Multiplier: 2, step4Multiplier: 2, accuracyTarget: 80, mockPassTarget: 75, exemptionMultiplier: 2, reviewShare: share };
+    return buildCatalog({ readings: [readings[0]], units: [unit("mu1", "mm-l2", ["r1"], 0), ...extraUnits], resources: rs,
+      planPackageSlugs: ["mm-l2", "kaplan-l2"], priority, lesHours: 200, ...(rules ? { rules } : {}) })[0];
+  };
+  it("floors tiny review content at the share of step 1", () => {
+    expect(run(60).options[3][0].minutes).toBeCloseTo(0.35 * 90);
+  });
+  it("keeps content above the floor", () => {
+    expect(run(1800).options[3][0].minutes).toBeCloseTo(31.5);
+    expect(run(2400).options[3][0].minutes).toBeCloseTo(40);
+  });
+  it("caps at 50% of step 1, or the share when higher", () => {
+    expect(run(6000).options[3][0].minutes).toBeCloseTo(45);
+    expect(run(60, 60).options[3][0].minutes).toBeCloseTo(54);
+  });
+  it("attaches the next step 3 package material when the lead has none", () => {
+    const c = run(null, undefined, [unit("ku1", "kaplan-l2", ["r1"], 4)], [res("k-n", "ku1", "notes", { durationSeconds: 60 })]);
+    const [lead] = c.options[3];
+    expect(lead.packageSlug).toBe("mm-l2");
+    expect(lead.minutes).toBeCloseTo(45); // no own content: half of read, within cap
+    expect(lead.resourceIds).toContain("k-n");
   });
 });

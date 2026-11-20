@@ -90,6 +90,7 @@ export type Tuning = {
   accuracyTarget: number;
   mockPassTarget: number;
   exemptionMultiplier: number;
+  reviewShare: number;
 };
 
 /**
@@ -352,6 +353,7 @@ export type StepRules = {
   accuracyTarget: number;
   mockPassTarget: number;
   exemptionMultiplier: number;
+  reviewShare: number;
 };
 /** Step 5 is mocks. */
 export type PlanTotals = {

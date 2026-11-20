@@ -5,7 +5,10 @@ import {
   sectionWindows, day, DAY, moduleHref, accuracy, perfRows,
   planTotalsLine, dailyNeed, stepSlices, topicMetrics,
 } from "./pace-view";
-import { calendarStrip, dayInfo, formatWeight, hourFigures, planVsSchedule } from "./pace-view";
+import {
+  dayInfo, formatWeight, hourFigures, planVsSchedule, planDays, monthGrid, monthMarks, clusterMocks, daySegments,
+  splitMinutes, budgetSplit, budgetTicks, stepLedger, verdictLine, keyFigures, MOCK_FULL_MIN,
+} from "./pace-view";
 import type { PlanTotals, Projection, ProjectionSection, ProjectionWindow } from "./types";
 
 const TODAY = "2026-11-16";
@@ -329,32 +332,92 @@ describe("hourFigures", () => {
   });
 });
 
-describe("calendarStrip", () => {
-  it("places today, exam, gate, holidays and mocks along the plan span", () => {
-    const c = calendarStrip(base());
-    expect(c.today).toBeGreaterThan(0);
-    expect(c.today!).toBeLessThan(c.gate!);
-    expect(c.gate!).toBeLessThan(c.exam);
-    expect(c.exam).toBeLessThanOrEqual(100);
-    expect(c.holidays).toHaveLength(1);
-    expect(c.mocks[0]!.pct).toBeGreaterThan(c.gate!);
-    expect(c.months[0]!.label).toBe("Dec");
-    expect(c.caption).toBe(
-      "Today 20 Nov. Exam 18 May 2027, 179 days away. Mocks from 18 Apr. 1 mock session planned, 20 Apr. Holidays: 24 Dec to 2 Jan.",
-    );
+describe("planDays and monthGrid", () => {
+  it("lists every day from plan start to the exam and groups them by month", () => {
+    const days = planDays(base());
+    expect(days[0]!.date).toBe("2026-11-01");
+    expect(days[days.length - 1]!.date).toBe("2027-05-18");
+    expect(days).toHaveLength(199);
+    expect(days.find((d) => d.today)!.idx).toBe(19);
+    const m = monthGrid(days);
+    expect(m.map((x) => x.key)).toEqual(["2026-11", "2026-12", "2027-01", "2027-02", "2027-03", "2027-04", "2027-05"]);
+    expect(m[0]!.label).toBe("November 2026");
+    expect(m[0]!.lead).toBe(6);
+    expect(m[0]!.days).toHaveLength(30);
+    expect(m[6]!.days).toHaveLength(18);
+    expect(monthMarks(days).map((x) => x.label).slice(0, 3)).toEqual(["Nov 2026", "Dec", "Jan 2027"]);
   });
-  it("merges mocks days apart into one counted marker", () => {
-    const mocks = ["2027-05-11", "2027-05-12", "2027-05-13"].map((date) => ({ date, done: false, title: null }));
-    const c = calendarStrip(base({ calendar: { start: "2026-11-01", mocks } }));
-    expect(c.mocks).toHaveLength(1);
-    expect(c.mocks[0]!.count).toBe(3);
-    expect(c.caption).toContain("3 mock sessions planned, 11 May to 13 May.");
+  it("starts a partial first month at the plan start", () => {
+    const m = monthGrid(planDays(base({ calendar: { start: "2026-11-18", mocks: [] } })));
+    expect(m[0]!.days).toHaveLength(13);
+    expect(m[0]!.lead).toBe(2);
   });
-  it("falls back to the first daily date and marks cancelled holidays", () => {
-    const c = calendarStrip(base({ calendar: undefined, holidays: [{ id: "h", start: "2026-12-24", end: "2026-12-24", cancelled: true }] }));
-    expect(c.win.start).toBe(Date.parse("2026-11-19T00:00:00Z"));
-    expect(c.holidays[0]!.label).toBe("24 Dec (cancelled)");
-    expect(c.caption).not.toContain("Holidays");
+  it("includes today when it falls after the exam", () => {
+    const days = planDays(base({ asOf: "2027-06-01" }));
+    expect(days[days.length - 1]!.date).toBe("2027-06-01");
+  });
+});
+
+describe("mock sessions", () => {
+  it("clusters near sessions into one counted ring", () => {
+    const c = clusterMocks([20, 23, 26, 28, 30].map((idx) => ({ idx, done: false })));
+    expect(c.map((x) => x.count)).toEqual([3, 2]);
+    expect(c[0]!.idx).toBe(23);
+    expect(clusterMocks([{ idx: 1, done: true }, { idx: 2, done: false }])[0]!.done).toBe(false);
+  });
+  it("names sessions per mock and splits sitting from review", () => {
+    const mocks = ["2027-04-20", "2027-04-23", "2027-04-26"].map((date) => ({ date, done: false, title: null }));
+    const p = base({
+      calendar: { start: "2026-11-01", mocks },
+      daily: [{ date: "2027-04-23", plannedMin: 198, doneMin: 0, byStep: { "1": 0, "2": 0, "3": 0, "4": 0, "5": 198 } }],
+    });
+    const d = dayInfo(p, "2027-04-23");
+    expect(d.events.map((e) => e.text)).toEqual(["Mock 1 session 2"]);
+    expect(d.steps.map((x) => [x.key, x.min])).toEqual([["5", 132], ["5r", 66]]);
+    expect(dayInfo(p, "2027-04-26").events[0]!.text).toBe("Mock 2 session 1");
+    expect(daySegments({ "5": 66 }, false)).toEqual([{ key: "5r", min: 66 }]);
+  });
+});
+
+describe("budget split", () => {
+  const trims = [
+    { readingId: "r", step: 4, minutes: 300, reason: "step 4 base" },
+    { readingId: null, step: 5, minutes: 0, reason: "mock-window-full" },
+  ];
+  const fit = { crash: 1.5, cancelledHolidayIds: [], feasible: false, belowPass: true, trims };
+  const p = () => base({ fit, daily: [row("2026-11-19", 60, 60), row("2026-11-20", 600), row("2026-11-21", 300)] });
+  it("adds up to the required hours and counts only today onwards as ahead", () => {
+    const b = budgetSplit(p())!;
+    expect(b.aheadMin).toBe(900);
+    expect(b.cutMin).toBe(300 + MOCK_FULL_MIN);
+    expect(b.doneMin + b.aheadMin + b.paceMin + b.cutMin).toBe(b.requiredMin);
+    expect(b.paceMin).toBe(944 * 60 - 540 - 900 - 300 - MOCK_FULL_MIN);
+    expect(b.cutMocks).toBe(1);
+  });
+  it("never goes negative or past the total when parts overshoot", () => {
+    const s = splitMinutes(100, 60, 60, 60);
+    expect(s).toEqual({ doneMin: 60, aheadMin: 40, cutMin: 0, paceMin: 0 });
+    expect(budgetSplit(base({ totals: undefined }))).toBeNull();
+  });
+  it("gives round ticks ending at the exact total", () => {
+    expect(budgetTicks(494 * 60)).toEqual([0, 100, 200, 300, 400, 494]);
+    expect(budgetTicks(0)).toEqual([0]);
+  });
+  it("builds a ledger row per step with its split", () => {
+    const t = { ...totals, byStep: Object.fromEntries(["1", "2", "3", "4", "5"].map((k) => [k, { requiredMin: k === "4" ? 1000 : 0, doneMin: 0 }])) };
+    const rows = stepLedger(base({ fit, totals: t, daily: [{ date: "2026-11-21", plannedMin: 500, doneMin: 0, byStep: { "1": 0, "2": 0, "3": 0, "4": 500, "5": 0 } }] }));
+    expect(rows.map((r) => r.key)).toEqual(["4", "5"]);
+    expect(rows[0]).toMatchObject({ fullMin: 1000, aheadMin: 500, cutMin: 300, paceMin: 200 });
+    expect(rows[1]!.cutMocks).toBe(1);
+  });
+  it("words the verdict and figures", () => {
+    expect(verdictLine(p())).toMatch(/^Your plan holds 16 of 944 hours by studying at 1\.5x pace\./);
+    expect(verdictLine(p())).toContain("The cut is 5 h of review questions and 1 mock.");
+    expect(verdictLine(base({ totals: undefined }))).toBeNull();
+    const f = keyFigures(base({ totals: { ...totals, questions: { required: 3915, answered: 97, correct: 83 } } }));
+    expect(f[0]!.value).toBe("16 h");
+    expect(f.find((x) => x.note.startsWith("to finish everything"))!.alarm).toBe(true);
+    expect(f[f.length - 1]!.value).toBe("0.5 of 0.5 mocks");
   });
 });
 
@@ -369,7 +432,7 @@ describe("dayInfo", () => {
     expect(d.label).toBe("Fri 25 Dec");
     expect(d.steps.map((x) => x.key)).toEqual(["1", "3"]);
     expect(d.doneMin).toBeNull();
-    expect(d.events.map((e) => e.text)).toEqual(["Holiday 24 Dec to 2 Jan", "Mock planned: Mock 1"]);
+    expect(d.events.map((e) => e.text)).toEqual(["Holiday 24 Dec to 2 Jan", "Mock 1 session 1"]);
     expect(d.text).toContain("3 h planned");
   });
   it("marks today with done hours, the gate and the exam day", () => {

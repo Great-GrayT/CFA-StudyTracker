@@ -66,6 +66,10 @@
   --step-3: #8a3fd1;
   --step-4: #c2306f;
   --gate: #9a6408;
+  /* Text-safe gate, ink on a gate fill, ink on an alarm fill. */
+  --gate-ink: #7a4f06;
+  --on-gate: #fff;
+  --on-alarm: #fff;
 
   --space-1: 4px;
   --space-2: 8px;
@@ -128,6 +132,9 @@
     --step-3: #b27cf0;
     --step-4: #e8689f;
     --gate: #d9a23a;
+  --gate-ink: #e8b85a;
+  --on-gate: #070b26;
+  --on-alarm: #1a0705;
   }
 }
 
@@ -164,6 +171,9 @@
   --step-3: #b27cf0;
   --step-4: #e8689f;
   --gate: #d9a23a;
+  --gate-ink: #e8b85a;
+  --on-gate: #070b26;
+  --on-alarm: #1a0705;
 }
 
 *,

@@ -43,6 +43,7 @@ export type Tuning = {
   accuracyTarget: number;
   mockPassTarget: number;
   exemptionMultiplier: number;
+  reviewShare: number;
 };
 
 export type RejectedField = {
@@ -62,6 +63,7 @@ export const DEFAULT_TUNING: Tuning = {
   accuracyTarget: DEFAULT_RULES.accuracyTarget,
   mockPassTarget: DEFAULT_RULES.mockPassTarget,
   exemptionMultiplier: DEFAULT_RULES.exemptionMultiplier,
+  reviewShare: DEFAULT_RULES.reviewShare,
 };
 
 export const TUNING_RANGES: Record<string, { min: number; max: number }> = {
@@ -71,6 +73,7 @@ export const TUNING_RANGES: Record<string, { min: number; max: number }> = {
   accuracyTarget: { min: 50, max: 100 },
   mockPassTarget: { min: 50, max: 100 },
   exemptionMultiplier: { min: 1.25, max: 5 },
+  reviewShare: { min: 10, max: 60 },
 };
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -195,6 +198,6 @@ export function rulesOf(t: Tuning): StepRules {
   return {
     step2Multiplier: t.step2Multiplier, step4Multiplier: t.step4Multiplier,
     accuracyTarget: t.accuracyTarget, mockPassTarget: t.mockPassTarget,
-    exemptionMultiplier: t.exemptionMultiplier,
+    exemptionMultiplier: t.exemptionMultiplier, reviewShare: t.reviewShare,
   };
 }

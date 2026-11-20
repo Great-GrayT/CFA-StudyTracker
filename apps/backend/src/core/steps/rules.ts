@@ -11,10 +11,12 @@ export type StepRules = {
   accuracyTarget: number; // percent, steps 2 and 4
   mockPassTarget: number; // percent per topic in a mock
   exemptionMultiplier: number; // exemption after this many x adequate minutes below target
+  reviewShare: number; // percent of step 1 minutes the step 3 review reading takes (floor)
 };
 
 export const DEFAULT_RULES: StepRules = {
   step2Multiplier: 2, step4Multiplier: 2, accuracyTarget: 80, mockPassTarget: 75, exemptionMultiplier: 2,
+  reviewShare: 35,
 };
 
 const DEFAULT_TARGET = DEFAULT_RULES.accuracyTarget / 100;

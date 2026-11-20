@@ -214,7 +214,7 @@ describe("non-default rules", () => {
   ];
   it("accuracyTarget 70 passes step 2 at 70%, default does not", () => {
     expect(deriveState(cat, s2tasks, [], []).get("r1")!.s2.passed).toBe(false);
-    const rules = { step2Multiplier: 2, step4Multiplier: 2, accuracyTarget: 70, mockPassTarget: 75, exemptionMultiplier: 2 };
+    const rules = { step2Multiplier: 2, step4Multiplier: 2, accuracyTarget: 70, mockPassTarget: 75, exemptionMultiplier: 2, reviewShare: 35 };
     expect(deriveState(withRules(rules), s2tasks, [], []).get("r1")!.s2.passed).toBe(true);
   });
   it("mockPassTarget 60 stops a 65% topic retest", () => {
@@ -226,7 +226,7 @@ describe("non-default rules", () => {
     ];
     const mock = [{ date: "2026-02-01", topicScores: [{ topicId: "t1", answered: 20, correct: 13 }] }];
     expect(deriveState(cat, base, [], mock).get("r1")!.s4.passed).toBe(false);
-    const rules = { step2Multiplier: 2, step4Multiplier: 2, accuracyTarget: 80, mockPassTarget: 60, exemptionMultiplier: 2 };
+    const rules = { step2Multiplier: 2, step4Multiplier: 2, accuracyTarget: 80, mockPassTarget: 60, exemptionMultiplier: 2, reviewShare: 35 };
     expect(deriveState(withRules(rules), base, [], mock).get("r1")!.s4.passed).toBe(true);
   });
 });

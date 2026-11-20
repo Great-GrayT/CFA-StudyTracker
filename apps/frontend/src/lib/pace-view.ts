@@ -476,113 +476,50 @@ export function hourFigures(p: Projection): HourFigures | null {
   };
 }
 
-// ---- Calendar strip -------------------------------------------------------
-
-const fullFmt = new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", day: "numeric", month: "short", year: "numeric" });
-const fullDate = (isoDate: string) => fullFmt.format(new Date(day(isoDate)));
-const range = (a: string, b: string) => (a.slice(0, 10) === b.slice(0, 10) ? shortDate(a) : `${shortDate(a)} to ${shortDate(b)}`);
-
-export type CalendarStrip = {
-  win: Win;
-  months: { pct: number; label: string }[];
-  holidays: { id: string; left: number; width: number; cancelled: boolean; label: string }[];
-  today: number | null;
-  exam: number;
-  gate: number | null;
-  mocks: { pct: number; done: boolean; title: string; count: number }[];
-  load: { date: string; left: number; width: number; opacity: number; done: boolean; height: number; fill: string }[];
-  /** Calendar days in the window, plan start to exam day inclusive. */
-  days: number;
-  caption: string;
-};
-
-const STEP_VAR: Record<string, string> = { "1": "--step-1", "2": "--step-2", "3": "--step-3", "4": "--step-4", "5": "--gate" };
-
-/** A day's hours as a bottom-up stack of step colours, so the strip reads which step owns each day. */
-export function stepFill(byStep: Record<string, number>): string {
-  const keys = ["1", "2", "3", "4", "5"].filter((k) => (byStep[k] ?? 0) > 0);
-  const total = keys.reduce((a, k) => a + byStep[k]!, 0);
-  if (total <= 0) return "var(--claimed)";
-  if (keys.length === 1) return `var(${STEP_VAR[keys[0]!]})`;
-  let at = 0;
-  const stops = keys.map((k) => {
-    const from = at;
-    at += (byStep[k]! / total) * 100;
-    return `var(${STEP_VAR[k]}) ${from.toFixed(1)}% ${at.toFixed(1)}%`;
-  });
-  return `linear-gradient(to top, ${stops.join(", ")})`;
-}
-
-/** Geometry and text for the plan calendar, from plan start (or first planned day) to the exam day. */
-export function calendarStrip(p: Projection): CalendarStrip {
-  const today = p.asOf.slice(0, 10);
-  const startIso = p.calendar?.start ?? p.daily[0]?.date ?? today;
-  const first = Math.min(day(startIso), day(today));
-  const win: Win = { start: first, end: Math.max(day(p.exam) + DAY, first + 2 * DAY) };
-  const box = (a: string, b: string) => {
-    const l = Math.max(0, pct(day(a), win));
-    const r = Math.min(100, pct(day(b) + DAY, win));
-    return r > l ? { left: l, width: r - l } : null;
-  };
-  const months: CalendarStrip["months"] = [];
-  const d = new Date(win.start);
-  d.setUTCDate(1);
-  for (d.setUTCMonth(d.getUTCMonth() + 1); d.getTime() < win.end; d.setUTCMonth(d.getUTCMonth() + 1)) {
-    months.push({ pct: pct(d.getTime(), win), label: monthFmt.format(d) });
-  }
-  const holidays = p.holidays.flatMap((h) => {
-    const g = box(h.start, h.end);
-    const text = range(h.start, h.end);
-    return g ? [{ id: h.id, ...g, cancelled: h.cancelled, label: h.cancelled ? `${text} (cancelled)` : text }] : [];
-  });
-  const gateMs = day(p.gate);
-  const max = Math.max(1, ...p.daily.map((x) => x.plannedMin));
-  const load = p.daily.flatMap((x) => {
-    const g = box(x.date, x.date);
-    if (!g || (x.plannedMin <= 0 && x.doneMin <= 0)) return [];
-    const done = x.doneMin > 0 && x.date <= today;
-    return [{
-      date: x.date.slice(0, 10), ...g, opacity: Math.max(0.15, x.plannedMin / max), done,
-      height: Math.max(0.2, Math.min(1, Math.max(x.plannedMin, x.doneMin) / max)), fill: stepFill(x.byStep),
-    }];
-  });
-  // Mocks a few days apart would overlap into a smear, so near ones share one counted marker.
-  const mocks: CalendarStrip["mocks"] = [];
-  for (const m of [...(p.calendar?.mocks ?? [])].sort((a, b) => a.date.localeCompare(b.date))) {
-    const at = Math.min(100, Math.max(0, pct(day(m.date) + DAY / 2, win)));
-    const title = `${m.done ? "Mock taken" : "Mock planned"} ${shortDate(m.date)}${m.title ? `, ${m.title}` : ""}`;
-    const last = mocks[mocks.length - 1];
-    if (last && at - last.pct < 2) {
-      last.pct = (last.pct * last.count + at) / (last.count + 1);
-      last.count += 1;
-      last.done = last.done && m.done;
-      last.title += `. ${title}`;
-    } else mocks.push({ pct: at, done: m.done, title, count: 1 });
-  }
-  const daysAway = Math.max(0, Math.round((day(p.exam) - day(today)) / DAY));
-  const live = p.holidays.filter((h) => !h.cancelled);
-  const parts = [
-    `Today ${shortDate(today)}. Exam ${fullDate(p.exam)}, ${daysAway} ${daysAway === 1 ? "day" : "days"} away.`,
-    `Mocks from ${shortDate(p.gate)}.`,
-  ];
-  const planned = (p.calendar?.mocks ?? []).filter((m) => !m.done).map((m) => m.date).sort();
-  if (planned.length) {
-    parts.push(`${planned.length} ${planned.length === 1 ? "mock session" : "mock sessions"} planned, ${planned.length === 1 ? shortDate(planned[0]!) : `${shortDate(planned[0]!)} to ${shortDate(planned[planned.length - 1]!)}`}.`);
-  }
-  if (live.length) parts.push(`Holidays: ${live.map((h) => range(h.start, h.end)).join(", ")}.`);
-  return {
-    win, months, holidays,
-    today: day(today) >= win.start && day(today) < win.end ? pct(day(today) + DAY / 2, win) : null,
-    exam: pct(day(p.exam) + DAY / 2, win),
-    gate: gateMs >= win.start && gateMs < win.end ? pct(gateMs, win) : null,
-    mocks, load, days: Math.round((win.end - win.start) / DAY), caption: parts.join(" "),
-  };
-}
-
-// ---- Day cursor -----------------------------------------------------------
+// ---- Plan days ------------------------------------------------------------
 
 const dowFmt = new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", weekday: "short", day: "numeric", month: "short" });
+const monthLongFmt = new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", month: "long", year: "numeric" });
+const range = (a: string, b: string) => (a.slice(0, 10) === b.slice(0, 10) ? shortDate(a) : `${shortDate(a)} to ${shortDate(b)}`);
 const STEP_KEYS = ["1", "2", "3", "4", "5"] as const;
+const oneDp = (x: number) => (Number.isInteger(x) ? String(x) : x.toFixed(1));
+const lowerFirst = (t: string) => t.charAt(0).toLowerCase() + t.slice(1);
+
+/** Mock work is step 5 in the data; on screen a sitting and its review are told apart. */
+export type SegKey = "1" | "2" | "3" | "4" | "5" | "5r";
+export const SEG_LABEL: Record<SegKey, string> = {
+  "1": "Read", "2": "Questions", "3": "Review", "4": "Review questions", "5": "Mock session", "5r": "Mock review",
+};
+const MOCK_SESSION_MIN = 132;
+const MOCK_REVIEW_MIN = 66;
+/** One full mock is two sessions, each a sitting plus its review. */
+export const MOCK_FULL_MIN = 2 * (MOCK_SESSION_MIN + MOCK_REVIEW_MIN);
+
+export type Seg = { key: SegKey; min: number };
+
+/** A day's stack bottom-up. Daily data lumps mock work into step 5, so on a mock day the first 132 min are the sitting and the rest its review. */
+export function daySegments(byStep: Partial<Record<string, number>>, mockDay: boolean): Seg[] {
+  const out: Seg[] = [];
+  for (const key of ["1", "2", "3", "4"] as const) {
+    const min = byStep[key] ?? 0;
+    if (min > 0) out.push({ key, min });
+  }
+  const m5 = byStep["5"] ?? 0;
+  const sit = mockDay ? Math.min(m5, MOCK_SESSION_MIN) : 0;
+  if (sit > 0) out.push({ key: "5", min: sit });
+  if (m5 - sit > 0) out.push({ key: "5r", min: m5 - sit });
+  return out;
+}
+
+export type MockSession = { n: number; s: number; done: boolean };
+
+/** Sessions in date order, two per mock: the 3rd is mock 2 session 1. */
+export function mockSessions(p: Projection): Map<string, MockSession> {
+  const sorted = [...(p.calendar?.mocks ?? [])].sort((a, b) => a.date.localeCompare(b.date));
+  return new Map(sorted.map((m, k) => [m.date.slice(0, 10), { n: Math.floor(k / 2) + 1, s: (k % 2) + 1, done: m.done }]));
+}
+
+export type DayEvent = { kind: "today" | "exam" | "gate" | "holiday" | "mock"; text: string; short: string };
 
 export type DayInfo = {
   date: string;
@@ -590,35 +527,41 @@ export type DayInfo = {
   plannedMin: number;
   /** Null for a future day, where nothing can be done yet. */
   doneMin: number | null;
-  steps: { key: (typeof STEP_KEYS)[number]; label: string; min: number }[];
-  events: { kind: "today" | "exam" | "gate" | "holiday" | "mock"; text: string }[];
+  steps: { key: SegKey; label: string; min: number }[];
+  /** Hours shown as the day's column: the stack total. */
+  total: number;
+  past: boolean;
+  today: boolean;
+  exam: boolean;
+  /** Inside a live (not cancelled) holiday. */
+  holiday: boolean;
+  mock: MockSession | null;
+  events: DayEvent[];
   /** Concise sentence for a screen reader. */
   text: string;
 };
+export type PlanDay = DayInfo & { idx: number };
 
-/** Everything the strip's hover card shows for one day. */
-export function dayInfo(p: Projection, isoDate: string): DayInfo {
+/** Everything the day cursor shows for one day. */
+export function dayInfo(p: Projection, isoDate: string, sessions: Map<string, MockSession> = mockSessions(p)): DayInfo {
   const date = isoDate.slice(0, 10);
   const today = p.asOf.slice(0, 10);
   const row = p.daily.find((d) => d.date.slice(0, 10) === date);
-  const steps = STEP_KEYS.flatMap((key) => {
-    const min = row?.byStep[key] ?? 0;
-    return min > 0 ? [{ key, label: SLICE_LABEL[key], min }] : [];
-  });
-  const events: DayInfo["events"] = [];
-  if (date === today) events.push({ kind: "today", text: "Today" });
-  if (date === p.exam.slice(0, 10)) events.push({ kind: "exam", text: "Exam day" });
-  if (date === p.gate.slice(0, 10)) events.push({ kind: "gate", text: "Mocks start" });
+  const mock = sessions.get(date) ?? null;
+  const steps = daySegments(row?.byStep ?? {}, mock !== null).map((x) => ({ ...x, label: SEG_LABEL[x.key] }));
+  const events: DayEvent[] = [];
+  const isExam = date === p.exam.slice(0, 10);
+  if (date === today) events.push({ kind: "today", text: "Today", short: "Today" });
+  if (isExam) events.push({ kind: "exam", text: "Exam day", short: "Exam" });
+  if (date === p.gate.slice(0, 10)) events.push({ kind: "gate", text: "Mocks start", short: "Mocks start" });
+  let holiday = false;
   for (const h of p.holidays) {
     if (date >= h.start.slice(0, 10) && date <= h.end.slice(0, 10)) {
-      events.push({ kind: "holiday", text: `Holiday ${range(h.start, h.end)}${h.cancelled ? " (cancelled)" : ""}` });
+      holiday ||= !h.cancelled;
+      events.push({ kind: "holiday", text: `Holiday ${range(h.start, h.end)}${h.cancelled ? " (cancelled)" : ""}`, short: "Holiday" });
     }
   }
-  for (const m of p.calendar?.mocks ?? []) {
-    if (m.date.slice(0, 10) === date) {
-      events.push({ kind: "mock", text: `${m.done ? "Mock taken" : "Mock planned"}${m.title ? `: ${m.title}` : ""}` });
-    }
-  }
+  if (mock) events.push({ kind: "mock", text: `Mock ${mock.n} session ${mock.s}${mock.done ? ", taken" : ""}`, short: "Mock" });
   const plannedMin = row?.plannedMin ?? 0;
   const doneMin = date <= today ? (row?.doneMin ?? 0) : null;
   const label = dowFmt.format(new Date(day(date))).replace(",", "");
@@ -627,7 +570,183 @@ export function dayInfo(p: Projection, isoDate: string): DayInfo {
     ...(doneMin !== null ? [`${formatHours(doneMin)} done`] : []),
     ...events.map((e) => e.text),
   ];
-  return { date, label, plannedMin, doneMin, steps, events, text: `${label}. ${bits.join(". ")}.` };
+  return {
+    date, label, plannedMin, doneMin, steps, total: steps.reduce((a, x) => a + x.min, 0),
+    past: date < today, today: date === today, exam: isExam, holiday, mock, events,
+    text: `${label}. ${bits.join(". ")}.`,
+  };
+}
+
+/** One entry per calendar day from plan start (or the first planned day) to the exam, today always included. */
+export function planDays(p: Projection): PlanDay[] {
+  const today = day(p.asOf);
+  const first = Math.min(day(p.calendar?.start ?? p.daily[0]?.date ?? p.asOf), today);
+  const last = Math.max(day(p.exam), today);
+  const sessions = mockSessions(p);
+  const out: PlanDay[] = [];
+  for (let t = first, idx = 0; t <= last; t += DAY, idx++) out.push({ ...dayInfo(p, iso(t), sessions), idx });
+  return out;
+}
+
+export type MonthBlock = { key: string; label: string; /** Blank cells before day 1 in a Monday-first week. */ lead: number; days: PlanDay[] };
+
+/** Days grouped by month for the calendar grid; a partial first or last month holds only its plan days. */
+export function monthGrid(days: PlanDay[]): MonthBlock[] {
+  const out: MonthBlock[] = [];
+  for (const d of days) {
+    const key = d.date.slice(0, 7);
+    let m = out[out.length - 1];
+    if (!m || m.key !== key) {
+      m = { key, label: monthLongFmt.format(new Date(day(d.date))), lead: (new Date(day(d.date)).getUTCDay() + 6) % 7, days: [] };
+      out.push(m);
+    }
+    m.days.push(d);
+  }
+  return out;
+}
+
+/** Month names along the ribbon axis, with the year on the first and on each January. */
+export function monthMarks(days: PlanDay[]): { idx: number; label: string }[] {
+  const out: { idx: number; label: string }[] = [];
+  for (const d of days) {
+    if (d.date.slice(8, 10) !== "01" && d.idx !== 0) continue;
+    const mo = monthFmt.format(new Date(day(d.date)));
+    out.push({ idx: d.idx, label: d.idx === 0 || d.date.slice(5, 7) === "01" ? `${mo} ${d.date.slice(0, 4)}` : mo });
+  }
+  return out;
+}
+
+/** Mock sessions a few days apart would overlap on the whole-plan ribbon, so they share one counted ring. */
+export function clusterMocks(ms: { idx: number; done: boolean }[], span = 6): { idx: number; count: number; done: boolean }[] {
+  const groups: { idx: number; done: boolean }[][] = [];
+  for (const m of [...ms].sort((a, b) => a.idx - b.idx)) {
+    const g = groups[groups.length - 1];
+    if (g && m.idx - g[0]!.idx <= span) g.push(m);
+    else groups.push([m]);
+  }
+  return groups.map((g) => ({ idx: g.reduce((a, x) => a + x.idx, 0) / g.length, count: g.length, done: g.every((x) => x.done) }));
+}
+
+// ---- Budget and ledger ----------------------------------------------------
+
+export type Split = { doneMin: number; aheadMin: number; paceMin: number; cutMin: number };
+
+/** Splits `required` into four parts that always add up to it: done, still ahead, cut, and the rest is the pace saving. */
+export function splitMinutes(required: number, done: number, ahead: number, cut: number): Split {
+  const cl = (v: number, max: number) => Math.max(0, Math.min(max, v));
+  const d = cl(done, required);
+  const a = cl(ahead, required - d);
+  const c = cl(cut, required - d - a);
+  return { doneMin: d, aheadMin: a, cutMin: c, paceMin: required - d - a - c };
+}
+
+const aheadOf = (p: Projection, key?: "1" | "2" | "3" | "4" | "5") => {
+  const today = p.asOf.slice(0, 10);
+  return p.daily.reduce((a, d) => (d.date.slice(0, 10) >= today ? a + (key ? (d.byStep[key] ?? 0) : d.plannedMin) : a), 0);
+};
+const cutMocksOf = (p: Projection) => p.fit.trims.filter((x) => x.step === 5).length;
+const cutReviewOf = (p: Projection) => p.fit.trims.filter((x) => x.step === 4).reduce((a, x) => a + x.minutes, 0);
+
+export type Budget = Split & { requiredMin: number; cutMocks: number; cutReviewMin: number };
+
+/** Where every hour of the full plan went. Only step 4 and mocks are ever cut; any other gap is the faster pace. */
+export function budgetSplit(p: Projection): Budget | null {
+  const t = p.totals;
+  if (!t) return null;
+  const cutMocks = cutMocksOf(p);
+  const cutReviewMin = cutReviewOf(p);
+  return {
+    requiredMin: t.requiredMin, cutMocks, cutReviewMin,
+    ...splitMinutes(t.requiredMin, t.doneMin, aheadOf(p), cutReviewMin + cutMocks * MOCK_FULL_MIN),
+  };
+}
+
+/** Axis ticks in hours: round numbers, then the exact total. */
+export function budgetTicks(totalMin: number): number[] {
+  const h = totalMin / 60;
+  if (!(h > 0)) return [0];
+  const step = [10, 20, 25, 50, 100, 200, 500, 1000].find((s) => h / s <= 6) ?? 1000;
+  const out = [0];
+  for (let v = step; v < h * 0.94; v += step) out.push(v);
+  out.push(h);
+  return out;
+}
+
+export type LedgerRow = Split & { key: (typeof STEP_KEYS)[number]; label: string; fullMin: number; cutMocks: number; why: string };
+
+/** One row per step: full plan, done, ahead, saved by pace and cut, with the reason in words. */
+export function stepLedger(p: Projection): LedgerRow[] {
+  const t = p.totals;
+  if (!t) return [];
+  const why = new Map((planVsSchedule(p)?.rows ?? []).map((r) => [r.key, r.text]));
+  return STEP_KEYS.flatMap((key): LedgerRow[] => {
+    const { requiredMin, doneMin } = t.byStep[key];
+    const cutMocks = key === "5" ? cutMocksOf(p) : 0;
+    if (requiredMin <= 0 && cutMocks === 0) return [];
+    const cut = key === "4" ? cutReviewOf(p) : cutMocks * MOCK_FULL_MIN;
+    return [{
+      key, label: key === "5" ? "Mock exams" : SEG_LABEL[key], fullMin: requiredMin, cutMocks, why: why.get(key) ?? "",
+      ...splitMinutes(requiredMin, doneMin, aheadOf(p, key), cut),
+    }];
+  });
+}
+
+/** The one-sentence headline: what the schedule holds of the full plan and what was cut. */
+export function verdictLine(p: Projection): string | null {
+  const b = budgetSplit(p);
+  const f = hourFigures(p);
+  if (!b || !f) return null;
+  const h0 = (m: number) => (m >= 600 ? String(Math.round(m / 60)) : oneDp(Math.round(m / 6) / 10));
+  const pace = p.fit.crash > 1.001 ? ` by studying at ${oneDp(p.fit.crash)}x pace` : "";
+  const bits: string[] = [];
+  if (b.cutReviewMin > 0) bits.push(`${formatHours(b.cutReviewMin)} of review questions`);
+  if (b.cutMocks > 0) bits.push(`${b.cutMocks} ${b.cutMocks === 1 ? "mock" : "mocks"}`);
+  const head = f.unscheduled <= 0
+    ? `Your plan holds all ${h0(f.required)} hours before the exam${pace}.`
+    : `Your plan holds ${h0(f.scheduled)} of ${h0(f.required)} hours${pace}.`;
+  if (bits.length) return `${head} Reading and first questions stay whole. The cut is ${bits.join(" and ")}.`;
+  return f.unscheduled > 0 ? `${head} The rest does not fit your available hours.` : head;
+}
+
+export type KeyFigure = { value: string; note: string; alarm?: boolean };
+
+/** The figures under the ribbon. */
+export function keyFigures(p: Projection): KeyFigure[] {
+  const t = p.totals;
+  const f = hourFigures(p);
+  if (!t || !f) return [];
+  const n = (x: number) => x.toLocaleString("en-US");
+  const out: KeyFigure[] = [
+    { value: formatHours(f.scheduled), note: `scheduled to the exam, of ${formatHours(f.required)} in the full plan` },
+    { value: formatHours(f.done), note: `done so far, ${formatHours(f.left)} left on schedule` },
+  ];
+  if (f.workDays > 0) {
+    const fit = (x: number) => (x > f.available ? `${formatHours(x - f.available)} more than you have` : `which fits your ${formatHours(f.available)}`);
+    out.push(
+      { value: `${formatHours(f.perDaySchedule)} a day`, note: `on schedule, ${fit(f.perDaySchedule)}`, alarm: f.shortSchedule },
+      { value: `${formatHours(f.perDayAll)} a day`, note: `to finish everything, ${fit(f.perDayAll)}`, alarm: f.shortAll },
+    );
+  }
+  const q = t.questions;
+  const target = accuracyTarget(p);
+  out.push({
+    value: `${n(q.answered)} of ${n(q.required)}`,
+    note: q.answered > 0
+      ? `questions answered, ${formatPercent(q.correct / q.answered)} correct against a ${target}% target`
+      : `questions answered, target accuracy ${target}%`,
+    alarm: q.answered > 0 && q.correct * 100 < target * q.answered,
+  });
+  const sessions = p.calendar?.mocks.length ?? 0;
+  const cut = cutMocksOf(p);
+  const sched = sessions / 2;
+  if (sched + cut > 0) {
+    const reasons = [...new Set(p.fit.trims.filter((x) => x.step === 5).map((x) => lowerFirst(reasonText(x.reason))))].join(", ");
+    out.push({
+      value: `${oneDp(sched)} of ${oneDp(sched + cut)} mocks`,
+      note: `scheduled as ${sessions} sessions${cut > 0 ? `, ${cut} cut${reasons ? ` (${reasons})` : ""}` : ""}`,
+    });
+  }
+  return out;
 }
 
 // ---- Original plan vs schedule --------------------------------------------
@@ -640,9 +759,6 @@ export type PlanRow = {
   whole: boolean;
   text: string;
 };
-
-const oneDp = (x: number) => (Number.isInteger(x) ? String(x) : x.toFixed(1));
-const lowerFirst = (t: string) => t.charAt(0).toLowerCase() + t.slice(1);
 
 /** One row per step: the original requirement, what the schedule holds (done work included), and the cut. Null without totals. */
 export function planVsSchedule(p: Projection): { rows: PlanRow[]; note: string | null } | null {

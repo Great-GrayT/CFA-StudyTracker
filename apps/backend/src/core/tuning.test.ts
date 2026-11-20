@@ -77,12 +77,12 @@ test("a non-object column yields defaults rather than throwing", () => {
 
 test("step rules default, accept in-range values and reject out-of-range ones", () => {
   expect(parseTuning(null).tuning).toMatchObject({
-    step2Multiplier: 2, step4Multiplier: 2, accuracyTarget: 80, mockPassTarget: 75, exemptionMultiplier: 2,
+    step2Multiplier: 2, step4Multiplier: 2, accuracyTarget: 80, mockPassTarget: 75, exemptionMultiplier: 2, reviewShare: 35,
   });
   const ok = parseTuning({ step2Multiplier: 3, accuracyTarget: 70, mockPassTarget: 60, exemptionMultiplier: 1.25 });
   expect(ok.rejected).toEqual([]);
   expect(ok.tuning).toMatchObject({ step2Multiplier: 3, accuracyTarget: 70, mockPassTarget: 60, exemptionMultiplier: 1.25 });
-  const bad = parseTuning({ accuracyTarget: 40, step4Multiplier: 7, exemptionMultiplier: 1 });
-  expect(bad.rejected.map((r) => r.field).sort()).toEqual(["accuracyTarget", "exemptionMultiplier", "step4Multiplier"]);
+  const bad = parseTuning({ accuracyTarget: 40, step4Multiplier: 7, exemptionMultiplier: 1, reviewShare: 70 });
+  expect(bad.rejected.map((r) => r.field).sort()).toEqual(["accuracyTarget", "exemptionMultiplier", "reviewShare", "step4Multiplier"]);
   expect(bad.tuning.accuracyTarget).toBe(80);
 });

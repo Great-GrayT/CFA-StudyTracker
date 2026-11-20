@@ -46,7 +46,7 @@ const POLICIES: { value: ReviewPolicy; label: string; detail: string }[] = [
   },
 ];
 
-type RuleKey = "step2Multiplier" | "step4Multiplier" | "accuracyTarget" | "mockPassTarget" | "exemptionMultiplier";
+type RuleKey = "step2Multiplier" | "step4Multiplier" | "accuracyTarget" | "mockPassTarget" | "exemptionMultiplier" | "reviewShare";
 
 const RULE_FIELDS: { key: RuleKey; label: string; unit: string; step: number; detail: string }[] = [
   {
@@ -83,6 +83,13 @@ const RULE_FIELDS: { key: RuleKey; label: string; unit: string; step: number; de
     unit: "x adequate",
     step: 0.25,
     detail: "If accuracy is still short after this many times the adequate time, the step moves on with a review owed.",
+  },
+  {
+    key: "reviewShare",
+    label: "Review reading time",
+    unit: "% of step 1",
+    step: 1,
+    detail: "How long the review reading before review questions takes, as a share of the first read.",
   },
 ];
 
