@@ -107,6 +107,22 @@ describe("GET /api/plans/:id/coverage", () => {
     expect(p.videos.watched).toBe(2);
   });
 
+  test("a stated step 1 credits the step 1 lead package by the share of readings stated", async () => {
+    const s = await setup();
+    const decl = (readingId: string, confidence: number | null) =>
+      db.stepDeclaration.create({ data: { planId: s.plan.id, readingId, step: 1, confidence, date: new Date("2027-01-04") } });
+    await decl(s.r1.id, 1); // low confidence is a half read, not watched
+    let p = (await readJson(await get(s.user, s.plan.id))).packages[0];
+    expect(p.videos.watched).toBe(0);
+    await db.stepDeclaration.deleteMany({});
+    await decl(s.r1.id, 4);
+    p = (await readJson(await get(s.user, s.plan.id))).packages[0];
+    expect(p.topics[0].units[0].videos.map((v: { status: string }) => v.status)).toEqual(["partial", "not-started"]);
+    await decl(s.r2.id, null);
+    p = (await readJson(await get(s.user, s.plan.id))).packages[0];
+    expect(p.videos.watched).toBe(2);
+  });
+
   test("numbered question work lists what is left; unnumbered work hides it", async () => {
     const s = await setup();
     const t = await task(s.plan.id, { status: "done", resourceIds: [s.qs.id], questionNumbers: [1, 2, 3, 7] });

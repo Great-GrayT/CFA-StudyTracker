@@ -1,5 +1,6 @@
 import { db } from "../../../../../lib/db";
 import { requireUser } from "../../../../../lib/FUNC-auth";
+import { resolvePriority } from "../../../../../lib/FUNC-schedule";
 
 // Handlers are called directly in tests, so the id comes from the path.
 function planIdFromUrl(req: Request): string {
@@ -57,7 +58,7 @@ export async function GET(req: Request): Promise<Response> {
   if (packageIds.length === 0) return Response.json({ packages: [] } satisfies Coverage);
 
   // Four batched reads; everything below is in-memory joins.
-  const [editions, tasks, declared] = await Promise.all([
+  const [editions, tasks, declared, stated] = await Promise.all([
     db.packageEdition.findMany({
       where: { packageId: { in: packageIds }, levelId: plan.levelId },
       orderBy: { year: "desc" },
@@ -83,6 +84,11 @@ export async function GET(req: Request): Promise<Response> {
       where: { planId, selfDeclared: true, declaredWatched: true, packageId: { in: packageIds } },
       select: { packageId: true, los: { select: { readingId: true } } },
     }),
+    // Low confidence (1-2) is a half read in the engine, so it does not mark videos watched.
+    db.stepDeclaration.findMany({
+      where: { planId, step: 1, OR: [{ confidence: null }, { confidence: { gt: 2 } }] },
+      select: { readingId: true },
+    }),
   ]);
 
   // Latest edition per package (editions arrive year-descending).
@@ -96,6 +102,11 @@ export async function GET(req: Request): Promise<Response> {
     set.add(d.los.readingId);
     declaredReadings.set(d.packageId, set);
   }
+
+  // A stated step 1 names no package; credit it to the package that leads step 1 on this plan.
+  const statedRead = new Set(stated.map((d) => d.readingId));
+  const slugs = planPackages.map((p) => p.package.slug ?? p.packageId);
+  const leadSlug = resolvePriority(plan.stepPriority, slugs)["1"].find((x) => slugs.includes(x)) ?? null;
 
   const packages: Coverage["packages"] = [];
   for (const pp of planPackages) {
@@ -141,6 +152,10 @@ export async function GET(req: Request): Promise<Response> {
         const spent = t.actualMinutes ?? (t.status === "done" ? t.estimatedMinutes : 0);
         const credited = Math.min(est, spent) * ((t.workMinutes ?? t.estimatedMinutes) / est);
         creditSec += credited * 60 * (mine / total);
+      }
+      if ((pp.package.slug ?? pp.packageId) === leadSlug) {
+        const share = readings.filter((r) => statedRead.has(r.id)).length / readings.length;
+        creditSec += share * videoRes.reduce((s, r) => s + r.durationSeconds!, 0);
       }
       let cum = 0;
       let partialSec = 0;

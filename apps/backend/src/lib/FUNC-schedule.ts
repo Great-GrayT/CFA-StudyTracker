@@ -38,7 +38,7 @@ const iso = (d: Date) => d.toISOString().slice(0, 10);
 const WEEKDAY = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 
 // Plan packages not named in a step's list go last, so a custom or test package still takes part.
-function resolvePriority(raw: unknown, planSlugs: string[]): Record<StepKey, string[]> {
+export function resolvePriority(raw: unknown, planSlugs: string[]): Record<StepKey, string[]> {
   const src = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
   const out = {} as Record<StepKey, string[]>;
   for (const k of [1, 2, 3, 4, 5] as StepKey[]) {
