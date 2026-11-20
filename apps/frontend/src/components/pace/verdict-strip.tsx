@@ -34,7 +34,7 @@ export function VerdictStrip({ p }: { p: Projection }) {
           {p.mocks.done} / {mocksTotal}
         </span>
         <span className="text-muted-foreground text-[12px]">
-          mocks{p.mocks.firstDate ? `, first ${shortDate(p.mocks.firstDate)}` : ""}
+          mock sessions{p.mocks.firstDate ? `, first ${shortDate(p.mocks.firstDate)}` : ""}
         </span>
       </Link>
       <Link href="/today" className={cn(cell, link)}>

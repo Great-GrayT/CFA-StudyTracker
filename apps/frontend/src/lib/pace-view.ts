@@ -384,14 +384,14 @@ function extraCell(e: ProjectionExtra) {
 const DEFAULT_TARGET = 80;
 export const accuracyTarget = (p: Projection): number => p.rules?.accuracyTarget ?? DEFAULT_TARGET;
 
-/** "412 h planned, 1,840 questions, 6 mocks"; null for an older server without totals. */
+/** "412 h planned, 1,840 questions, 6 mock sessions"; null for an older server without totals. */
 export function planTotalsLine(p: Projection): string | null {
   const t = p.totals;
   if (!t) return null;
   const mocks = p.mocks.done + p.mocks.planned;
   const parts = [`${formatHours(t.requiredMin)} planned`];
   if (t.questions.required > 0) parts.push(`${t.questions.required.toLocaleString("en-US")} questions`);
-  if (mocks > 0) parts.push(`${mocks} mock${mocks === 1 ? "" : "s"}`);
+  if (mocks > 0) parts.push(`${mocks} mock session${mocks === 1 ? "" : "s"}`);
   return parts.join(", ");
 }
 

@@ -260,7 +260,7 @@ describe("plan metrics", () => {
   const proj = (over: Partial<Projection>) => ({ mocks: { done: 1, planned: 5, firstDate: null }, sections: [], ...over }) as unknown as Projection;
 
   it("summarises totals in one line", () => {
-    expect(planTotalsLine(proj({ totals }))).toBe("16.7 h planned, 1,840 questions, 6 mocks");
+    expect(planTotalsLine(proj({ totals }))).toBe("16.7 h planned, 1,840 questions, 6 mock sessions");
     expect(planTotalsLine(proj({}))).toBeNull();
   });
   it("flags a shortfall only when need exceeds availability", () => {
